@@ -267,6 +267,8 @@ mods/tracks/world_mxvatv/
   `at`, and its scale is one of the world's tile spacings. C1 puts every join on one lattice for the whole
   world, at the commonest tile spacing (the finer on a tie), so joins agree where they meet and each
   interior's edges lie on lattice lines; `joins[].samples` (C1's own field) gives a join's samples a side.
+  Round a tile whose spacing is not the lattice's, the joins next to it are at that tile's spacing
+  (C6), listed first, and meet the lattice's joins along lines where both have samples.
   The ground is C1's solved blend, with no
   height or slope step at any seam and nothing steeper than the bike climbs. Each sample's surface byte is
   the nearer tile's. The join has no `.col` and no scene. The heightfield is its collision, as on the disc.

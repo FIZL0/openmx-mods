@@ -124,11 +124,14 @@ fn cmd_check(args: &[String]) -> ExitCode {
         println!("FAIL: {f}");
     }
     println!(
-        "stitch check {}: {} seam points (worst height step {:.5} ft, slope step {:.6}), join slope {:.3} away from the seams: {}",
+        "stitch check {}: {} seam points (worst height step {:.5} ft, slope step {:.6}), {} where joins of two spacings meet \
+         (worst {:.5} ft), join slope {:.3} away from the seams: {}",
         dir.display(),
         r.seam_points,
         r.worst_height,
         r.worst_slope,
+        r.join_seam_points,
+        r.join_seam_height,
         r.far_slope,
         if r.ok() { "ok" } else { "FAILED" }
     );

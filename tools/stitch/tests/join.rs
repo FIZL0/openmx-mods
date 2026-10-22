@@ -20,15 +20,19 @@ fn height(x: f64, z: f64, side: f64, base: f64, rise: f64, band: f64) -> f64 {
 }
 
 /// Write a generated track mod `elev_<name>` with `n + 1` samples a side at `s` feet, three placements:
-/// Model1 in the middle, Model2 and Object1 in the berm band.
-fn tile(root: &Path, name: &str, n: u32, s: f32, base: f64, surface: u8) -> PathBuf {
+/// Model1 in the middle, Model2 and Object1 in the berm band. `ripple` ft of ripples about 25 ft across
+/// are added (0: none), for ground with curvature at its edge.
+fn tile_rippled(root: &Path, name: &str, n: u32, s: f32, base: f64, surface: u8, ripple: f64) -> PathBuf {
     let id = format!("elev_{name}");
     let dir = root.join(&id);
     std::fs::create_dir_all(&dir).unwrap();
     let side = f64::from(n) * f64::from(s);
     let w = n + 1;
     let feet: Vec<f32> = (0..w * w)
-        .map(|i| height(f64::from(i % w) * f64::from(s), f64::from(i / w) * f64::from(s), side, base, 45.0, 240.0) as f32)
+        .map(|i| {
+            let (x, z) = (f64::from(i % w) * f64::from(s), f64::from(i / w) * f64::from(s));
+            (height(x, z, side, base, 45.0, 240.0) + ripple * (x / 4.1).sin() * (z / 3.7).cos()) as f32
+        })
         .collect();
     let (mut g, hs) = trnwrite::Grid::from_feet(w, w, &feet, s).unwrap();
     g.surfaces = (0..w * w).map(|i| if (i % w) < w / 2 { surface } else { surface + 1 }).collect();
@@ -58,9 +62,14 @@ fn tile(root: &Path, name: &str, n: u32, s: f32, base: f64, surface: u8) -> Path
 }
 
 fn world(name: &str, tiles: &[(&str, u32, f32, f64)]) -> (PathBuf, PathBuf, stitch::build::Built) {
+    world_rippled(name, tiles, 0.0)
+}
+
+fn world_rippled(name: &str, tiles: &[(&str, u32, f32, f64)], ripple: f64) -> (PathBuf, PathBuf, stitch::build::Built) {
     let root = scratch(name);
     let mods = root.join("mods");
-    let dirs: Vec<PathBuf> = tiles.iter().enumerate().map(|(i, (n, sz, s, b))| tile(&mods, n, *sz, *s, *b, 2 * i as u8 + 1)).collect();
+    let dirs: Vec<PathBuf> =
+        tiles.iter().enumerate().map(|(i, (n, sz, s, b))| tile_rippled(&mods, n, *sz, *s, *b, 2 * i as u8 + 1, ripple)).collect();
     let mut p = Params::new(&format!("world_{name}"), &format!("Test world {name}"));
     p.threads = 4;
     let b = build(&dirs, &root.join("out"), &p).unwrap();
@@ -191,4 +200,30 @@ fn a_tampered_world_fails_the_check() {
     std::fs::write(&scn, text).unwrap();
     let r = stitch::check::check(&dir, Some(&mods), None);
     assert!(r.fail.iter().any(|f| f.contains("elev_n.scn: differs")), "{:?}", r.fail);
+}
+
+/// A 3.5 ft map beside 4.5 ft ones (C6): the 3.5 ft map's joins are at its own spacing, so every one
+/// of its seam samples is a join sample, and where its collar meets the 4.5 ft lattice the two agree.
+/// And the other way round: a 4.5 ft map in a 3.5 ft world.
+#[test]
+fn a_finer_map_gets_joins_at_its_own_spacing() {
+    let (mods, dir, b) = world_rippled("mixed35", &[("p", 256, 4.5, 120.0), ("q", 256, 3.5, 140.0), ("r", 256, 4.5, 130.0)], 3.0);
+    assert_eq!(b.plan.spacing, 4.5);
+    assert_eq!(b.plan.collars.len(), 1, "{:?}", b.plan.uncollared);
+    assert_eq!(b.plan.collars[0].tile, 1);
+    assert_eq!(b.plan.collars[0].period, 31.5, "9 samples of 3.5 ft are 7 of 4.5");
+    let r = assert_checks(&dir, &mods);
+    assert_eq!(r.between_points, 0, "every 3.5 ft seam sample is a sample of its collar");
+    assert!(r.join_seam_points > 100, "{} points where the collar meets the lattice", r.join_seam_points);
+    assert!(r.worst_height < 0.01 && r.worst_slope < 0.005, "{} {}", r.worst_height, r.worst_slope);
+    // Each 3.5 ft seam sample is counted twice (as a tile sample and a collar sample), like the 4.5s.
+    let per = |p: &stitch::build::Placed| 2 * ((p.keep[2] - p.keep[0]) as usize + 1) + 2 * ((p.keep[3] - p.keep[1]) as usize + 1);
+    assert_eq!(r.seam_points, 2 * b.plan.placed.iter().map(per).sum::<usize>());
+
+    let (mods, dir, b) = world("mixed45", &[("s", 256, 3.5, 120.0), ("t", 256, 4.5, 140.0)]);
+    assert_eq!(b.plan.spacing, 3.5, "a tie goes to the finer");
+    assert_eq!(b.plan.collars.len(), 1, "{:?}", b.plan.uncollared);
+    let r = assert_checks(&dir, &mods);
+    assert_eq!(r.between_points, 0);
+    assert!(r.join_seam_points > 100);
 }

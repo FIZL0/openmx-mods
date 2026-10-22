@@ -6,9 +6,11 @@
 //!   the mods the world was built from) every file of the tile byte for byte its source mod's.
 //! - Every seam point, read from the tile's kept cell and the join's cell outside it with
 //!   `Terrain::cell`: the same height and the same slope across the seam, to the join's height quantum.
-//!   A seam point is a join lattice point on an interior's edge, which is every tile sample on it when
-//!   the spacings agree. Tile samples between lattice points (spacings that differ) are measured and
-//!   reported, not failed.
+//!   A seam point is a sample of the join that covers the edge, which is every tile sample on it when
+//!   that join is at the tile's spacing (always, or the tile's collar, C6). Tile samples between the
+//!   join's samples (a tile with no collar whose spacing differs) are measured and reported, not failed.
+//! - Where a join at one spacing meets a join at another (a collar's edge), the two are the same height
+//!   at every sample of either along the line.
 //! - Neighbouring join pieces agree on their shared samples.
 //! - Join ground away from the seams is no steeper than the world's `max_slope`.
 //! - The look: on every seam point the touching tile's weight is 255, and no weight jumps by more than
@@ -35,6 +37,11 @@ pub struct Report {
     /// Tile samples between lattice points: count and worst height step.
     pub between_points: usize,
     pub between_height: f64,
+    /// Points where joins of two spacings meet, checked strictly: count, worst height step, and (not
+    /// failed: each side's cell is its own spacing's) worst slope step across.
+    pub join_seam_points: usize,
+    pub join_seam_height: f64,
+    pub join_seam_slope: f64,
     pub far_slope: f64,
 }
 
@@ -88,6 +95,19 @@ impl Join {
         Some(f64::from((self.scale * y).0))
     }
 
+    /// The ground at a world point, from the cell that holds `probe` (a point nudged to one side).
+    fn height_by(&self, t: &Terrain, x: f64, z: f64, probe: [f64; 2]) -> Option<f64> {
+        let f = [(x - self.at[0]) / self.spacing, (z - self.at[1]) / self.spacing];
+        let c = [0, 1].map(|ax| (((probe[ax] - self.at[ax]) / self.spacing).floor().max(0.0) as u32).min(self.samples[ax] - 2));
+        self.in_cell(t, c[0], c[1], f[0], f[1])
+    }
+
+    /// Whether a world coordinate along `axis` is one of the join's sample lines.
+    fn on_lattice(&self, axis: usize, v: f64) -> bool {
+        let f = (v - self.at[axis]) / self.spacing;
+        (f - f.round()).abs() < 1e-6
+    }
+
     fn sample(&self, t: &Terrain, x: u32, z: u32) -> Option<f64> {
         let (cx, cz) = (x.min(self.samples[0] - 2), z.min(self.samples[1] - 2));
         self.in_cell(t, cx, cz, f64::from(x), f64::from(z))
@@ -115,6 +135,7 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         }
     };
     let st = meta.get("stitch");
+    let lattice = st.and_then(|s| s.get("spacing")).and_then(Json::num);
     let max_slope = st.and_then(|s| s.get("max_slope")).and_then(Json::num).unwrap_or(0.5);
     let fade = st.and_then(|s| s.get("fade")).and_then(Json::num).unwrap_or(48.0);
 
@@ -228,23 +249,29 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             };
             let normal_axis = 1 - along_axis;
             let (a0, a1) = (f64::from(k[along_axis]), f64::from(k[along_axis + 2]));
-            // Points along the edge, in tile samples: every tile sample, and every join lattice point.
-            let mut pts: Vec<(f64, bool)> = (k[along_axis]..=k[along_axis + 2]).map(|a| (f64::from(a), false)).collect();
-            let step = joins[0].spacing;
+            // Points along the edge, in tile samples: every tile sample, and every sample of each join
+            // that reaches the edge's line (counted only where that join is the one covering the seam).
+            let mut pts: Vec<(f64, Option<usize>)> = (k[along_axis]..=k[along_axis + 2]).map(|a| (f64::from(a), None)).collect();
             let w0 = at[along_axis] + a0 * s;
             let w1 = at[along_axis] + a1 * s;
-            let origin = joins[0].at[along_axis];
-            let mut l = ((w0 - origin) / step - 1e-9).ceil();
-            while origin + l * step <= w1 + 1e-6 {
-                pts.push(((origin + l * step - at[along_axis]) / s, true));
-                l += 1.0;
+            let line = at[normal_axis] + f64::from(fixed) * s;
+            for (ji, j) in joins.iter().enumerate() {
+                let r = j.rect();
+                if line < r[normal_axis] - 1e-6 || line > r[normal_axis + 2] + 1e-6 {
+                    continue;
+                }
+                let (lo, hi) = (w0.max(r[along_axis]), w1.min(r[along_axis + 2]));
+                let origin = j.at[along_axis];
+                let mut l = ((lo - origin) / j.spacing - 1e-9).ceil();
+                while origin + l * j.spacing <= hi + 1e-6 {
+                    pts.push(((origin + l * j.spacing - at[along_axis]) / s, Some(ji)));
+                    l += 1.0;
+                }
             }
-            for (a, lattice_pt) in pts {
+            for (a, from_join) in pts {
                 let mut world = [0.0; 2];
-                world[normal_axis] = at[normal_axis] + f64::from(fixed) * s;
+                world[normal_axis] = line;
                 world[along_axis] = at[along_axis] + a * s;
-                let on_lattice = lattice_pt
-                    || ((world[along_axis] - origin) / step - ((world[along_axis] - origin) / step).round()).abs() < 1e-6;
                 // The tile side: the kept cell on this edge.
                 let cn = if n < 0.0 { fixed } else { fixed - 1 };
                 let ca = (a.floor() as u32).clamp(k[along_axis], k[along_axis + 2] - 1);
@@ -270,7 +297,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
                     r.fail.push(format!("{} edge {edge} at {:.2},{:.2}: no join outside it", tile.id, world[0], world[1]));
                     continue;
                 };
+                if from_join.is_some_and(|f| f != ji) {
+                    continue; // a sample of a join that does not own this stretch of the seam
+                }
                 let j = &joins[ji];
+                let on_lattice = from_join.is_some() || j.on_lattice(along_axis, world[along_axis]);
                 let f = [(world[0] - j.at[0]) / j.spacing, (world[1] - j.at[1]) / j.spacing];
                 let mut c = [0u32; 2];
                 for ax in 0..2 {
@@ -325,10 +356,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             r.between_points, r.between_height
         ));
     }
+    join_seams(&tiles, &joins, &jt, &mut r);
 
     // Joins against each other, slopes, blend steps.
     let mut shared: HashMap<(i64, i64), (usize, f64)> = HashMap::new();
-    let far = 2.0 * joins[0].spacing + 3.0 * fade;
+    let far = 2.0 * lattice.unwrap_or(joins[0].spacing) + 3.0 * fade;
     let dist = |x: f64, z: f64| -> f64 {
         rects
             .iter()
@@ -347,7 +379,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         for z in 0..d {
             for x in 0..w {
                 if x == 0 || z == 0 || x == w - 1 || z == d - 1 {
-                    let key = (((j.at[0] / j.spacing).round() as i64) + i64::from(x), ((j.at[1] / j.spacing).round() as i64) + i64::from(z));
+                    // Keyed by the sample's world position in hundredths of a foot: joins of two
+                    // spacings share only the samples their lattices both have.
+                    let wx = j.at[0] + f64::from(x) * j.spacing;
+                    let wz = j.at[1] + f64::from(z) * j.spacing;
+                    let key = ((wx * 100.0).round() as i64, (wz * 100.0).round() as i64);
                     let v = h[(x + z * w) as usize];
                     match shared.get(&key) {
                         Some(&(other, ov)) if (ov - v).abs() > j.quantum.max(joins[other].quantum) + 1e-4 => {
@@ -396,6 +432,98 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         r.fail.push(format!("... {} more", n - 50));
     }
     r
+}
+
+/// Who rides a world point: a tile inside its `keep` (`Ok`), else the first join covering it (`Err`).
+fn ridden(tiles: &[(Tile, [f64; 2], [u32; 4])], joins: &[Join], x: f64, z: f64) -> Option<Result<usize, usize>> {
+    let tile = tiles.iter().position(|(t, at, k)| {
+        let (fx, fz) = ((x - at[0]) / t.spacing, (z - at[1]) / t.spacing);
+        fx >= f64::from(k[0]) && fx < f64::from(k[2]) && fz >= f64::from(k[1]) && fz < f64::from(k[3])
+    });
+    match tile {
+        Some(t) => Some(Ok(t)),
+        None => joins.iter().position(|j| j.covers(x, z)).map(Err),
+    }
+}
+
+/// Where a join meets a join of another spacing: along each edge of every join, at its own samples and at
+/// the other spacings' samples, the ground just inside (this join, as ridden) and just outside (another
+/// join, as ridden) must be the same height to the coarser join's height quantum.
+fn join_seams(tiles: &[(Tile, [f64; 2], [u32; 4])], joins: &[Join], jt: &[Terrain], r: &mut Report) {
+    // Every lattice the joins are on: (spacing, origin), one entry per spacing and alignment.
+    let mut lattices: Vec<(f64, [f64; 2])> = Vec::new();
+    for j in joins {
+        let o = j.at.map(|a| a.rem_euclid(j.spacing));
+        let same = |l: &(f64, [f64; 2])| (l.0 - j.spacing).abs() < 1e-9 && (0..2).all(|ax| ((l.1[ax] - o[ax]).abs() % j.spacing).min(j.spacing - (l.1[ax] - o[ax]).abs() % j.spacing) < 1e-6);
+        if !lattices.iter().any(same) {
+            lattices.push((j.spacing, o));
+        }
+    }
+    if lattices.len() < 2 {
+        return;
+    }
+    const E: f64 = 1e-3;
+    for (ji, j) in joins.iter().enumerate() {
+        let rect = j.rect();
+        for edge in 0..4 {
+            let (normal_axis, n) = match edge {
+                0 => (0, -1.0),
+                1 => (1, -1.0),
+                2 => (0, 1.0),
+                _ => (1, 1.0),
+            };
+            let along = 1 - normal_axis;
+            let line = if n < 0.0 { rect[normal_axis] } else { rect[normal_axis + 2] };
+            let (lo, hi) = (rect[along], rect[along + 2]);
+            let mut pts: Vec<f64> = Vec::new();
+            for (sp, o) in &lattices {
+                let mut l = ((lo - o[along]) / sp - 1e-9).ceil();
+                while o[along] + l * sp <= hi + 1e-6 {
+                    pts.push(o[along] + l * sp);
+                    l += 1.0;
+                }
+            }
+            for a in pts {
+                let mut p = [0.0; 2];
+                p[normal_axis] = line;
+                p[along] = a;
+                let (mut pin, mut pout) = (p, p);
+                pin[normal_axis] -= n * E;
+                pout[normal_axis] += n * E;
+                let (Some(Err(i)), Some(Err(o))) = (ridden(tiles, joins, pin[0], pin[1]), ridden(tiles, joins, pout[0], pout[1])) else {
+                    continue;
+                };
+                let k = &joins[o];
+                if i != ji || (k.spacing - j.spacing).abs() < 1e-9 {
+                    continue;
+                }
+                let (Some(h_in), Some(h_out)) = (j.height_by(&jt[ji], p[0], p[1], pin), k.height_by(&jt[o], p[0], p[1], pout)) else {
+                    r.fail.push(format!("joins {} and {}: no cell at ({:.3}, {:.3})", j.name, k.name, p[0], p[1]));
+                    continue;
+                };
+                // Slope across, each from one cell of its own (only reported).
+                let mut qin = p;
+                qin[normal_axis] -= n * j.spacing;
+                let mut qout = p;
+                qout[normal_axis] += n * k.spacing;
+                if let (Some(a), Some(b)) = (j.height_by(&jt[ji], qin[0], qin[1], pin), k.height_by(&jt[o], qout[0], qout[1], pout)) {
+                    r.join_seam_slope = r.join_seam_slope.max(((h_in - a) / j.spacing - (b - h_out) / k.spacing).abs());
+                }
+                let dh = (h_in - h_out).abs();
+                r.join_seam_points += 1;
+                r.join_seam_height = r.join_seam_height.max(dh);
+                if dh > j.quantum.max(k.quantum) + 1e-4 * h_in.abs().max(1.0) {
+                    r.fail.push(format!("joins {} and {} at ({:.3}, {:.3}): {h_in:.4} ft against {h_out:.4}", j.name, k.name, p[0], p[1]));
+                }
+            }
+        }
+    }
+    if r.join_seam_points > 0 {
+        r.note.push(format!(
+            "{} points where joins of two spacings meet: worst height step {:.5} ft, slope step {:.4} (not failed)",
+            r.join_seam_points, r.join_seam_height, r.join_seam_slope
+        ));
+    }
 }
 
 fn compare(src: &Path, copy: &Path, name: &str, r: &mut Report) {
