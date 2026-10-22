@@ -9,6 +9,7 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
+- [ ] **M14** survey reads Untamed's scenes: `tools/survey untamed` decodes `<MAP>.scn.bpb` with `tools/bpb` and fills the scene columns (terrain keys, models, collision placements) in notes/mxvatv-later.md's table, which still say 'not read (M10)' (after M10) → tools/survey/ · notes/mxvatv-later.md | t: survey's ignored row test covers an Untamed scene | j: survey-bpb
 - [ ] **T7** accuracy harness: compare a mod against its source game running. Set up PCSX2 for each source disc with ../ps2-decomp-kit (a kit config per game under extracted/<game>/, PINE on), find each game's terrain query and its camera in RAM (as openmx's research did for MXU: terrain_point_query, the camera), and write tools/accuracy: (1) heights — read the original's own ground height and surface at ≥1,000 points per map over PINE and compare with openmx's Terrain on the imported file, which must be exact since the terrain is copied; (2) the look — screenshot pairs from the same poses, the original (./kit shot) and openmx (--shot from a pose, openmx MD10), side by side in out/accuracy/<map>/ for a person or an agent to read. Prove it on one MX vs. ATV Unleashed map end to end (after T5, M2) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests on generated data; the one map's heights all equal | j: accuracy-harness
 
 ### MX vs. ATV Unleashed
@@ -18,7 +19,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### MX vs. ATV Untamed
 
-- [ ] **M10** decode BPB, Untamed's binary INI (`.scn.bpb`, `.toy.bpb`, `.rpy.bpb`; 7,697 members): `BPB\0`, a header, 12-byte records (a 32-bit name hash, a string-table offset, two 16-bit fields), a string table of the INI's section and key names. Get the header, the record, the value encodings and the hash from SLUS_217.01's reader (set up a Ghidra project for it with ../ps2-decomp-kit under extracted/untamed/ghidra), and write `tools/bpb` (BPB → INI text). Proof: every `.scn.bpb` on the disc decodes to an INI that openmx's `Scene::parse` reads, and every record's hash recomputes from its name (after T5) → tools/bpb/ · notes/mxvatv-later.md | t: tools/bpb tests — a BPB built in the test decodes; `--ignored` all 7,697 on the disc | j: bpb
 - [ ] **M4** Untamed importer: M2's importer with M10's decoder in front, for Untamed's freeride and national maps; Untamed's `.col` (1,604) through openmx's reader first (after M2, M10) → tools/import-mxvatv/ | t: `--ignored` every chosen Untamed map imports and reads back | j: import-untamed
 
 ### Real elevation
