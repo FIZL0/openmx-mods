@@ -213,23 +213,61 @@ impl Disc {
         Ok(())
     }
 
-    /// A `.res` member, read whole and its directory parsed.
+    /// A `.res` member, read whole and its directory parsed. One whose directory `Res::parse`
+    /// refuses only for the zero bytes padding it (Untamed's map archives) is read through
+    /// [`ResFile::unpadded`], and its `padding` says so.
     pub fn res(&mut self, e: &Entry) -> Result<ResFile, String> {
         let bytes = self.read(e)?;
-        ResFile::from_bytes(bytes).map_err(|why| format!("{}: {why}", e.name))
+        ResFile::unpadded(bytes).map_err(|why| format!("{}: {why}", e.name))
     }
 }
 
 /// A `.res` archive in memory, with its directory parsed by openmx's reader.
 pub struct ResFile {
+    /// The file, or with `padding` its view without the directory's zero bytes.
     pub bytes: Vec<u8>,
     pub dir: Res,
+    /// Zero bytes taken off the end of the directory for `Res::parse` ([`ResFile::unpadded`]); 0
+    /// when it read the file as it is.
+    pub padding: usize,
 }
 
 impl ResFile {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<ResFile, String> {
         let dir = Res::parse(&bytes)?;
-        Ok(ResFile { bytes, dir })
+        Ok(ResFile { bytes, dir, padding: 0 })
+    }
+
+    /// [`ResFile::from_bytes`], or when `Res::parse` refuses the file, a view of it with the zero
+    /// bytes that end its directory taken out and the directory length cut to match. MX vs. ATV
+    /// Untamed pads every map archive's directory so (56 to 2,003 bytes, which the header's length
+    /// counts: `notes/mxvatv-later.md`, `notes/openmx-asks.md`). Only a cut the reader then takes
+    /// whole, directory and every block, is used, so every member is still read by openmx's reader;
+    /// the cut is tools/survey's `res_view`.
+    pub fn unpadded(bytes: Vec<u8>) -> Result<ResFile, String> {
+        let why = match Res::parse(&bytes) {
+            Ok(dir) => return Ok(ResFile { bytes, dir, padding: 0 }),
+            Err(why) => why,
+        };
+        let refused = || format!("Res::parse: {why}");
+        let word = |at: usize| bytes.get(at..at + 4).map(|w| u32::from_le_bytes(w.try_into().expect("4 bytes")) as usize);
+        let count_at = 0x14 + word(0x10).ok_or_else(refused)?;
+        let dir_bytes = word(count_at + 4).ok_or_else(refused)?;
+        let dir_at = count_at + 8;
+        let dir = bytes.get(dir_at..dir_at + dir_bytes).ok_or_else(refused)?;
+        let zeros = dir.iter().rev().take_while(|&&b| b == 0).count();
+        // The last entry ends in its size, whose high bytes may be zero too: the longest cut first.
+        for cut in (1..=zeros).rev().take(4) {
+            let mut v = Vec::with_capacity(bytes.len() - cut);
+            v.extend_from_slice(&bytes[..count_at + 4]);
+            v.extend_from_slice(&((dir_bytes - cut) as u32).to_le_bytes());
+            v.extend_from_slice(&bytes[dir_at..dir_at + dir_bytes - cut]);
+            v.extend_from_slice(&bytes[dir_at + dir_bytes..]);
+            if let Ok(dir) = Res::parse(&v) {
+                return Ok(ResFile { bytes: v, dir, padding: cut });
+            }
+        }
+        Err(refused())
     }
 
     pub fn open(path: &Path) -> Result<ResFile, String> {

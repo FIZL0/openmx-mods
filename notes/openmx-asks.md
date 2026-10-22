@@ -61,6 +61,21 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   zero bytes, which the header's directory length counts. On the other maps the padding is 56 to 2,003
   bytes. The blocks start after the padding. Fix: after the last entry, accept zero bytes up to the
   claimed length. `tools/survey` reads them now through a view without the padding.
+- **Untamed's binary INI (BPB) past the scene** (M4, `notes/mxvatv-later.md`, *The importer (M4)*).
+  An Untamed mod holds its scene twice: the disc's `<MAP>.scn.bpb` and the `<MAP>.scn` the importer
+  decodes beside it (§2a). Every other INI of the map is BPB only, and nothing in openmx reads BPB:
+  its materials (`res\env\Nat_AZ\Nat_AZ_mat.res:tex\nat_az_bowsaw.psm.bpb`, 24 to 130 a mod, counting the loose
+  ones pulled), its toys (`env\nat_az\Nat_AZ.toy.bpb`; `toy::Traffic::load` looks for `Nat_AZ.toy`),
+  its particles (`part\SX11particles.prt.bpb`) and its sounds (`Nat_AZ.aud.bpb`). So a mod draws every
+  Untamed model untextured and runs no traffic. The textures are there: read through tools/bpb's decode,
+  `world::Assets::resolve` finds a texture for every material but the `screen.psm` jumbotrons
+  (`RenderTarget`). Fix, either: game-render reads a `<name>.bpb` where it would read `<name>` as text,
+  as the game's loader does (SLUS_217.01 `0x001425c0`: `%s.bpb` first, then the text; format and hash
+  in `notes/mxvatv-later.md`, *Scenes: binary (BPB)*); or the standard lets an importer decode every
+  BPB beside itself, as it does the scene.
+- **`Res::parse` and Untamed's padding, more evidence** (M4): the 120 archives of the 40 imported maps
+  are all padded (56 to 2,003 bytes); `tools/import-mxvatv` and `modcheck` open them through
+  `discx::ResFile::unpadded`, the same cut as `tools/survey`'s, and each mod's `todo` names the padding.
 - **MD5, more evidence** (T6): on MX vs. ATV Unleashed, `collision class 1 is not understood` is every
   animated object, and only those: 7 `.col` in the map archives and 15 loose, all under `Env\<MAP>\Anim\`
   (`Nat04_FerrisWheel`, `Nat05_Gallows_Door`, `Nat10_TireSwing`, `PackCamel`, `bigfoot`, …; the full list
