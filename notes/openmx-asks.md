@@ -284,3 +284,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   folder), P71 would be loading this mod. What differs from P71's text: one global sky instead of each
   map's own (the standard's world has one sky; MD9 has a Per map setting), and each tile keeps its own
   scene instead of merged objects and emitters.
+- **MD8 at the ultra map's size** (C5, `notes/ultra-map.md`). `world_ultra` is one world of 77 tiles from
+  three games, 1,854 of their joins and 281 new ones (2,212 terrains, 2.1 GB). It spans 116,068.5 ×
+  33,844.5 ft. At x = 116,000 ft a single float resolves 1/128 ft (0.0078 ft). A tile's ground is
+  bit-exact only if the port queries it in the tile's own coordinates (world − `at`, done in a way that
+  loses nothing), not in world feet. The ride also needs the draw, collision and props of only the
+  nearby tiles and joins, not all 2,212 at once. Nothing in openmx fails on it yet, because nothing loads
+  a world (MD8 open). This is a size to design MD8 for.

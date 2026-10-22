@@ -8,6 +8,7 @@
 //! stitch map WORLD_DIR OUT.pgm [FEET]       (the world's heights as a greyscale picture, shaded)
 //! stitch edges [--max-slope X] [--fade FT] TILE_DIR...  (each edge's relief and seam gate, C9)
 //! stitch --mods OUT/mods --out STAGE        (build.sh: every world in tools/stitch/worlds/*.json)
+//! stitch ultra OUT --id world_x --name NAME [--sky TILE] [--max-slope X] [--min-gap FT] [--fade FT] WORLD_DIR...
 //! ```
 //!
 //! A world spec (`worlds/<id>.json`): `{"id": "world_x", "name": "...", "tiles": ["mxvatv_nat05", ...]}`
@@ -16,6 +17,9 @@
 //! `--mods`/tracks/. An `mxu_` tile is never there (MX Unleashed's tracks are only a world's tiles,
 //! §1, so no step packages them): it is imported off the MX Unleashed disc in `$DISCX_ISO` (or `iso/`)
 //! into `<STAGE>.mxu/`, beside the stage, so build.sh does not package it as a track (C4).
+//!
+//! A spec with `worlds` in place of `tiles` is an ultra map (C5): whole worlds joined, built after every
+//! tile spec, from the worlds just built into STAGE (or already in `--mods`/tracks/).
 
 use modcheck::json::Json;
 use std::path::{Path, PathBuf};
@@ -23,7 +27,7 @@ use std::process::ExitCode;
 use stitch::build::{Params, build};
 
 fn usage() -> ExitCode {
-    eprintln!("{}", include_str!("main.rs").lines().skip(3).take(8).map(|l| l.trim_start_matches("//! ")).collect::<Vec<_>>().join("\n"));
+    eprintln!("{}", include_str!("main.rs").lines().skip(3).take(9).map(|l| l.trim_start_matches("//! ")).collect::<Vec<_>>().join("\n"));
     ExitCode::from(2)
 }
 
@@ -35,6 +39,7 @@ fn main() -> ExitCode {
         Some("profile") => cmd_profile(&args[1..]),
         Some("map") => cmd_map(&args[1..]),
         Some("edges") => cmd_edges(&args[1..]),
+        Some("ultra") => cmd_ultra(&args[1..]),
         Some("--mods") | Some("--out") => cmd_specs(&args),
         _ => usage(),
     }
@@ -92,6 +97,60 @@ fn cmd_build(args: &[String]) -> ExitCode {
         }
         let b = build(&tiles, &out, &p)?;
         report(&b);
+        Ok(())
+    };
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("stitch: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn ultra_report(b: &stitch::ultra::Built) {
+    println!(
+        "stitch: {} ({} worlds, {} tiles, {} of their joins, {} new pieces at {} ft; new ground slope {:.3} away from the worlds' edges, {:.3} near them)",
+        b.dir.display(),
+        b.worlds.len(),
+        b.tiles,
+        b.copied_joins,
+        b.pieces,
+        b.plan.spacing,
+        b.far_slope,
+        b.near_slope
+    );
+}
+
+/// The ultra map (C5): built worlds joined whole.
+fn cmd_ultra(args: &[String]) -> ExitCode {
+    let run = || -> Result<(), String> {
+        let mut out = None;
+        let mut p = Params::new("", "");
+        let mut worlds = Vec::new();
+        let mut i = 0;
+        while i < args.len() {
+            let a = args[i].as_str();
+            match a {
+                "--id" => p.id = take(args, &mut i, a)?,
+                "--name" => p.name = take(args, &mut i, a)?,
+                "--sky" => p.sky = Some(take(args, &mut i, a)?),
+                "--max-slope" => p.max_slope = num(&take(args, &mut i, a)?, a)?,
+                "--min-gap" => p.min_gap = num(&take(args, &mut i, a)?, a)?,
+                "--fade" => p.fade = num(&take(args, &mut i, a)?, a)?,
+                "--chunk" => p.chunk = num(&take(args, &mut i, a)?, a)? as u32,
+                "--threads" => p.threads = num(&take(args, &mut i, a)?, a)? as usize,
+                _ if a.starts_with("--") => return Err(format!("unknown flag {a}")),
+                _ if out.is_none() => out = Some(PathBuf::from(a)),
+                _ => worlds.push(PathBuf::from(a)),
+            }
+            i += 1;
+        }
+        let out = out.ok_or("no OUT folder")?;
+        if p.id.is_empty() || p.name.is_empty() {
+            return Err("--id and --name are needed".into());
+        }
+        ultra_report(&stitch::ultra::build(&worlds, &out, &p)?);
         Ok(())
     };
     match run() {
@@ -162,12 +221,26 @@ fn cmd_specs(args: &[String]) -> ExitCode {
         .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect())
         .unwrap_or_default();
     names.sort();
+    // Ultra maps (C5) after the worlds they join.
+    let is_ultra = |p: &PathBuf| std::fs::read_to_string(p).ok().and_then(|t| Json::parse(&t).ok()).is_some_and(|j| j.get("worlds").is_some());
+    names.sort_by_key(|p| is_ultra(p));
     if names.is_empty() {
         println!("stitch: no world specs in {}: nothing to build", specs.display());
         return ExitCode::SUCCESS;
     }
     let mut failed = false;
     for spec in names {
+        if is_ultra(&spec) {
+            match ultra_spec(&spec, &mods, &out) {
+                Ok(Some(b)) => ultra_report(&b),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("stitch: {}: {e}", spec.display());
+                    failed = true;
+                }
+            }
+            continue;
+        }
         let run = || -> Result<Option<stitch::build::Built>, String> {
             let j = Json::parse(&std::fs::read_to_string(&spec).map_err(|e| e.to_string())?)?;
             let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
@@ -215,6 +288,36 @@ fn cmd_specs(args: &[String]) -> ExitCode {
         }
     }
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+/// An ultra map's spec (C5): `{"id", "name", "worlds": [...]}` with optional `sky`, `max_slope`, `min_gap`,
+/// `fade`, `chunk` and `todo`. Each world is looked for in the stage first (built in this run), then in
+/// `--mods`/tracks/; a world missing from both skips the map with a line, as a missing tile skips a world.
+fn ultra_spec(spec: &Path, mods: &Path, out: &Path) -> Result<Option<stitch::ultra::Built>, String> {
+    let j = Json::parse(&std::fs::read_to_string(spec).map_err(|e| e.to_string())?)?;
+    let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
+    let mut p = Params::new(&g("id").ok_or("no id")?, &g("name").ok_or("no name")?);
+    p.sky = g("sky");
+    p.todo = j.get("todo").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
+    for (k, v) in [("max_slope", &mut p.max_slope), ("min_gap", &mut p.min_gap), ("fade", &mut p.fade)] {
+        if let Some(n) = j.get(k).and_then(Json::num) {
+            *v = n;
+        }
+    }
+    if let Some(v) = j.get("chunk").and_then(Json::num) {
+        p.chunk = v as u32;
+    }
+    let mut dirs = Vec::new();
+    for w in j.get("worlds").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str) {
+        match [out.join(w), mods.join("tracks").join(w)].into_iter().find(|d| d.join("mod.json").exists()) {
+            Some(d) => dirs.push(d),
+            None => {
+                println!("stitch: skip {}: the world {w} is not built", p.id);
+                return Ok(None);
+            }
+        }
+    }
+    stitch::ultra::build(&dirs, out, &p).map(Some)
 }
 
 /// MX Unleashed's tracks as tiles, off its disc into `stage` (import-mxvatv's MXU path, read back as

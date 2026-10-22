@@ -223,3 +223,12 @@ nat13 306, nat17 189–315, the rest at most 306 and mostly 153; MX Unleashed's 
   in the 400 ft drop (near-seam slope 63). `stitch check` still fails there on the missing cells. C8 is
   still needed, and a wide gate on a tile whose edge reads 0 ft is a sign of it. (Measured on C9's
   branch, before C8 merged; with C8's keep nat04's edges no longer read missing cells. Not re-measured.)
+
+## Whole worlds: the ultra map (C5)
+
+`stitch ultra` (and a spec with `worlds` in place of `tiles`) joins built worlds whole. Each world is
+one source of the same blend. Its interior is its whole rectangle, its ring its outer edge as its joins
+have it. Its tiles and joins are copied unchanged and moved. New pieces `u…` fill only the ground
+outside every world. `stitch check` then also holds the world seams (height and slope across, to the
+quantum) and compares each copied join with the world's own. The method, the layout and the numbers
+on the real map are in `notes/ultra-map.md`.
