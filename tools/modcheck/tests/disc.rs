@@ -459,7 +459,10 @@ fn paths_that_differ_only_in_case_fail() {
 fn a_refused_or_missing_shape_must_be_in_todo() {
     let m = map("col", 1);
     let dir = package(&m, "mxvatv_test", r#"["scratch"]"#);
-    fails_with(&run(&m, &dir), "Col/Blade.col: Collision::parse: collision class 1 is not understood, and todo does not name it");
+    // openmx's own words: "collision class 1 is not understood" before its MD5; after it, the shape is
+    // a hierarchy with a word left over.
+    let why = game_sim::track::Collision::parse(&class1_col()).expect_err("Blade.col is refused");
+    fails_with(&run(&m, &dir), &format!("Col/Blade.col: Collision::parse: {why}, and todo does not name it"));
     let dir = package(&m, "mxvatv_test", TODO);
     std::fs::remove_file(dir.join("Col/Rock.col")).unwrap();
     fails_with(&run(&m, &dir), "Rock.col: placed by the scene, not in the folder, and todo does not name it");

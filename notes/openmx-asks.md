@@ -247,19 +247,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
 - **`Res::parse` and Untamed's padding, one more archive** (M13). Every Untamed mod now also holds the
   members of `res\Shadows.res` (the six shadow sets' 18 `.psm.bpb`, opened in every ride), padded by
   1,250 bytes like the map archives; the same fix covers it.
-- **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
-  --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
-  Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive
-  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera, 75 on Untamed's). Whether 85
-  spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
-  so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
-  side decides whether the pairs compare HUDs too.
-- **MD2 and MD10, a command line for the accuracy pairs** (T9, `notes/accuracy.md`, *openmx's half*).
-  MD2's plan text covers the track pick, but `tools/accuracy pair` runs openmx headless, one shot a pose:
-  `openmx <a mod track> --shot PATH --shot-pose x,y,z,yaw,pitch,fov`. It needs a flag that rides a mod
-  from the command line, either a folder (`--mod mods/tracks/mxvatv_nat05`, what `look::OPENMX_ARGS`
-  assumes) or `--track <mod id>` finding it in the mods folder, and both flags listed in `--help` (the
-  harness checks there before it runs). openmx `b63486a` has neither.
+- **MD10, what the harness passes** (T7), and **MD2 and MD10, a command line for the accuracy pairs**
+  (T9): answered by openmx's MD2 (`--mods DIR --track <mod id>`) and MD10 (`--shot-pose`, the fov the
+  horizontal one, as the presets'). `look::OPENMX_ARGS` uses them, and the eight Lago pairs agree with
+  openmx's reading of the fov (`notes/accuracy.md`, *openmx's half*). Nothing left to ask.
 - **New: an elevation mod's ground paint** (M1, `notes/elevation.md`). The `elev_*` mods colour their
   ground the way MXU's freeride tracks lay a whole-map mask: a `tracks/<id>/terrainscreenspacemesh.psm`
   with one pass (free09's `ShaderPass_1` keys, `UScale = 1/extent`, `VScale = −1/extent`) naming

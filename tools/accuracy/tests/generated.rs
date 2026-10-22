@@ -315,32 +315,46 @@ fn the_kit_config_names_the_disc_and_the_gameplay_module() {
 #[test]
 fn the_openmx_command_line_built_from_a_pose() {
     let pose = Pose::from_angles([2113.5, 455.25, 3014.0], 90.0, -12.0, 85.0);
-    let folder = Path::new("/mods/tracks/mxvatv nat05");
+    let folder = Path::new("/my mods/tracks/mxvatv_nat05");
     let shot = Path::new("/out/accuracy/nat05/start.openmx.png");
     let args = look::openmx_args(look::OPENMX_ARGS, folder, shot, &pose);
-    assert_eq!(args.len(), 6, "{args:?}");
-    assert_eq!(args[..2], ["--mod".to_owned(), "/mods/tracks/mxvatv nat05".to_owned()], "a path with a space stays one word");
-    assert_eq!(args[2..4], ["--shot".to_owned(), shot.to_string_lossy().into_owned()]);
-    assert_eq!(args[4], "--shot-pose");
-    assert_eq!(args[5], pose.md10());
-    // The --shot-pose word is the pose again, to a thousandth.
-    assert!(Pose::parse_md10(&args[5]).unwrap().close(&pose, 1e-3));
+    let word = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
+    // MD2: the folder over tracks/, one word though it has a space, and the mod's id.
+    assert_eq!(word("--mods"), Some("/my mods"), "{args:?}");
+    assert_eq!(word("--track"), Some("mxvatv_nat05"));
+    assert_eq!(word("--shot"), Some("/out/accuracy/nat05/start.openmx.png"));
+    // MD10: the pose, which reads back as the pose to a thousandth.
+    let md10 = word("--shot-pose").unwrap();
+    assert_eq!(md10, pose.md10());
+    assert!(Pose::parse_md10(md10).unwrap().close(&pose, 1e-3));
+    // The run: headless, ended after the shot, 4:3, no HUD, the original's fog.
+    assert!(args.contains(&"--headless".to_owned()));
+    assert_eq!(word("--frames"), Some("2"));
+    assert_eq!(word("--size"), Some("640x480"));
+    assert_eq!(word("--overlay"), Some("none"));
+    assert_eq!(word("--graphics"), Some("original"));
+    assert!(args.iter().all(|a| !a.contains('{')), "a placeholder left: {args:?}");
     // A template of the caller's own: its own words, the placeholders filled where they are.
     let mine = look::openmx_args("--track={mod} --overlay none --shot-pose {pose}", folder, shot, &pose);
-    assert_eq!(mine[0], "--track=/mods/tracks/mxvatv nat05");
+    assert_eq!(mine[0], "--track=/my mods/tracks/mxvatv_nat05");
     assert_eq!(mine[1..3], ["--overlay".to_owned(), "none".to_owned()]);
+    assert!(look::in_a_mods_folder(folder).is_ok());
+    assert!(look::in_a_mods_folder(Path::new("/stage/mxvatv_nat05")).is_err());
 }
 
 #[test]
 fn openmx_is_ready_only_with_every_flag_as_a_word() {
-    // openmx today: --shot and --modifiers, no --shot-pose and no --mod (--modifiers is not it).
-    let today = "  --track NAME\n  --shot PATH\n  --shot-frame N\n  --modifiers LIST\n";
-    let missing = look::openmx_missing(today, look::OPENMX_ARGS);
-    assert_eq!(missing, ["--mod, a track from a mod folder (openmx MD2)", "--shot-pose (openmx MD10)"]);
-    assert!(!look::help_has_flag(today, "--shot-pose"));
-    assert!(look::help_has_flag(today, "--shot"));
-    let ready = format!("{today}  --mod DIR\n  --shot-pose x,y,z,yaw,pitch,fov\n");
+    // openmx before MD2 and MD10: --shot and --modifiers, no --shot-pose and no --mods.
+    let before = "  --track NAME --headless --no-sound --frames N --size WxH --overlay none --graphics full\n  --shot PATH\n  --shot-frame N\n  --modifiers LIST\n";
+    let missing = look::openmx_missing(before, look::OPENMX_ARGS);
+    assert_eq!(missing, ["--mods, tracks from a mods folder (openmx MD2)", "--shot-pose (openmx MD10)"]);
+    assert!(!look::help_has_flag(before, "--shot-pose"));
+    assert!(look::help_has_flag(before, "--shot"));
+    // `--mods` is not in `--modifiers`, nor `--mod` in `--mods`.
+    assert!(!look::help_has_flag(before, "--mod"));
+    let ready = format!("{before}  [--mods DIR|off]\n  [--shot-pose x,y,z,yaw,pitch,fov]\n");
     assert!(look::openmx_missing(&ready, look::OPENMX_ARGS).is_empty());
+    assert!(!look::help_has_flag(&ready, "--mod"));
 }
 
 /// Untamed (M13): its gameplay module goes in at 0x48ea80, and its ride camera's fov is 75.

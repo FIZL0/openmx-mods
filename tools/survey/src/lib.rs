@@ -398,6 +398,7 @@ pub fn col(file: &str, b: &[u8]) -> ColRow {
             m.triangles.len()
         ),
         Collision::Rays(r) => format!("rays v{} {} segments", r.version, r.segments.len()),
+        Collision::Hierarchy(h) => format!("hierarchy v{} {} parts", h.version, h.parts.len()),
     });
     ColRow {
         file: file.to_owned(),

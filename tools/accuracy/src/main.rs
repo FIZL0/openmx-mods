@@ -48,10 +48,12 @@ const USAGE: &str = "accuracy: a track mod against its source game running in PC
       --live keeps the game's own camera as it is (after the --pad commands) as pose NAME. Without
       --viewport the ride camera's viewport is found in a fresh capture (scratch slot 8).
 
-  accuracy pair --mod DIR [--out DIR] [--openmx BIN] [--openmx-args TEMPLATE]
-      openmx's shot from every pose that has none ({mod} {shot} {pose} in TEMPLATE, default
-      \"--mod {mod} --shot {shot} --shot-pose {pose}\"), then DIR/POSE.pair.png side by side and
-      DIR/index.md. Without MD2/MD10 in openmx the original's shots are indexed alone.
+  accuracy pair --mod DIR [--out DIR] [--openmx BIN] [--openmx-dir DIR] [--openmx-args TEMPLATE]
+      openmx's shot from every pose that has none, then DIR/POSE.pair.png side by side and
+      DIR/index.md. openmx runs in --openmx-dir (default openmx, for its kit.toml) as TEMPLATE says:
+      {mods} the folder over the mod's tracks/, {id} the mod's id, {mod} its folder, {shot} {pose};
+      default look::OPENMX_ARGS (--mods {mods} --track {id} ... --shot {shot} --shot-pose {pose}).
+      An openmx without every flag of TEMPLATE in its --help gets the original's shots indexed alone.
 
 The source game comes from mod.json's source.boot (SLUS_211.04: MX vs. ATV Unleashed; SLUS_217.01: MX vs.
 ATV Untamed). KIT defaults to
@@ -504,9 +506,17 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
     let out = out_dir(a, &m);
     let openmx = PathBuf::from(a.take("--openmx").unwrap_or_else(|| "openmx/target/release/openmx".into()));
     let template = a.take("--openmx-args").unwrap_or_else(|| look::OPENMX_ARGS.into());
+    // openmx finds its disc by the nearest kit.toml above where it runs: its own checkout's.
+    let openmx_dir = PathBuf::from(a.take("--openmx-dir").unwrap_or_else(|| "openmx".into()));
     a.done()?;
     let src = source_of(&m)?;
-    let ready = look::openmx_ready(&openmx, &template);
+    let abs = |p: &Path| std::path::absolute(p).map_err(|e| format!("{}: {e}", p.display()));
+    let (openmx, folder) = (abs(&openmx)?, abs(&m.folder)?);
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let out = abs(&out)?;
+    let ready = look::openmx_ready(&openmx, &template).and_then(|()| {
+        if template.contains("{mods}") { look::in_a_mods_folder(&folder) } else { Ok(()) }
+    });
     let mut ok = true;
     for r in look::rows(&out)? {
         if !r.original {
@@ -516,8 +526,13 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
         if !r.openmx
             && let Ok(()) = ready
         {
-            let args = look::openmx_args(&template, &m.folder, &shot, &r.pose);
-            let st = Command::new(&openmx).args(&args).status().map_err(|e| format!("{}: {e}", openmx.display()))?;
+            let args = look::openmx_args(&template, &folder, &shot, &r.pose);
+            let st = Command::new(&openmx)
+                .args(&args)
+                .current_dir(&openmx_dir)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .map_err(|e| format!("{}: {e}", openmx.display()))?;
             if !st.success() || !shot.exists() {
                 eprintln!("{}: openmx gave no shot ({st})", r.name);
                 ok = false;
