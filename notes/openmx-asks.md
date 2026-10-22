@@ -55,3 +55,18 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   stem: `<stem>.toy`, `<stem>particles.prt`, `<stem>_shadow_NN.pst` are built from `args.track`. For a mod
   the stem is its one `.scn`'s file stem, not its id. (3) `<track>_2.res`: a mod has no second archive
   (bike, physics, `biplanecpresets.ini`), so the ride takes them from a disc track's.
+- **New: `Res::parse` and Untamed's map archives** (T6, `notes/mxvatv-later.md`). All 48
+  `res\env\<MAP>\<MAP>.res` on the Untamed disc are refused: `res\env\FS_A\FS_A.res`: `.res: the header
+  claims a 1730-byte directory, 1470 bytes were read`. The directory's 45 entries are followed by 260
+  zero bytes, which the header's directory length counts. On the other maps the padding is 56 to 2,003
+  bytes. The blocks start after the padding. Fix: after the last entry, accept zero bytes up to the
+  claimed length. `tools/survey` reads them now through a view without the padding.
+- **MD5, more evidence** (T6): on MX vs. ATV Unleashed, `collision class 1 is not understood` is every
+  animated object, and only those: 7 `.col` in the map archives and 15 loose, all under `Env\<MAP>\Anim\`
+  (`Nat04_FerrisWheel`, `Nat05_Gallows_Door`, `Nat10_TireSwing`, `PackCamel`, `bigfoot`, …; the full list
+  is in `notes/mxvatv.md`, *Survey tables*). Untamed has one, `Env\Nat_DVCA\Anim\Nat05_Gallows_Door.col`.
+  MX Unleashed's own disc has more than the one file that `game-sim/src/track.rs`'s comment mentions:
+  `survey mxu` finds 11 in the track archives, 8 distinct. Three are under `anim\` (`free10\anim\shovel`,
+  `nat07\anim\mill`, `nat11\anim\gondola`) and five under `col\`: `watertower`, `mainhouse` (nat01),
+  `cemeterygate` (nat02), `utilityshack1` (free09, nat06), `nat08smallshanty`. Whether nat01's scene
+  places those was not checked.

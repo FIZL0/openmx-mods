@@ -1,0 +1,12 @@
+[package]
+name = "survey"
+description = "Every map on a disc through openmx's readers: terrain, scene and collision, one row per map"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Terrain, scene, collision and .res: openmx's readers, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+# The disc image, its PSR and the globs.
+discx = { path = "../discx" }
