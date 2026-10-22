@@ -321,3 +321,36 @@ ridge`) against openmx built from openmx `3b11fd6`. What differs, by eye:
 - **The rider.** openmx's rider stands at the scene's start, in front of the start pose. The original's
   was wherever it had been ridden to when T7 took the shots (in the middle distance of spawn). This is
   not the map's difference.
+
+## Textures in openmx (T11)
+
+Every track mod in `out/mods/tracks/` and the 27 MXU tiles `world_mxu` uses, 127 in all, ridden in
+openmx `e7b66dd` (MD2, MD3, MD10, MD12 in) headless with `look::OPENMX_ARGS`: one `--shot-pose` at the
+scene's start and one at the biggest landmark (`accuracy poses --landmarks 1`; the elevation maps have
+none and take the overview). The five MXU freeride tiles need `--camera "Flight Cam 1"` (openmx-asks,
+*what it draws wrong*). The shots were read by eye on contact sheets, and every material was resolved
+by `tools/import-mxvatv/tests/textures.rs` (`cargo test -p import-mxvatv --test textures -- --ignored`)
+through `Res::folder` and `world::Assets::resolve`, as the shell does. After the fix: 224 misses on 127
+mods, every one named in its mod's `todo`.
+
+| map | what was missing | cause | fixed or asked |
+|---|---|---|---|
+| all 40 `untamed_*` | every prop, plant, start gate and billboard drawn white (3,918 materials) | the materials are BPB only (`.psm.bpb`); the port reads text | fixed: the importer decodes `.psm`, `.toy`, `.prt` BPB beside itself (§2a), each named in `todo` |
+| all 56 `mxvatv_*`, all 40 `untamed_*` | the ground one flat colour, shaded only by its normals | the ground is the `.trn`'s texture pages and `<MAP>_d`; the port has no reader for them yet | asked: openmx MD4 (filed) |
+| 44 stadium maps (`mxvatv_fs*`, `sx*`, `mc06`–`mc08`; `untamed_fs_*`, `sx_*`, `mt_a`) | the jumbotrons white | `screen.psm` names `RenderTarget`, which the game draws at run time and does not read as a file | asked: *`RenderTarget`* |
+| 45 maps (all `sx*` of both games, `fs01`, `fs02`, `fs05`, `nat02`, `untamed_fs_b`, `sm_mb`, MXU `nat01`, `nat03`, `nat04`, `nat06`, `nat13`, `nat14`, `nat19`, `nat20`, `nat22`) | a prop drawn with another prop's picture or model (`thq.psm` as `BaleTHQ`) | `Res::find_suffix` has no path boundary, and a folder is in path order | asked: MD2 boundary (more evidence) |
+| `mxvatv_fs05`, `mxvatv_sx09` | `seating_blue.pst`: the stands drawn with `Anaheim_seating_blue.pst` | the map has no such file; the suffix finds a longer name | asked, with the above; the game's choice not looked up |
+| `untamed_sx_g` (14), `untamed_sx_d` (1) | the stadium shell `FP03B1`–`8` and `skyline01` white | a material with no `.psm`; the game uses its own name's texture, which the mod holds | asked: *a material with no `.psm`* |
+| `mxvatv_nat12` | `Nat12 _genericsandstone`, `Nat12 _pillarA` untextured | `TextureMap_1` with a space | asked: M9 *material texture names* |
+| `mxvatv_nat05`, `mxvatv_mc05` | `Nat05_liverystable_detail` untextured | `TextureMap_1` with a `.dxm` tail, which the game swaps for `.pst` | asked: M9 *material texture names* |
+| `mxvatv_nat12` | five plant species not drawn | `psg::Model::parse`: V2-8 texture coordinates | asked: M9 *`.psg` streams* |
+| `mxvatv_nat16` | `NorthernLights` not drawn | `psg::Model::parse`: stream mask `0x1f` | asked: M9 *`.psg` streams* |
+| MXU `nat03`, `nat22` tiles | `nat03_bridgeDirt01/02`, `nat03_start_slab` not drawn | `psg::Model::parse`: the file ends before the size it reads | in `todo` (the disc's own tracks too); not asked again here |
+| `mxvatv_mc02`, `sm01`–`sm03` | no plants | `EcosystemFile` without `.esb` | asked: M9 *`EcosystemFile` without its extension* |
+| `untamed_am_cs` | `AM_CS_Concretein`, `AM_CS_Concretein01` | the disc has only their `.col`: invisible collision, not a missing model | nothing to fix |
+| four `elev_*` | (looked flat from the rider) | the NAIP picture at 2 m a pixel, no detail map: soft, not missing | nothing to fix; openmx-asks' elevation entry answered |
+| 27 MXU tiles, 56 + 40 skies | nothing | the MXU ground (splat), every sky and every other material resolve | — |
+
+Not a cause anywhere: the lower-case `tex\` beside `Tex\` (85 of the 127 here; the brief counted 86). `Res` folds case in every lookup, and
+`Res::folder` refuses only one path spelt two ways, which no mod has (all 127 open). `.pst` against
+`.PST` is the same fold.

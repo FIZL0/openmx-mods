@@ -283,3 +283,39 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   loses nothing), not in world feet. The ride also needs the draw, collision and props of only the
   nearby tiles and joins, not all 2,212 at once. Nothing in openmx fails on it yet, because nothing loads
   a world (MD8 open). This is a size to design MD8 for.
+- **MD2, lookups on a segment boundary: what it draws wrong** (T11, `tools/import-mxvatv/tests/textures.rs`).
+  Every track mod and world tile in `out/` (127), opened with `disc::Res::folder` and resolved with
+  `world::Assets::resolve` over `read_suffix`, as the shell does. In 45 of them `Res::find_suffix` answers
+  a model or material with another file whose name only ends the same, because a mod folder's members
+  are in path order: `thq.psm` with `Tex\BaleTHQ.psm` (all 18 MX vs. ATV `sx*`; Untamed's 12 `sx_*` with
+  `Banner_Stadium_THQ.psm`, `startgatethq.psm` or `Stadium_Backlit_THQ.psm`), `TripleBale01.psg` with
+  `Geo\downtriplebale01.psg`, `concretefloor.psm` with `BlueConcreteFloor.psm`, `tarp.psm` with
+  `StandsTarp.PSM`, `brick.psm` with `big_brick.psm` (Nat02), `screen.psm` with `StadiumSunScreen.PSM`
+  (Untamed FS_B, SX_B), `chain_link_fence.psm` with `AM_JY_Chain_Link_Fence.psm` (SM_MB); and on MXU's
+  own tracks as tiles `stake.psm` with `redstake.psm` (nat04, nat06), `cactusb.psg` with
+  `barrelcactusb.psg` (nat13, nat19), `log.psg` with `big_log.psg` (nat14), `trucktire.psm` with
+  `nat01_trucktire.psm`. The same lookup answers `cpresets.ini` with `biplanecpresets.ini` on the five MXU
+  freeride tiles, so `--track mxu_free06` stops with `--camera: the track has no preset called "Race
+  Cam 1"`. Each mod's `todo` lists its own (import-mxvatv `suffix_picks`). Fix as above: match on a `\`
+  or `/` boundary (or the whole name). Two are stand-ins rather than wrong picks: MX vs. ATV FS05 and
+  SX09 name `seating_blue.pst`, which the map lacks, and the suffix finds `Anaheim_seating_blue.pst`;
+  what the game draws there was not looked up.
+- **New: a material with no `.psm`** (T11). `world::Assets::resolve` gives no texture when
+  `<material>.psm` is missing. MX vs. ATV Unleashed's loader gives such a material its own name as its
+  one texture (SLUS_211.04 `0x00167f10`, then `.pst`, `.pss`, `.tga`, `.atm` by `0x00170500`;
+  `notes/mxvatv.md`, *Textures*). Untamed SX_G's stadium shell (`FP03B1.psg` … `FP03B8.psg`) names 14
+  `alt-02_*` materials with no `.psm` on the disc, and the mod holds every one's `.pst`
+  (`tex\Alt-02_Fence.pst`); SX_D's `skyline01` likewise (`tex\skyline01.PST`). The port draws them white.
+  Fix: when the `.psm` is missing, try `texture_files` on the material's own name. Whether Untamed's
+  loader (SLUS_217.01 `0x00163930`) does the same was not looked up.
+- **New: `RenderTarget`, the stadium jumbotrons** (T11). `screen.psm` names `TextureMap_1 = RenderTarget`
+  on 44 maps (MX vs. ATV `fs*`, `sx*`, MC06–MC08; Untamed `fs_*`, `sx_*`, MT_A). The game skips that name
+  as a file (`0x00167720`: `RenderTarget`, `RenderTarget2`, `FrameBuffer`, `DisplayBuffer`) and draws
+  into it at run time. The port looks for `RenderTarget.pst` and draws the screen white. Fix: treat those
+  four names as no file (a dark screen), or as a view of the ride.
+- **Untamed's BPB, answered for what is drawn** (T11). The importer now decodes every `.psm.bpb`,
+  `.toy.bpb` and `.prt.bpb` beside itself as it does the scene (standard §2a), so the 40 Untamed mods draw
+  their props, plants and start gates textured and the port finds `<MAP>.toy`. Only `.aud.bpb` is still
+  BPB only. A BPB reader in game-render would still let a mod drop the decoded copies.
+- **An elevation mod's ground paint, answered** (T11). With MD2 the four `elev_*` mods draw their NAIP
+  ground through `splat::Splat::load` from the mod folder (checked from 150 ft up, looking down).
