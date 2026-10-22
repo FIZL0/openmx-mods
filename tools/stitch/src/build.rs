@@ -29,6 +29,9 @@ pub struct Params {
     pub sky: Option<String>,
     /// Threads for the join ground (0: as many as the machine has).
     pub threads: usize,
+    /// Give each point only the tiles that can have a say there (the spatial grid, [`Plan::bins`]).
+    /// Off, every tile is a candidate everywhere; the ground is the same either way (C7's test).
+    pub prune: bool,
 }
 
 impl Params {
@@ -43,6 +46,7 @@ impl Params {
             fade: 48.0,
             sky: None,
             threads: 0,
+            prune: true,
         }
     }
 }
@@ -66,8 +70,13 @@ pub struct Plan {
     pub size: [u32; 2],
     pub placed: Vec<Placed>,
     pub sources: Vec<Source>,
-    /// The Shepard radius, feet.
+    /// The largest Shepard radius, feet.
     pub radius: f64,
+    /// Each source's Shepard radius, feet ([`radii`]).
+    pub radii: Vec<f64>,
+    /// The sources each square of the world can hear from.
+    pub bins: Bins,
+    pub prune: bool,
     pub fade: f64,
     /// Every tile's spacing as `p/q` of the lattice's, where one with q ≤ 64 exists.
     pub ratio: Vec<Option<(i64, i64)>>,
@@ -260,21 +269,91 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result
         })
         .collect();
     let size = [((far[0] + pad) / step).ceil() as u32, ((far[1] + pad) / step).ceil() as u32];
-    // The radius: twice the farthest any world point is from its nearest interior, so every point has
-    // at least two tiles' say near the middle of a gap.
-    let mut dmax: f64 = 0.0;
+    let radii = radii(&sources, size, step);
+    let radius = radii.iter().copied().fold(0.0, f64::max);
+    let bins = Bins::new(&sources, &radii, size, step);
+    let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
+    let (collars, uncollared) = collars(&sources, &ratios, step, size, p.fade);
+    Ok(Plan { spacing: step, size, placed, sources, radius, radii, bins, prune: p.prune, fade: p.fade, ratio: ratios, widen, collars, uncollared })
+}
+
+/// Each source's Shepard radius: twice the farthest any world point is from its nearest interior, over
+/// the points of this source's own neighbourhood. Those are the points it is the nearest to, or within one
+/// coarse cell's diagonal of the nearest (so the boundaries between neighbourhoods are not missed between
+/// coarse points). On the boundary between two neighbourhoods, both tiles then reach at least twice as far
+/// as the point is from either, so each point near the middle of a gap has two tiles' say, as C1's one
+/// radius (twice the farthest point of the whole world) gave. A gap made wide by one tall neighbour no
+/// longer widens every tile's reach across the world.
+pub fn radii(sources: &[Source], size: [u32; 2], step: f64) -> Vec<f64> {
     let stride = 8;
+    let cell = step * stride as f64;
+    let slack = cell * std::f64::consts::SQRT_2;
+    let mut far = vec![0.0f64; sources.len()];
+    let mut d = vec![0.0; sources.len()];
     for kz in (0..=size[1]).step_by(stride) {
         for kx in (0..=size[0]).step_by(stride) {
             let (x, z) = (f64::from(kx) * step, f64::from(kz) * step);
-            let d = sources.iter().map(|s| s.distance(x, z)).fold(f64::INFINITY, f64::min);
-            dmax = dmax.max(d);
+            for (di, s) in d.iter_mut().zip(sources) {
+                *di = s.distance(x, z);
+            }
+            let d1 = d.iter().copied().fold(f64::INFINITY, f64::min);
+            for (f, di) in far.iter_mut().zip(&d) {
+                if *di <= d1 + slack {
+                    *f = f.max(d1);
+                }
+            }
         }
     }
-    let radius = 2.0 * dmax + 4.0 * step * stride as f64;
-    let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
-    let (collars, uncollared) = collars(&sources, &ratios, step, size, p.fade);
-    Ok(Plan { spacing: step, size, placed, sources, radius, fade: p.fade, ratio: ratios, widen, collars, uncollared })
+    // The coarse lattice's margin, as C1 had: no point is more than a few coarse cells from one sampled.
+    far.iter().map(|f| 2.0 * f + 4.0 * cell).collect()
+}
+
+/// A spatial grid over the world: for each square, the sources that can have a say at some point within
+/// one lattice step of it (Shepard weight above 0, `d − step < radius`), in source order. A point past
+/// the world's edge (a piece's normals margin) belongs to the nearest square.
+pub struct Bins {
+    /// Feet a square a side.
+    pub side: f64,
+    pub n: [usize; 2],
+    pub cells: Vec<Vec<usize>>,
+}
+
+/// Lattice cells a side of one [`Bins`] square.
+pub const BIN: u32 = 32;
+
+impl Bins {
+    pub fn new(sources: &[Source], radii: &[f64], size: [u32; 2], step: f64) -> Bins {
+        let side = f64::from(BIN) * step;
+        let n = [size[0].div_ceil(BIN).max(1) as usize, size[1].div_ceil(BIN).max(1) as usize];
+        let mut cells = Vec::with_capacity(n[0] * n[1]);
+        for bz in 0..n[1] {
+            for bx in 0..n[0] {
+                let r = [bx as f64 * side, bz as f64 * side, (bx + 1) as f64 * side, (bz + 1) as f64 * side];
+                cells.push((0..sources.len()).filter(|&c| rect_gap(r, sources[c].rect) <= radii[c] + 2.0 * step).collect());
+            }
+        }
+        Bins { side, n, cells }
+    }
+
+    fn index(&self, x: f64, z: f64) -> [usize; 2] {
+        let i = |v: f64, n: usize| ((v / self.side).floor().max(0.0) as usize).min(n - 1);
+        [i(x, self.n[0]), i(z, self.n[1])]
+    }
+
+    /// The sources that can have a say at a world point.
+    pub fn at(&self, x: f64, z: f64) -> &[usize] {
+        let [bx, bz] = self.index(x, z);
+        &self.cells[bx + bz * self.n[0]]
+    }
+
+    /// Every source any square under a world rectangle lists, in source order.
+    pub fn over(&self, rect: [f64; 4]) -> Vec<usize> {
+        let ([x0, z0], [x1, z1]) = (self.index(rect[0], rect[1]), self.index(rect[2], rect[3]));
+        let mut out: Vec<usize> = (z0..=z1).flat_map(|bz| (x0..=x1).flat_map(move |bx| self.cells[bx + bz * self.n[0]].iter().copied())).collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
 }
 
 /// A collar round every tile whose spacing is a small fraction p/q (q > 1) of the lattice's, where one
@@ -387,21 +466,32 @@ impl Plan {
                 return Point { h, surface, w, near: 0.0 };
             }
         }
-        let reach: Vec<crate::Reach> = cands.iter().map(|&c| self.sources[c].extend(x, z, step, self.fade)).collect();
-        let (ni, nearest) = reach
-            .iter()
-            .enumerate()
-            .min_by(|a, b| a.1.d.total_cmp(&b.1.d))
-            .map(|(i, r)| (i, *r))
-            .expect("a point has a candidate");
+        // The distances first (cheap), then a tile's extension only where its weight is not 0: the
+        // nearest, and the ones within their radius. Pruned or not, the sums see the same terms in the
+        // same order (a weight of 0 adds nothing), so the ground is the same to the bit.
+        let ds: Vec<f64> = cands.iter().map(|&c| self.sources[c].extend_distance(x, z)).collect();
+        let ni = (0..ds.len()).min_by(|a, b| ds[*a].total_cmp(&ds[*b])).expect("a point has a candidate");
+        let say = |i: usize| !self.prune || i == ni || ds[i] - step < self.radii[cands[i]];
+        let reach: Vec<Option<crate::Reach>> = (0..cands.len())
+            .map(|i| {
+                say(i).then(|| {
+                    let r = self.sources[cands[i]].extend(x, z, step, self.fade);
+                    debug_assert_eq!(r.d.to_bits(), ds[i].to_bits(), "extend_distance is extend's d");
+                    r
+                })
+            })
+            .collect();
+        let nearest = reach[ni].expect("the nearest is always extended");
         if nearest.d <= step * (1.0 + 1e-9) {
             w[ni] = 1.0;
             return Point { h: nearest.h, surface: nearest.surface, w, near: nearest.d };
         }
         let mut sum = 0.0;
         for (i, r) in reach.iter().enumerate() {
-            w[i] = shepard(r.d - step, self.radius);
-            sum += w[i];
+            if let Some(r) = r {
+                w[i] = shepard(r.d - step, self.radii[cands[i]]);
+                sum += w[i];
+            }
         }
         if sum == 0.0 {
             w[ni] = 1.0;
@@ -409,24 +499,25 @@ impl Plan {
         }
         let mut h = 0.0;
         for (i, r) in reach.iter().enumerate() {
-            w[i] /= sum;
-            h += w[i] * r.h;
+            if let Some(r) = r {
+                w[i] /= sum;
+                h += w[i] * r.h;
+            }
         }
         Point { h, surface: nearest.surface, w, near: nearest.d }
     }
 
-    /// The sources within reach of a world rectangle.
+    /// The sources within reach of a world rectangle (and one lattice step round it): from the spatial
+    /// grid, each within its own radius; every source when pruning is off.
     pub fn candidates(&self, rect: [f64; 4]) -> Vec<usize> {
-        let reach = self.radius + 2.0 * self.spacing;
-        self.sources
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| {
-                let dx = (s.rect[0] - rect[2]).max(rect[0] - s.rect[2]).max(0.0);
-                let dz = (s.rect[1] - rect[3]).max(rect[1] - s.rect[3]).max(0.0);
-                dx.hypot(dz) <= reach
-            })
-            .map(|(i, _)| i)
+        if !self.prune {
+            return (0..self.sources.len()).collect();
+        }
+        let step = self.spacing;
+        self.bins
+            .over([rect[0] - step, rect[1] - step, rect[2] + step, rect[3] + step])
+            .into_iter()
+            .filter(|&c| rect_gap(rect, self.sources[c].rect) <= self.radii[c] + 2.0 * step)
             .collect()
     }
 
@@ -477,15 +568,30 @@ impl Plan {
 
     /// The steepest join ground on a coarse lattice (every `stride` samples), away from the seams.
     pub fn coarse_slope(&self, tiles: &[Tile], stride: u32) -> (f64, [f64; 2]) {
-        let terrains: Vec<Terrain> = tiles.iter().map(Tile::terrain).collect();
         let all: Vec<usize> = (0..self.sources.len()).collect();
+        let near = |x: f64, z: f64| if self.prune { self.bins.at(x, z) } else { &all[..] };
         let step = self.spacing * f64::from(stride);
         let (nx, nz) = (self.size[0] / stride, self.size[1] / stride);
-        let h: Vec<Point> = (0..=nz)
-            .flat_map(|kz| (0..=nx).map(move |kx| (kx, kz)))
-            .map(|(kx, kz)| self.at(tiles, &terrains, &all, f64::from(kx) * step, f64::from(kz) * step))
-            .collect();
         let row = (nx + 1) as usize;
+        // Rows on threads; each point keeps only its height and distance (not its weights), so a world
+        // of tens of maps fits in memory however often the gaps are widened.
+        let mut h = vec![Coarse { h: 0.0, near: 0.0 }; row * (nz as usize + 1)];
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let rows_each = (nz as usize + 1).div_ceil(threads).max(1);
+        std::thread::scope(|sc| {
+            for (part, out) in h.chunks_mut(rows_each * row).enumerate() {
+                let near = &near;
+                sc.spawn(move || {
+                    let terrains: Vec<Terrain> = tiles.iter().map(Tile::terrain).collect();
+                    for (i, o) in out.iter_mut().enumerate() {
+                        let (kx, kz) = (i % row, part * rows_each + i / row);
+                        let (x, z) = (kx as f64 * step, kz as f64 * step);
+                        let pt = self.at(tiles, &terrains, near(x, z), x, z);
+                        *o = Coarse { h: pt.h, near: pt.near };
+                    }
+                });
+            }
+        });
         let far = 2.0 * self.spacing + 3.0 * self.fade + step;
         let mut worst = (0.0, [0.0; 2]);
         for kz in 0..nz as usize {
@@ -502,6 +608,13 @@ impl Plan {
         }
         worst
     }
+}
+
+/// A coarse lattice point: the ground's height and the distance to the nearest interior.
+#[derive(Clone, Copy)]
+struct Coarse {
+    h: f64,
+    near: f64,
 }
 
 /// The slope of a cell's blend at its middle, from its four corners (sample, +x, +z, both).
@@ -734,8 +847,19 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
     let joins = dir.join("joins");
     let mut widen = 1.0;
     let (plan, results) = loop {
+        let t0 = std::time::Instant::now();
         let plan = plan(&tiles, &cuts, p, widen)?;
+        let (rmin, rmax) = plan.radii.iter().fold((f64::INFINITY, 0.0f64), |(a, b), r| (a.min(*r), b.max(*r)));
+        eprintln!(
+            "stitch: widen {widen:.3}: world {:.0} × {:.0} ft, {} pieces, radius {rmin:.0}–{rmax:.0} ft, planned in {:.1} s",
+            f64::from(plan.size[0]) * plan.spacing,
+            f64::from(plan.size[1]) * plan.spacing,
+            plan.pieces(p.chunk).len(),
+            t0.elapsed().as_secs_f64()
+        );
+        let t0 = std::time::Instant::now();
         let (coarse, at) = plan.coarse_slope(&tiles, 4);
+        eprintln!("stitch: coarse pass {coarse:.3} steepest, {:.1} s", t0.elapsed().as_secs_f64());
         if coarse > p.max_slope {
             let (d, near) = plan
                 .sources
@@ -752,6 +876,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 std::fs::remove_dir_all(&joins).map_err(|e| format!("{}: {e}", joins.display()))?;
             }
             let results: Mutex<Vec<Done>> = Mutex::new(Vec::new());
+            let t0 = std::time::Instant::now();
             solve(&plan, &tiles, p.chunk, p.threads, &|pc: Piece| {
                 let jd = joins.join(&pc.name);
                 std::fs::create_dir_all(&jd).map_err(|e| format!("{}: {e}", jd.display()))?;
@@ -762,11 +887,22 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             })?;
             let mut results = results.into_inner().expect("lock");
             results.sort_by(|a, b| a.name.cmp(&b.name));
+            eprintln!("stitch: {} pieces solved and written in {:.1} s", results.len(), t0.elapsed().as_secs_f64());
             let far = results.iter().map(|r| r.far).fold(0.0, f64::max);
             if far <= p.max_slope {
                 break (plan, results);
             }
-            eprintln!("stitch: join ground {far:.3} steep away from the seams, past {}: widening the gaps", p.max_slope);
+            let worst = results.iter().max_by(|a, b| a.far.total_cmp(&b.far)).expect("a piece");
+            let near = plan
+                .sources
+                .iter()
+                .min_by(|a, b| a.distance(worst.at[0], worst.at[1]).total_cmp(&b.distance(worst.at[0], worst.at[1])))
+                .map(|s| tiles[s.tile].id.as_str())
+                .unwrap_or("");
+            eprintln!(
+                "stitch: join ground {far:.3} steep away from the seams in {} (at {:.0}, {:.0}; nearest {near}), past {}: widening the gaps",
+                worst.name, worst.at[0], worst.at[1], p.max_slope
+            );
         }
         widen *= 1.25;
         if widen > 20.0 {
@@ -907,6 +1043,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 ("max_slope", J::N(p.max_slope)),
                 ("fade", J::N(plan.fade)),
                 ("radius", J::N(plan.radius)),
+                ("radius_min", J::N(plan.radii.iter().copied().fold(f64::INFINITY, f64::min))),
                 ("widen", J::N(plan.widen)),
                 (
                     "collars",
