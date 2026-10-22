@@ -75,14 +75,16 @@ fn every_imported_map_is_the_originals() {
         let ground = Ground::new(&terrain, &m.layout);
         let field = ground.field();
         for (what, same) in heights::object_checks(&oracle, &src, &field) {
-            // openmx's Ground sizes a one-level terrain (the arenas) at 16 samples a side where the game's
-            // box is 256 (notes/openmx-asks.md); the queries do not clamp to the box, so the points agree.
-            if what.contains("box") && terrain.levels == 1 {
-                assert!(!same, "{}: the box now agrees; drop this exception", m.id);
+            // The box is checked against the file below: openmx's Ground takes the scene's width x
+            // 16^levels samples, which is not the game's on the arenas and Nat04 (notes/openmx-asks.md).
+            if what.contains("box") {
                 continue;
             }
             assert!(same, "{}: {what}", m.id);
         }
+        let (ex, ez) = accuracy::look::terrain_box(&m, &terrain);
+        let (lo, hi) = (oracle.quad(src.object.min), oracle.quad(src.object.max));
+        assert_eq!([lo[0], lo[2], hi[0], hi[2]], [0.0, 0.0, ex, ez], "{}: the game's box is the file's leaves", m.id);
         let (lo, hi) = heights::inner_box(&oracle, &src);
         let points = heights::points(1000, 0x7acc_5eed, lo, hi, terrain.scale.0);
         let modes = vec![heights::modes(oracle.own_mode())[0]];

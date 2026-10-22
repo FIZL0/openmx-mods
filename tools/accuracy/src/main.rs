@@ -386,9 +386,7 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
         let shot = (|| {
             wait();
             let p = live_pose(&k, &src, vp_at, &scratch)?;
-            let mut c = kit(&k, Some(&src));
-            c.arg("shot").arg(look::original_png(&out, &name));
-            run(c)?;
+            shot(&k, &src, &look::original_png(&out, &name))?;
             look::write_pose(&out, &name, &p)?;
             println!("{name}: the game's own camera, --shot-pose {}", p.md10());
             Ok::<(), String>(())
@@ -415,9 +413,7 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
         let r = (|| {
             place(&k, &src, vp_at, p)?;
             wait();
-            let mut c = kit(&k, Some(&src));
-            c.arg("shot").arg(look::original_png(&out, name));
-            run(c)?;
+            shot(&k, &src, &look::original_png(&out, name))?;
             // What the viewport held through the shot: the game normalises forward and up itself, so
             // the read-back is compared to a thousandth.
             let back = live_pose(&k, &src, vp_at, &scratch)?;
@@ -436,6 +432,21 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
     hold_camera(&k, &src, false)?;
     let _ = std::fs::remove_file(&scratch);
     Ok(ok)
+}
+
+/// `./kit shot` into `png`, taken again (up to three times) when the file does not end in a PNG's
+/// `IEND` chunk: the copy can catch PCSX2's screenshot before it is all written (M12, one in 600).
+fn shot(k: &Path, src: &source::Source, png: &Path) -> Result<(), String> {
+    for _ in 0..3 {
+        let mut c = kit(k, Some(src));
+        c.arg("shot").arg(png);
+        run(c)?;
+        if look::png_complete(png) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Err(format!("{}: the screenshot is cut short three times running", png.display()))
 }
 
 fn cmd_pair(a: &mut Args) -> Result<bool, String> {
