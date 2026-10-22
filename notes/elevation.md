@@ -36,7 +36,7 @@ Downloads go in `extracted/elevation/dem/` and `extracted/elevation/naip/` (igno
   so none is shared), about 36 MB. The limits from `notes/mxu-terrain-limits.md`: at most 16 cells a side
   (4097 samples, which would be 65,536 leaves plus 257 upper blocks, past the u16 block index unless some
   were shared). The 4000-leaf draw list binds only past a fog end of about 1600 ft at this spacing (leaves are
-  52.5 ft), and the scenes here have no fog section, so the game's default applies (not checked).
+  52.5 ft). The scenes' fog is their donor map's (below), whose end is 768 or 1152 ft (not checked in the game).
 - **x is east, z is north**, and sample (0, 0) is the south-west corner. openmx's camera is left-handed
   (`game-render::mat::look_at`), so this is not mirrored. `mod.json`'s `elevation` block gives the
   corner's UTM coordinate, the pixel, and the datum, so a point in the map converts back to the ground:
@@ -76,5 +76,42 @@ to rank 2 km windows by high minus low.
   system's country). Whether the trails run inside it was not checked against a trail map. The lidar is
   bare earth: it shows benches and tracks under the forest that the aerial picture, which is all
   canopy, hides. The drape is the canopy's colour over bare ground.
+
+## Sky, fog and lights (M17)
+
+The data has no sky, fog or lights, so each site takes all three from one MX vs. ATV Unleashed map of the
+same kind, as a set: the scene's `CubeFile`, its `[Fog]`, `[Lights]` and `[Light<n>]` sections copied line
+for line (comments and unread keys included), and the `.cub` the `CubeFile` names copied byte for byte
+from that map's archive to the same member path (`Skies/sky16.ps2.cub`). A set is never mixed or tuned:
+the sky's lower half is painted in its own map's fog colour (game-render `sky`), so a sky with another
+map's fog would show a seam at the horizon.
+
+| site | donor (`Env\<map>\<map>.res`) | why | CubeFile | fog end |
+|---|---|---|---|---|
+| `elev_glamis` | Nat03 Glamis | the same place: the game's own Glamis national | sky16 | 768 ft |
+| `elev_ocotillo` | Nat09 Deadman Wash | a desert wash map; its ecosystem is ocotillo, palo verde, prickly pear and barrel cactus | sky31 | 768 ft |
+| `elev_littlesahara` | MC04 Glamis South | a second dune map (Nat03's sky and fog colour, its own lights and a 1152-ft fog end), so the two dune sites are not the same set | sky16 | 1152 ft |
+| `elev_hatfield` | Nat15 Smuggler's Notch | Appalachian forest (Vermont), the same range as southern West Virginia; its ecosystem is five trees | sky93 | 768 ft |
+
+The candidates were MX vs. ATV Unleashed's big outdoor maps, read for their `CubeFile`, fog, lights and
+ecosystem members (tree, cactus and bush models). MX Unleashed's own maps were not used: the port already
+has that disc, but a mod with a sky must hold the `.cub` either way (MD2 decides whether a mod reads disc
+archives), and MX vs. ATV Unleashed has Glamis itself.
+
+- **Permission.** A mod built with a sky holds a disc's bytes (the `.cub`) and the disc's scene lines, so
+  its `permission` is `own-disc`. Built with `--sky none`, or with no MX vs. ATV Unleashed disc in `iso/`
+  (`$DISCX_ISO`), the sites have no sky and are `public-domain` as before; every other file is the same
+  either way.
+- `mod.json` names the donor in `sky_from` (`game`, `boot`, `map`, `name`, `members`, `scene`, `cube`,
+  `sections`), the tool's own field (standard §1), and in `todo`.
+- **The sun's points.** `[Light2]`'s `Position` and `TargetPosition` are in the donor's 5760-ft frame
+  (target at its middle, 2880, 400, 2880), not the elevation map's 6719-ft one. game-render uses only
+  their direction, which is kept. What the original does with the points themselves (its shadow, for one)
+  is not known, so this is in `todo`.
+- The `[Environment]` keys that go with a sky but are not the sky (`EcoAmbientScale`,
+  `AmountOfTransmittedLight`, `ParticleTextureMapName`, `Wind`) are not copied: they belong to the
+  donor's ecosystem and particles, which the elevation mods do not have.
+- The build proves it: game-render's `Sky::parse` decodes the `.cub`, and `scene::Scene::parse` reads the
+  same fog numbers (bit for bit) and lights from the generated scene as from the donor's.
 
 Rebuild a site with the command in its journal entry (`journal/2026-10-22-m1-elevation/`).

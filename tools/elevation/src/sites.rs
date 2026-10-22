@@ -23,6 +23,9 @@ pub struct Site {
     pub naip: &'static [Naip],
     pub centre: (f64, f64),
     pub cells: (u32, u32),
+    /// The MX vs. ATV Unleashed map whose sky, fog and lights the scene takes (M17): its folder under
+    /// `Env\` and its name in the game. `notes/elevation.md` says why each.
+    pub sky: (&'static str, &'static str),
 }
 
 pub const SITES: &[Site] = &[
@@ -38,6 +41,7 @@ pub const SITES: &[Site] = &[
         }],
         centre: (676634.0, 3648229.0),
         cells: (8, 8),
+        sky: ("Nat03", "Glamis"),
     },
     Site {
         id: "elev_ocotillo",
@@ -56,6 +60,7 @@ pub const SITES: &[Site] = &[
         ],
         centre: (584090.0, 3666421.0),
         cells: (8, 8),
+        sky: ("Nat09", "Deadman Wash"),
     },
     Site {
         id: "elev_littlesahara",
@@ -74,6 +79,7 @@ pub const SITES: &[Site] = &[
         ],
         centre: (381994.0, 4397606.0),
         cells: (8, 8),
+        sky: ("MC04", "Glamis South"),
     },
     Site {
         id: "elev_hatfield",
@@ -87,6 +93,7 @@ pub const SITES: &[Site] = &[
         }],
         centre: (425114.0, 4166421.0),
         cells: (8, 8),
+        sky: ("Nat15", "Smuggler's Notch"),
     },
 ];
 
@@ -178,6 +185,7 @@ impl Site {
                 quads.join(" and ")
             ),
             date,
+            sky: None,
         })
     }
 }
