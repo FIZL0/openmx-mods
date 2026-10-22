@@ -11,6 +11,11 @@
 //! | `[Fog]` | `0x31f0c0` | `0x3c5bd0` | -0x20 `ColorRGB` as four floats (A 255), -0x10 `Visibility`, -0xc `Haziness`, -0x8 `MinimumFogDistance`, -0x4 `MaximumFogDistance` |
 //! | `[Environment]` | `0x31e0c0` | `0x3c5be0` | words of the reader's object, the vtable at word 0x169 ([`ENV`]) |
 //!
+//! The `[Light<n>]`s (`0x31e7d0`) become light objects, vtable `0x3b3cd0` at +4: +0x30 the colour over
+//! 255 (A 1), +0x40 the position (w 1), +0x50 the direction, `TargetPosition - Position` made unit, and
+//! +0x70 the type (`Ambient` 4, `Directional` 2, `ObjectPoint` 1, `Spotlight` 3). Each scene light is
+//! matched to the first light object of its type.
+//!
 //! A key the scene leaves out takes the reader's default (the constants in its calls, given here). The
 //! values are compared as the game's bits, the text read the way openmx reads a scene's numbers
 //! (`strtod`, then the EE's truncating double-to-float): read as Rust reads it, rounding to nearest,
@@ -23,6 +28,7 @@ use std::collections::BTreeMap;
 pub const SCENE_INFO_VT: u32 = 0x3c5c10;
 pub const FOG_VT: u32 = 0x3c5bd0;
 pub const ENV_VT: u32 = 0x3c5be0;
+pub const LIGHT_VT: u32 = 0x3b3cd0;
 /// The Environment reader's vtable word, in words from the start of its object.
 pub const ENV_VT_WORD: u32 = 0x169;
 
@@ -98,6 +104,9 @@ pub struct Field {
     pub scene: Vec<f32>,
     pub defaulted: bool,
     pub game: Vec<f32>,
+    /// Worked out here rather than read from the text (the sun's direction): a few ulps are the
+    /// game's arithmetic, not the data, and are called close.
+    pub computed: bool,
 }
 
 impl Field {
@@ -126,8 +135,13 @@ impl Field {
         match self.ulps() {
             0 => "equal",
             1 => "1 ulp",
+            2..=8 if self.computed => "close",
             _ => "DIFFERS",
         }
+    }
+    /// Whether the field counts against the map: more than an ulp off, or more than 8 on a computed one.
+    pub fn differs(&self) -> bool {
+        self.verdict() == "DIFFERS"
     }
 }
 
@@ -161,7 +175,7 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
     let mut out = Vec::new();
     let mut push = |what: String, scene: Option<Vec<f32>>, default: Vec<f32>, game: Vec<f32>| {
         let defaulted = scene.is_none();
-        out.push(Field { what, scene: scene.unwrap_or(default), defaulted, game });
+        out.push(Field { what, scene: scene.unwrap_or(default), defaulted, game, computed: false });
     };
 
     let info = sec("sceneinfo");
@@ -222,17 +236,62 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
         });
         push(format!("Environment {k}"), val, vec![1.0; 4], read(ram, word(w), 4));
     }
+
+    let mut computed = Vec::new();
+    let lights: Vec<u32> = with_vtable(ram, LIGHT_VT).into_iter().map(|v| v - 4).collect();
+    let n: usize = sec("lights").get("numberoflights").and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    for i in 1..=n {
+        let l = sec(&format!("light{i}"));
+        let kind = l.get("type").map(|t| t.to_ascii_lowercase()).unwrap_or_default();
+        let code = match kind.as_str() {
+            "ambient" => 4,
+            "directional" => 2,
+            "objectpoint" => 1,
+            "spotlight" => 3,
+            _ => 4,
+        };
+        let Some(&at) = lights.iter().find(|&&a| u32_at(ram, a + 0x70) == Some(code)) else {
+            return Err(format!("no light object of type {code} ([Light{i}] {kind}) in the image"));
+        };
+        let rgb = l.get("colorrgb").map(|t| {
+            let mut c: Vec<f32> = floats(t).iter().map(|v| v / 255.0).collect();
+            c.resize(3, 1.0);
+            c.push(1.0);
+            c
+        });
+        push(format!("Light{i} ({kind}) ColorRGB / 255"), rgb, vec![1.0; 4], read(ram, at + 0x30, 4));
+        if code == 2 {
+            let pos = l.get("position").map(|t| floats(t));
+            let target = l.get("targetposition").map(|t| floats(t));
+            push(format!("Light{i} ({kind}) Position"), pos.clone(), vec![0.0; 3], read(ram, at + 0x40, 3));
+            if let (Some(p), Some(t)) = (pos, target)
+                && p.len() == 3
+                && t.len() == 3
+            {
+                let d = [t[0] - p[0], t[1] - p[1], t[2] - p[2]];
+                let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                computed.push(Field {
+                    what: format!("Light{i} ({kind}) direction, Target - Position made unit"),
+                    scene: d.iter().map(|c| c / len).collect(),
+                    defaulted: false,
+                    game: read(ram, at + 0x50, 3),
+                    computed: true,
+                });
+            }
+        }
+    }
+    out.extend(computed);
     Ok(out)
 }
 
 /// The report: one line a field, then a verdict line first.
 pub fn text(id: &str, fields: &[Field]) -> String {
-    let differ = fields.iter().filter(|f| f.ulps() > 1).count();
-    let ulp = fields.iter().filter(|f| f.ulps() == 1).count();
+    let differ = fields.iter().filter(|f| f.differs()).count();
+    let near = fields.iter().filter(|f| matches!(f.verdict(), "1 ulp" | "close")).count();
     let mut s = format!(
-        "{id}: scene in RAM: {} fields, {} equal, {ulp} 1 ulp off, {differ} differ\n",
+        "{id}: scene in RAM: {} fields, {} equal, {near} within an ulp (or 8 on a computed one), {differ} differ\n",
         fields.len(),
-        fields.len() - differ - ulp
+        fields.len() - differ - near
     );
     for f in fields {
         let bits = |v: &[f32]| v.iter().map(|x| format!("{:08x}", x.to_bits())).collect::<Vec<_>>().join(" ");

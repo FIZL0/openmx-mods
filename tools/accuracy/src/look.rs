@@ -139,6 +139,22 @@ pub fn openmx_ready(openmx: &Path) -> Result<(), String> {
 /// The ride camera's field of view on MX vs. ATV, which the generated poses keep.
 pub const FOV: f32 = 85.0;
 
+/// The terrain's box as the game's object has it (M12): `TerrainWidth` x 256 samples at the file's
+/// scale, whatever the tree's depth. openmx's `world::Ground` takes `width x 16^levels` samples, which on
+/// a one-level terrain (MX vs. ATV's arenas) is 16, not 256 (notes/openmx-asks.md).
+pub fn terrain_box(m: &crate::modfiles::TrackMod, terrain: &game_sim::track::Terrain) -> (f32, f32) {
+    let s = terrain.scale.0;
+    (m.layout.width.max(1) as f32 * 256.0 * s, m.layout.breadth.max(1) as f32 * 256.0 * s)
+}
+
+/// The ground's height at `x, z`: the port's terrain query (`contact_search::ground`, which the heights
+/// check proves equal to the original's), 0 off the terrain.
+pub fn height_at(field: &game_sim::contact_search::TerrainField, x: f32, z: f32) -> f32 {
+    let at = ps2_float::Vf::new(x, 0.0, z, 1.0);
+    let g = game_sim::contact_search::ground(field, at);
+    if g.point.y().is_finite() { g.point.y() } else { 0.0 }
+}
+
 /// A pose list for a map, from its own terrain: the scene's start seen from behind the rider, the map's
 /// centre looking north, east, south and west, an overview from high over the centre, and the highest
 /// ground found (a sample in 32 across) looking across to the centre. Heights are openmx's ground under
@@ -146,9 +162,9 @@ pub const FOV: f32 = 85.0;
 pub fn standard_poses(m: &crate::modfiles::TrackMod) -> Vec<(String, Pose)> {
     let terrain = m.parse();
     let ground = game_sim::world::Ground::new(&terrain, &m.layout);
-    let (ex, ez) = ground.extent();
-    let (ex, ez) = (ex.0, ez.0);
-    let y_at = |x: f32, z: f32| ground.at(ps2_float::F(x), ps2_float::F(z)).map_or(0.0, |h| h.y.0);
+    let field = ground.field();
+    let (ex, ez) = terrain_box(m, &terrain);
+    let y_at = |x: f32, z: f32| height_at(&field, x, z);
     let mut out = Vec::new();
 
     let [sx, sy, sz] = m.start;

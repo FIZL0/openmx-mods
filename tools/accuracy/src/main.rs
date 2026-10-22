@@ -499,7 +499,7 @@ fn cmd_scene(a: &mut Args) -> Result<bool, String> {
     print!("{report}");
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     std::fs::write(out.join("scene.txt"), &report).map_err(|e| format!("{}: {e}", out.display()))?;
-    Ok(fields.iter().all(|f| f.ulps() <= 1))
+    Ok(!fields.iter().any(|f| f.differs()))
 }
 
 fn cmd_files(a: &mut Args) -> Result<bool, String> {
