@@ -454,6 +454,7 @@ fn probe(disc: &mut Disc, map: &str, named: &[&str], png: Option<&Path>) -> Resu
         .find(|e| ext(&e.name).ends_with("trn"))
         .map(|e| e.name.clone());
     let mut extent = None;
+    let mut terrain_bytes: Option<Vec<u8>> = None;
     println!(
         "### Terrain — game-render `Terrain::parse`, and its texture pages through `Texture::parse`\n"
     );
@@ -479,6 +480,7 @@ fn probe(disc: &mut Disc, map: &str, named: &[&str], png: Option<&Path>) -> Resu
             &b
         };
         let t = game_sim::track::Terrain::parse(tb)?;
+        terrain_bytes = Some(tb.to_vec());
         let palette = t.palette().ok_or("the terrain has no palette")?.to_vec();
         let alphas = tally(palette.chunks(4).map(|c| format!("{:#04x}", c[3])));
         let mut decoded = Vec::new();
@@ -596,7 +598,14 @@ fn probe(disc: &mut Disc, map: &str, named: &[&str], png: Option<&Path>) -> Resu
                         .map(|p| p.pos.x.max(p.pos.z))
                         .fold(0.0f32, f32::max);
                     let mut assets = Assets::default();
-                    let grove = Grove::load(&rs, &scene, extent, &mut assets);
+                    // Grove::load stands plants on the terrain (openmx V49): the sim's scene layout and terrain.
+                    let grove = match (&terrain_bytes, read(&scn_name)) {
+                        (Some(tb), Some(sb)) => game_sim::track::Scene::parse(&sb).and_then(|sim| {
+                            let t = game_sim::track::Terrain::parse(tb)?;
+                            Grove::load(&rs, &scene, &sim.terrain, &t, &mut assets)
+                        }),
+                        _ => Err("no terrain or scene for Grove::load".to_string()),
+                    };
                     let missing: Vec<String> = assets.missing().to_vec();
                     let mut eco_loose = Vec::new();
                     for m in &missing {

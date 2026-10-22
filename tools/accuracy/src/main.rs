@@ -434,19 +434,48 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
     Ok(ok)
 }
 
-/// `./kit shot` into `png`, taken again (up to three times) when the file does not end in a PNG's
-/// `IEND` chunk: the copy can catch PCSX2's screenshot before it is all written (M12, one in 600).
+/// `./kit shot` into `png`. The kit copies PCSX2's screenshot once its size holds for 0.3 s, which can
+/// be before PCSX2 has written it all (M12: 35 of the first 600 shots ended short of the PNG's `IEND`).
+/// Then the screenshot is waited for in the copy's `snaps` folder (the newest file there, written since
+/// the shot was asked for) until it is whole, and copied again.
 fn shot(k: &Path, src: &source::Source, png: &Path) -> Result<(), String> {
-    for _ in 0..3 {
-        let mut c = kit(k, Some(src));
-        c.arg("shot").arg(png);
-        run(c)?;
-        if look::png_complete(png) {
+    let asked = std::time::SystemTime::now();
+    let mut c = kit(k, Some(src));
+    c.arg("shot").arg(png);
+    run(c)?;
+    if look::png_complete(png) {
+        return Ok(());
+    }
+    let snaps = config_dir(k)?.join("snaps");
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let newest = std::fs::read_dir(&snaps)
+            .map_err(|e| format!("{}: {e}", snaps.display()))?
+            .flatten()
+            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+            .filter(|(t, _)| *t >= asked - std::time::Duration::from_secs(1))
+            .max();
+        if let Some((_, from)) = newest
+            && look::png_complete(&from)
+        {
+            std::fs::copy(&from, png).map_err(|e| format!("{} -> {}: {e}", from.display(), png.display()))?;
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    Err(format!("{}: the screenshot is cut short three times running", png.display()))
+    Err(format!("{}: the screenshot is cut short, and no whole one came in {}", png.display(), snaps.display()))
+}
+
+/// The running copy's PCSX2 config folder, from `kit pcsx2 status`.
+fn config_dir(k: &Path) -> Result<PathBuf, String> {
+    let status = run({
+        let mut c = kit(k, None);
+        c.args(["pcsx2", "status"]);
+        c
+    })?;
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("config").map(|r| PathBuf::from(r.trim())))
+        .ok_or_else(|| "`kit pcsx2 status` names no config folder: is the copy running?".to_string())
 }
 
 fn cmd_pair(a: &mut Args) -> Result<bool, String> {
