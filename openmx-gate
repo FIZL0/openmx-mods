@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Reopen tasks that wait on openmx, once openmx has landed what they name.
+
+agent-runner's own `reopen` only sees this repo's ids. A task waiting on the port is blocked with
+`openmx: MD2, MD10` in its BLOCKED reason; this reads openmx's main (plan/DONE.md, committed) and, when
+every MD it names is ticked there, unblocks the task and commits plan/TODO.md. Runs as runner.toml's
+`before_start`, so it always exits 0: it must never hold a slot. Safe to run by hand.
+"""
+import re
+import subprocess as sp
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+TODO = 'plan/TODO.md'
+LINE = re.compile(r'^- \[~\] \*\*(\w+)\*\*.*BLOCKED:.*?openmx: ?((?:MD\d+[, ]*)+)')
+
+
+def git(*a, cwd=ROOT):
+    return sp.run(['git', *a], cwd=cwd, capture_output=True, text=True)
+
+
+def main():
+    if git('branch', '--show-current').stdout.strip() != 'main' or git('status', '--porcelain', '--', TODO).stdout.strip():
+        return  # someone is mid-edit: leave it for the next start
+    done_md = git('show', 'main:plan/DONE.md', cwd=ROOT / 'openmx').stdout
+    landed = set(re.findall(r'^- \[x\] \*\*(MD\d+)\*\*', done_md, re.M))
+    ready = []
+    for l in (ROOT / TODO).read_text().splitlines():
+        if m := LINE.match(l):
+            want = re.findall(r'MD\d+', m.group(2))
+            if want and set(want) <= landed:
+                ready.append((m.group(1), want))
+    for tid, want in ready:
+        sp.run(['agent-runner', 'plan', 'unblock', tid, f'openmx landed {", ".join(want)}'], cwd=ROOT, capture_output=True)
+    if ready:
+        names = ', '.join(t for t, _ in ready)
+        if git('commit', '-qm', f'Plan: reopen {names} (openmx landed what they waited on)', '--', TODO).returncode:
+            git('checkout', '-q', '--', TODO)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception:
+        pass
