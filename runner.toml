@@ -1,0 +1,16 @@
+# agent-runner (github.com/FIZL0/agent-runner): `agent-runner run 3` inside tmux works plan/TODO.md.
+
+[plan]
+journal = "journal"
+
+[run]
+test = "./check.sh"
+rules = "AGENTS.md"
+slots = 3
+notes = ".runner"
+# The discs, what was taken off them, and the openmx checkout the tools build against: all git-ignored.
+links = ["iso", "extracted", "out", "openmx"]
+
+[git]
+push = "origin"
+push_merge = true

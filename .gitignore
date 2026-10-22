@@ -3,3 +3,6 @@ iso/
 out/
 target/
 __pycache__/
+.runner/
+journal/*/scratch/
+openmx
