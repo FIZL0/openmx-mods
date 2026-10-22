@@ -10,6 +10,8 @@ slots = 3
 notes = ".runner"
 # The discs, what was taken off them, and the openmx checkout the tools build against: all git-ignored.
 links = ["iso", "extracted", "out", "openmx"]
+# Reopens tasks blocked on openmx (`openmx: MD2, MD10` in the reason) once openmx has landed them. Exits 0 always.
+before_start = "./openmx-gate"
 
 [git]
 push = "origin"

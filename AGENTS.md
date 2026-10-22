@@ -18,6 +18,8 @@ is openmx's Phase 14 (MD1–MD6); this repo's half is getting the maps out and i
 - **Don't edit openmx from here.** `openmx` is a symlink to the user's checkout, which runs its own
   agents. When the port needs a change (a reader refuses a file, a size it cannot take), write it in
   `notes/openmx-asks.md` with the file and the failure, and say so in your journal. A human files it there.
+  A task that waits on the port is blocked with `openmx: MD2, MD10` in its reason; `./openmx-gate`
+  (the runner's `before_start`) reopens it once every MD it names is in openmx's `plan/DONE.md`.
 - **Accurate to the original game.** An imported map is the source game's map: the terrain, collision,
   placements, textures, ecosystem, sky, fog and lights as its disc has them, nothing resampled, rescaled or
   approximated (the combined maps change only the joins). Every gap goes in mod.json's `todo`. A map is
