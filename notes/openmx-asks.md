@@ -189,13 +189,6 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   where openmx's misses; (2) a global (`0x541518`) switches the reader to a packed normal table (`0x39e320`).
   It is off on Lago. Fix: a per-source variant of the query for MX vs. ATV mod tracks (the normal step
   and the clamp), chosen from mod.json's `source.boot`, if wheels on those tracks are to be bit-exact.
-- **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
-  --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
-  Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive
-  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera). Whether 85
-  spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
-  so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
-  side decides whether the pairs compare HUDs too.
 - **New: `world::Ground` sizes a terrain from the scene, the game from the file** (M12, `notes/mxvatv.md`
   *Against the game*). `Ground::new` takes `TerrainWidth × 16^levels` samples a side. MX vs. ATV
   Unleashed's terrain object (its box at `+0x30/+0x40`, read in a ride on every map) reaches as far as
@@ -231,3 +224,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   and the game stands the rider on the ground over it (the camera 5 ft over the ground, 20–310 ft over
   the start; Nat14 had rolled away). Fix (MD2): a mod track's spawn takes the ground's height where the
   scene's is below it. Each such mod's `todo` says so.
+- **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
+  --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
+  Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive
+  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera). Whether 85
+  spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
+  so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
+  side decides whether the pairs compare HUDs too.
