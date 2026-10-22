@@ -256,7 +256,7 @@ fn cmd_profile(args: &[String]) -> ExitCode {
     let terrain = t.terrain();
     let skip = (stitch::SHOOTOFF / t.spacing).ceil() as u32;
     let p: Vec<Vec<f64>> = (0..4).map(|side| t.profile(&terrain, side, last, skip)).collect();
-    println!("{}: {}×{} samples at {} ft, keep {:?}", t.id, t.n.0, t.n.1, t.spacing, t.find_keep());
+    println!("{}: {}×{} samples at {} ft, ground {:?}, keep {:?}", t.id, t.n.0, t.n.1, t.spacing, t.ground, t.find_keep());
     // The whole map, coarse: one height every 1/20 of a side (rows are z).
     let at = |x: u32, z: u32| {
         let (cx, cz) = (x.min(t.n.0 - 1), z.min(t.n.1 - 1));
@@ -266,7 +266,7 @@ fn cmd_profile(args: &[String]) -> ExitCode {
         let z = t.n.1 * k / 20;
         println!("z={z:5} {}", (0..=20).map(|i| format!("{:4.0}", at(t.n.0 * i / 20, z))).collect::<Vec<_>>().join(""));
     }
-    println!("samples\tfeet\tx=d\tz=d\tx=n-d\tz=n-d");
+    println!("samples\tfeet\tx=x0+d\tz=z0+d\tx=x1-d\tz=z1-d\t(the ground's sides)");
     for d in 0..=last {
         println!("{d}\t{:.1}\t{:.2}\t{:.2}\t{:.2}\t{:.2}", d as f64 * t.spacing, p[0][d], p[1][d], p[2][d], p[3][d]);
     }
