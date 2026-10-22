@@ -135,9 +135,10 @@ pub fn pose_name(l: &Landmark) -> String {
 pub fn poses(m: &TrackMod, marks: &[Landmark]) -> Vec<(String, Pose)> {
     let terrain = m.parse();
     let ground = game_sim::world::Ground::new(&terrain, &m.layout);
-    let (ex, ez) = ground.extent();
-    let (cx, cz) = (ex.0 / 2.0, ez.0 / 2.0);
-    let y_at = |x: f32, z: f32| ground.at(ps2_float::F(x), ps2_float::F(z)).map_or(f32::MIN, |h| h.y.0);
+    let field = ground.field();
+    let (ex, ez) = crate::look::terrain_box(m, &terrain);
+    let (cx, cz) = (ex / 2.0, ez / 2.0);
+    let y_at = |x: f32, z: f32| crate::look::height_at(&field, x, z);
     marks
         .iter()
         .map(|l| {
