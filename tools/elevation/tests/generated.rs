@@ -285,6 +285,7 @@ fn request(
         cells,
         texture: 64,
         surface: 3,
+        ground: None,
         data: "generated GeoTIFF (test)".into(),
         date: "2026-10-22".into(),
         sky: None,

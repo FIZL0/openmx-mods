@@ -118,6 +118,7 @@ fn a_generated_scene_with_a_donor_reads_as_the_donor_lights_it() {
         cells: (1, 1),
         texture: 64,
         surface: 0,
+        ground: None,
         data: "generated GeoTIFF (test)".into(),
         date: "2026-10-22".into(),
         sky: Some(d.clone()),
