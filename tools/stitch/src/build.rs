@@ -1,0 +1,741 @@
+//! Laying the tiles out, solving the join ground, and writing the world mod.
+
+use crate::jsonw::{J, o, s};
+use crate::{Source, Tile, shepard};
+use game_sim::track::Terrain;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub const AUTHOR: &str = "openmx-mods tools/stitch 0.1";
+
+/// What a world is built with.
+#[derive(Clone, Debug)]
+pub struct Params {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// The steepest join ground allowed away from the seams, feet per foot. Not a number the game has
+    /// (it has no climbing limit; the bike either makes it or does not): 0.5 is 26.6°.
+    pub max_slope: f64,
+    /// The narrowest gap between two interiors, feet.
+    pub min_gap: f64,
+    /// Join pieces are at most this many lattice cells a side.
+    pub chunk: u32,
+    /// How far a tile's edge slope carries into the join before it levels off, feet.
+    pub fade: f64,
+    /// The tile that lights the world under Settings → World sky: Global (MD9). Default: the first.
+    pub sky: Option<String>,
+    /// Threads for the join ground (0: as many as the machine has).
+    pub threads: usize,
+}
+
+impl Params {
+    pub fn new(id: &str, name: &str) -> Params {
+        Params {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            version: "1.0.0".into(),
+            max_slope: 0.5,
+            min_gap: 2.0 * crate::SHOOTOFF,
+            chunk: 256,
+            fade: 48.0,
+            sky: None,
+            threads: 0,
+        }
+    }
+}
+
+/// One tile's place.
+#[derive(Clone, Debug)]
+pub struct Placed {
+    /// World feet of the tile's sample (0, 0).
+    pub at: [f64; 2],
+    /// The interior, after the berm cut and the lattice alignment.
+    pub keep: [u32; 4],
+    /// Where in the layout's grid (column, row).
+    pub cell: (usize, usize),
+}
+
+/// The whole layout: the join lattice, every tile's place, the blend's sources.
+pub struct Plan {
+    /// Feet between join samples, the same for every join piece.
+    pub spacing: f64,
+    /// The lattice's last sample on each axis: the world is `[0, size × spacing]`.
+    pub size: [u32; 2],
+    pub placed: Vec<Placed>,
+    pub sources: Vec<Source>,
+    /// The Shepard radius, feet.
+    pub radius: f64,
+    pub fade: f64,
+    /// Every tile's spacing as `p/q` of the lattice's, where one with q ≤ 64 exists.
+    pub ratio: Vec<Option<(i64, i64)>>,
+    pub widen: f64,
+}
+
+/// `s / lattice` as a small fraction, if there is one.
+pub fn ratio(s: f64, lattice: f64) -> Option<(i64, i64)> {
+    let r = s / lattice;
+    (1..=64).find_map(|q| {
+        let p = (r * q as f64).round();
+        ((r * q as f64 - p).abs() < 1e-9 && p > 0.0).then_some((p as i64, q))
+    })
+}
+
+/// The lattice spacing: the commonest tile spacing, the finer on a tie.
+pub fn lattice_spacing(tiles: &[Tile]) -> f64 {
+    let mut count: BTreeMap<u64, usize> = BTreeMap::new();
+    for t in tiles {
+        *count.entry(t.spacing.to_bits()).or_default() += 1;
+    }
+    let mut v: Vec<(f64, usize)> = count.into_iter().map(|(b, n)| (f64::from_bits(b), n)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.total_cmp(&b.0)));
+    v[0].0
+}
+
+/// The gap two edges at these heights need so the blend between them stays under the slope: the
+/// Shepard profile is at most about 1.6 times the mean slope, plus the two tapers.
+fn gap_for(dh: f64, p: &Params, step: f64, widen: f64) -> f64 {
+    (1.6 * dh.abs() / p.max_slope + 2.0 * (step + p.fade)).max(p.min_gap) * widen
+}
+
+/// Place one interior's near edge at or past `want` (world feet) along one axis: the tile's origin on a
+/// whole leaf (16 samples), and the interior's edges on the join lattice where the spacings allow it
+/// (the near edge cut a few samples more, the far edge a few less). Returns (origin, lo, hi).
+fn place_axis(want: f64, s: f64, lo: u32, hi: u32, ratio: Option<(i64, i64)>) -> (f64, u32, u32) {
+    let leaf = 16.0 * s;
+    let k = ((want - f64::from(lo) * s) / leaf).ceil() as i64;
+    let (mut lo2, mut hi2) = (lo, hi);
+    if let Some((_, q)) = ratio
+        && q > 1
+    {
+        let mut d = 0;
+        while (16 * k + i64::from(lo) + d).rem_euclid(q) != 0 {
+            d += 1;
+        }
+        lo2 = lo + d as u32;
+        hi2 = lo2 + ((hi - lo2) as i64 / q * q) as u32;
+    }
+    (k as f64 * leaf, lo2, hi2)
+}
+
+/// Lay the tiles out in a grid, ordered by the height of their interiors' edges and filled in a snake,
+/// so neighbours are close in height; each gap is as wide as its two facing edges' heights need.
+pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result<Plan, String> {
+    if tiles.len() < 2 {
+        return Err("a world needs two tiles or more".into());
+    }
+    let step = lattice_spacing(tiles);
+    let ratios: Vec<Option<(i64, i64)>> = tiles.iter().map(|t| ratio(t.spacing, step)).collect();
+    let rings: Vec<crate::Ring> = tiles.iter().zip(cuts).map(|(t, k)| t.ring(*k)).collect();
+    let mut order: Vec<usize> = (0..tiles.len()).collect();
+    order.sort_by(|a, b| rings[*a].mean().total_cmp(&rings[*b].mean()));
+    let cols = (tiles.len() as f64).sqrt().ceil() as usize;
+    let rows = tiles.len().div_ceil(cols);
+    let mut grid = vec![vec![None; cols]; rows];
+    let mut cell = vec![(0, 0); tiles.len()];
+    for (i, &t) in order.iter().enumerate() {
+        let (r, mut c) = (i / cols, i % cols);
+        if r % 2 == 1 {
+            c = cols - 1 - c;
+        }
+        grid[r][c] = Some(t);
+        cell[t] = (c, r);
+    }
+    let pad = crate::SHOOTOFF + p.min_gap / 2.0;
+    let mut at = vec![[0.0; 2]; tiles.len()];
+    let mut keep = cuts.to_vec();
+    // axis 0: columns along x (keep[0], keep[2]; edges 0 and 2); axis 1: rows along z.
+    for axis in 0..2 {
+        let lines = if axis == 0 { cols } else { rows };
+        let members = |l: usize| -> Vec<usize> {
+            if axis == 0 { grid.iter().filter_map(|row| row[l]).collect() } else { grid[l].iter().flatten().copied().collect() }
+        };
+        let mut cursor = pad;
+        for l in 0..lines {
+            let m = members(l);
+            let width = |t: usize| f64::from(cuts[t][axis + 2] - cuts[t][axis]) * tiles[t].spacing;
+            let wmax = m.iter().map(|&t| width(t)).fold(0.0, f64::max);
+            let mut far = cursor;
+            for &t in &m {
+                let s = tiles[t].spacing;
+                let want = cursor + (wmax - width(t)) / 2.0;
+                let (origin, lo, hi) = place_axis(want, s, cuts[t][axis], cuts[t][axis + 2], ratios[t]);
+                at[t][axis] = origin;
+                keep[t][axis] = lo;
+                keep[t][axis + 2] = hi;
+                far = far.max(origin + f64::from(hi) * s);
+            }
+            // The gap to the next line: the widest any facing pair needs.
+            let mut gap = p.min_gap * widen;
+            if l + 1 < lines {
+                let pairs: Vec<(Option<usize>, Option<usize>)> = if axis == 0 {
+                    grid.iter().map(|row| (row[l], row[l + 1])).collect()
+                } else {
+                    (0..cols).map(|c| (grid[l][c], grid[l + 1][c])).collect()
+                };
+                for (a, b) in pairs {
+                    if let (Some(a), Some(b)) = (a, b) {
+                        let dh = rings[a].edge_mean(axis + 2) - rings[b].edge_mean(axis);
+                        gap = gap.max(gap_for(dh, p, step, widen));
+                    }
+                }
+            }
+            cursor = far + gap;
+        }
+    }
+    let mut far = [0.0f64; 2];
+    let sources: Vec<Source> = (0..tiles.len())
+        .map(|t| {
+            let s = tiles[t].spacing;
+            let k = keep[t];
+            let rect = [
+                at[t][0] + f64::from(k[0]) * s,
+                at[t][1] + f64::from(k[1]) * s,
+                at[t][0] + f64::from(k[2]) * s,
+                at[t][1] + f64::from(k[3]) * s,
+            ];
+            far[0] = far[0].max(rect[2]);
+            far[1] = far[1].max(rect[3]);
+            Source { tile: t, rect, at: at[t], spacing: s, keep: k, ring: tiles[t].ring(k) }
+        })
+        .collect();
+    let size = [((far[0] + pad) / step).ceil() as u32, ((far[1] + pad) / step).ceil() as u32];
+    // The radius: twice the farthest any world point is from its nearest interior, so every point has
+    // at least two tiles' say near the middle of a gap.
+    let mut dmax: f64 = 0.0;
+    let stride = 8;
+    for kz in (0..=size[1]).step_by(stride) {
+        for kx in (0..=size[0]).step_by(stride) {
+            let (x, z) = (f64::from(kx) * step, f64::from(kz) * step);
+            let d = sources.iter().map(|s| s.distance(x, z)).fold(f64::INFINITY, f64::min);
+            dmax = dmax.max(d);
+        }
+    }
+    let radius = 2.0 * dmax + 4.0 * step * stride as f64;
+    let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
+    Ok(Plan { spacing: step, size, placed, sources, radius, fade: p.fade, ratio: ratios, widen })
+}
+
+/// The join ground at one world point.
+pub struct Point {
+    pub h: f64,
+    pub surface: u8,
+    /// Each candidate's share, summing to 1.
+    pub w: Vec<f64>,
+    /// Distance to the nearest interior.
+    pub near: f64,
+}
+
+impl Plan {
+    /// The ground at a world point, from the candidate sources `cands` (indices into `sources`).
+    pub fn at(&self, tiles: &[Tile], terrains: &[Terrain], cands: &[usize], x: f64, z: f64) -> Point {
+        let step = self.spacing;
+        let mut w = vec![0.0; cands.len()];
+        for (i, &c) in cands.iter().enumerate() {
+            let src = &self.sources[c];
+            if src.contains(x, z) {
+                let t = src.tile;
+                let (fx, fz) = ((x - src.at[0]) / src.spacing, (z - src.at[1]) / src.spacing);
+                let (h, surface) = tiles[t].ground_in(&terrains[t], src.keep, fx, fz).unwrap_or((0.0, 0));
+                w[i] = 1.0;
+                return Point { h, surface, w, near: 0.0 };
+            }
+        }
+        let reach: Vec<crate::Reach> = cands.iter().map(|&c| self.sources[c].extend(x, z, step, self.fade)).collect();
+        let (ni, nearest) = reach
+            .iter()
+            .enumerate()
+            .min_by(|a, b| a.1.d.total_cmp(&b.1.d))
+            .map(|(i, r)| (i, *r))
+            .expect("a point has a candidate");
+        if nearest.d <= step * (1.0 + 1e-9) {
+            w[ni] = 1.0;
+            return Point { h: nearest.h, surface: nearest.surface, w, near: nearest.d };
+        }
+        let mut sum = 0.0;
+        for (i, r) in reach.iter().enumerate() {
+            w[i] = shepard(r.d - step, self.radius);
+            sum += w[i];
+        }
+        if sum == 0.0 {
+            w[ni] = 1.0;
+            sum = 1.0;
+        }
+        let mut h = 0.0;
+        for (i, r) in reach.iter().enumerate() {
+            w[i] /= sum;
+            h += w[i] * r.h;
+        }
+        Point { h, surface: nearest.surface, w, near: nearest.d }
+    }
+
+    /// The sources within reach of a world rectangle.
+    pub fn candidates(&self, rect: [f64; 4]) -> Vec<usize> {
+        let reach = self.radius + 2.0 * self.spacing;
+        self.sources
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                let dx = (s.rect[0] - rect[2]).max(rect[0] - s.rect[2]).max(0.0);
+                let dz = (s.rect[1] - rect[3]).max(rect[1] - s.rect[3]).max(0.0);
+                dx.hypot(dz) <= reach
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Join pieces: `(name, first lattice sample x, z, cells x, z)`, every chunk not wholly inside one
+    /// interior.
+    pub fn pieces(&self, chunk: u32) -> Vec<(String, u32, u32, u32, u32)> {
+        let mut out = Vec::new();
+        let step = self.spacing;
+        for (jz, z0) in (0..self.size[1]).step_by(chunk as usize).enumerate() {
+            for (jx, x0) in (0..self.size[0]).step_by(chunk as usize).enumerate() {
+                let (w, d) = (chunk.min(self.size[0] - x0), chunk.min(self.size[1] - z0));
+                let r = [f64::from(x0) * step, f64::from(z0) * step, f64::from(x0 + w) * step, f64::from(z0 + d) * step];
+                let inside = self.sources.iter().any(|s| s.contains(r[0], r[1]) && s.contains(r[2], r[3]));
+                if !inside {
+                    out.push((format!("j{jx:03}_{jz:03}"), x0, z0, w, d));
+                }
+            }
+        }
+        out
+    }
+
+    /// The steepest join ground on a coarse lattice (every `stride` samples), away from the seams.
+    pub fn coarse_slope(&self, tiles: &[Tile], stride: u32) -> (f64, [f64; 2]) {
+        let terrains: Vec<Terrain> = tiles.iter().map(Tile::terrain).collect();
+        let all: Vec<usize> = (0..self.sources.len()).collect();
+        let step = self.spacing * f64::from(stride);
+        let (nx, nz) = (self.size[0] / stride, self.size[1] / stride);
+        let h: Vec<Point> = (0..=nz)
+            .flat_map(|kz| (0..=nx).map(move |kx| (kx, kz)))
+            .map(|(kx, kz)| self.at(tiles, &terrains, &all, f64::from(kx) * step, f64::from(kz) * step))
+            .collect();
+        let row = (nx + 1) as usize;
+        let far = 2.0 * self.spacing + 3.0 * self.fade + step;
+        let mut worst = (0.0, [0.0; 2]);
+        for kz in 0..nz as usize {
+            for kx in 0..nx as usize {
+                let c = [&h[kx + kz * row], &h[kx + 1 + kz * row], &h[kx + (kz + 1) * row], &h[kx + 1 + (kz + 1) * row]];
+                if c.iter().any(|p| p.near < far) {
+                    continue;
+                }
+                let g = cell_slope([c[0].h, c[1].h, c[2].h, c[3].h], step);
+                if g > worst.0 {
+                    worst = (g, [kx as f64 * step, kz as f64 * step]);
+                }
+            }
+        }
+        worst
+    }
+}
+
+/// The slope of a cell's blend at its middle, from its four corners (sample, +x, +z, both).
+pub fn cell_slope(h: [f64; 4], step: f64) -> f64 {
+    let gx = (h[1] - h[0] + h[3] - h[2]) / (2.0 * step);
+    let gz = (h[2] - h[0] + h[3] - h[1]) / (2.0 * step);
+    gx.hypot(gz)
+}
+
+/// One join piece computed.
+pub struct Piece {
+    pub name: String,
+    pub at: [f64; 2],
+    pub samples: [u32; 2],
+    pub between: Vec<usize>,
+    pub trn: Vec<u8>,
+    pub blend: Vec<u8>,
+    /// Steepest cell away from the seams, and anywhere.
+    pub far_slope: f64,
+    pub near_slope: f64,
+    pub clamped: usize,
+}
+
+/// Turn shares into bytes summing to 255, by largest remainder.
+pub fn bytes_255(w: &[f64]) -> Vec<u8> {
+    let sum: f64 = w.iter().sum();
+    let exact: Vec<f64> = w.iter().map(|x| if sum > 0.0 { x / sum * 255.0 } else { 0.0 }).collect();
+    let mut out: Vec<u32> = exact.iter().map(|x| x.floor() as u32).collect();
+    let mut left = 255 - out.iter().sum::<u32>().min(255);
+    let mut idx: Vec<usize> = (0..w.len()).collect();
+    idx.sort_by(|a, b| (exact[*b] - exact[*b].floor()).total_cmp(&(exact[*a] - exact[*a].floor())).then(a.cmp(b)));
+    for &i in idx.iter().cycle().take(w.len() * 255) {
+        if left == 0 {
+            break;
+        }
+        out[i] += 1;
+        left -= 1;
+    }
+    out.into_iter().map(|x| x as u8).collect()
+}
+
+fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &(String, u32, u32, u32, u32)) -> Result<Piece, String> {
+    let (name, x0, z0, w, d) = spec;
+    let step = plan.spacing;
+    let rect = [f64::from(*x0) * step, f64::from(*z0) * step, f64::from(x0 + w) * step, f64::from(z0 + d) * step];
+    let cands = plan.candidates(rect);
+    let (sw, sd) = (*w as usize + 1, *d as usize + 1);
+    // One sample of margin all round, for the normals.
+    let (mw, md) = (sw + 2, sd + 2);
+    let mut h = vec![0.0; mw * md];
+    let mut near = vec![0.0; sw * sd];
+    let mut surfaces = vec![0u8; sw * sd];
+    let mut shares = vec![0.0; sw * sd * cands.len()];
+    for mz in 0..md {
+        for mx in 0..mw {
+            let (kx, kz) = (i64::from(*x0) + mx as i64 - 1, i64::from(*z0) + mz as i64 - 1);
+            let pt = plan.at(tiles, terrains, &cands, kx as f64 * step, kz as f64 * step);
+            h[mx + mz * mw] = pt.h;
+            if (1..=sw).contains(&mx) && (1..=sd).contains(&mz) {
+                let i = (mx - 1) + (mz - 1) * sw;
+                near[i] = pt.near;
+                surfaces[i] = pt.surface & 0x7f;
+                shares[i * cands.len()..(i + 1) * cands.len()].copy_from_slice(&pt.w);
+            }
+        }
+    }
+    let clamped = h.iter().filter(|v| **v < 0.0).count();
+    let feet: Vec<f32> = (0..sd).flat_map(|z| (0..sw).map(move |x| (x, z))).map(|(x, z)| h[x + 1 + (z + 1) * mw].max(0.0) as f32).collect();
+    let (mut grid, hs) = trnwrite::Grid::from_feet(sw as u32, sd as u32, &feet, step as f32)?;
+    grid.surfaces = surfaces;
+    // Normals from the ground itself, across the piece's edges too (trnwrite's formula, on feet).
+    grid.normals = (0..sd)
+        .flat_map(|z| (0..sw).map(move |x| (x, z)))
+        .map(|(x, z)| {
+            let at = |dx: i64, dz: i64| h[(x as i64 + 1 + dx) as usize + (z as i64 + 1 + dz) as usize * mw];
+            let gx = (at(1, 0) - at(-1, 0)) / (2.0 * step);
+            let gz = (at(0, 1) - at(0, -1)) / (2.0 * step);
+            let len = (gx * gx + 1.0 + gz * gz).sqrt();
+            [(-gx / len * 127.0) as i8, (1.0 / len * 127.0) as i8, (-gz / len * 127.0) as i8]
+        })
+        .collect();
+    let trn = trnwrite::build(&grid, &trnwrite::Options::new(step as f32, hs))?;
+    let (bytes, _) = trnwrite::write(&trn)?;
+    // Slopes, away from the seams and anywhere.
+    let far = 2.0 * step + 3.0 * plan.fade;
+    let (mut far_slope, mut near_slope) = (0.0f64, 0.0f64);
+    for z in 0..sd - 1 {
+        for x in 0..sw - 1 {
+            let c = [x + z * sw, x + 1 + z * sw, x + (z + 1) * sw, x + 1 + (z + 1) * sw];
+            if c.iter().any(|&i| near[i] == 0.0) {
+                continue; // a tile's own cell
+            }
+            let hh = c.map(|i| h[(i % sw) + 1 + (i / sw + 1) * mw]);
+            let g = cell_slope(hh, step);
+            if c.iter().all(|&i| near[i] > far) {
+                far_slope = far_slope.max(g);
+            } else {
+                near_slope = near_slope.max(g);
+            }
+        }
+    }
+    // The look: the tiles with a share anywhere in the piece, in the world's tile order.
+    let n = cands.len();
+    let mut used: Vec<usize> = (0..n).filter(|&c| (0..sw * sd).any(|i| shares[i * n + c] * 255.0 >= 0.5)).collect();
+    used.sort_by_key(|&c| plan.sources[cands[c]].tile);
+    let mut between: Vec<usize> = used.iter().map(|&c| plan.sources[cands[c]].tile).collect();
+    let mut blend = Vec::with_capacity(sw * sd * between.len().max(2));
+    for i in 0..sw * sd {
+        let w: Vec<f64> = used.iter().map(|&c| shares[i * n + c]).collect();
+        blend.extend(bytes_255(&w));
+    }
+    if between.len() < 2 {
+        // modcheck wants two or more: the nearest other tile, at 0 everywhere.
+        let other = plan
+            .sources
+            .iter()
+            .filter(|s| !between.contains(&s.tile))
+            .min_by(|a, b| a.distance(rect[0], rect[1]).total_cmp(&b.distance(rect[0], rect[1])))
+            .map(|s| s.tile)
+            .ok_or("one tile only")?;
+        let mut padded = Vec::with_capacity(sw * sd * 2);
+        let pos = between.iter().position(|&t| t > other).unwrap_or(between.len());
+        for c in blend.chunks(between.len().max(1)) {
+            let mut v = c.to_vec();
+            v.insert(pos, 0);
+            padded.extend(v);
+        }
+        between.insert(pos, other);
+        blend = padded;
+    }
+    Ok(Piece {
+        name: name.clone(),
+        at: [rect[0], rect[1]],
+        samples: [sw as u32, sd as u32],
+        between,
+        trn: bytes,
+        blend,
+        far_slope,
+        near_slope,
+        clamped,
+    })
+}
+
+/// Compute every piece, on threads; `f` gets each one as it is done (in no order).
+pub fn solve(plan: &Plan, tiles: &[Tile], chunk: u32, threads: usize, f: &(dyn Fn(Piece) -> Result<(), String> + Sync)) -> Result<usize, String> {
+    let specs = plan.pieces(chunk);
+    let next = AtomicUsize::new(0);
+    let err: Mutex<Option<String>> = Mutex::new(None);
+    let threads = if threads == 0 { std::thread::available_parallelism().map_or(4, |n| n.get()) } else { threads };
+    std::thread::scope(|sc| {
+        for _ in 0..threads.min(specs.len().max(1)) {
+            sc.spawn(|| {
+                let terrains: Vec<Terrain> = tiles.iter().map(Tile::terrain).collect();
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= specs.len() || err.lock().expect("lock").is_some() {
+                        break;
+                    }
+                    if let Err(e) = piece(plan, tiles, &terrains, &specs[i]).and_then(f) {
+                        *err.lock().expect("lock") = Some(e);
+                    }
+                }
+            });
+        }
+    });
+    match err.into_inner().expect("lock") {
+        Some(e) => Err(e),
+        None => Ok(specs.len()),
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+    for rel in crate::files(from)? {
+        let dst = to.join(&rel);
+        if let Some(p) = dst.parent() {
+            std::fs::create_dir_all(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        }
+        std::fs::copy(from.join(&rel), &dst).map_err(|e| format!("{}: {e}", dst.display()))?;
+    }
+    Ok(())
+}
+
+/// One piece written, for mod.json.
+struct Done {
+    name: String,
+    at: [f64; 2],
+    samples: [u32; 2],
+    between: Vec<usize>,
+    far: f64,
+    near: f64,
+    clamped: usize,
+}
+
+/// What a build came to.
+pub struct Built {
+    pub dir: PathBuf,
+    pub pieces: usize,
+    pub drops: usize,
+    pub far_slope: f64,
+    pub near_slope: f64,
+    pub plan: Plan,
+}
+
+/// Build the world `p.id` from the tile folders into `out/<id>/`, replacing a world already there.
+pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, String> {
+    let tiles: Vec<Tile> = tile_dirs.iter().map(|d| Tile::load(d)).collect::<Result<_, _>>()?;
+    let mut seen = std::collections::HashSet::new();
+    for t in &tiles {
+        if !seen.insert(t.id.clone()) {
+            return Err(format!("{} is given twice", t.id));
+        }
+    }
+    let cuts: Vec<[u32; 4]> = tiles.iter().map(Tile::find_keep).collect();
+    for (t, k) in tiles.iter().zip(&cuts) {
+        let ring = t.ring(*k);
+        let steep = ring.edges.iter().flatten().map(|e| e.gx.hypot(e.gz)).fold(0.0, f64::max);
+        eprintln!(
+            "stitch: {}: {}×{} samples at {} ft, keep {:?}, edge height {:.1} ft (mean), steepest edge cell {:.3}",
+            t.id, t.n.0, t.n.1, t.spacing, k, ring.mean(), steep
+        );
+    }
+    let dir = out.join(&p.id);
+    if dir.exists() {
+        let old = std::fs::read_to_string(dir.join("mod.json")).unwrap_or_default();
+        if !old.contains("\"world\"") {
+            return Err(format!("{} exists and is not a world mod: not replacing it", dir.display()));
+        }
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let joins = dir.join("joins");
+    let mut widen = 1.0;
+    let (plan, results) = loop {
+        let plan = plan(&tiles, &cuts, p, widen)?;
+        let (coarse, at) = plan.coarse_slope(&tiles, 4);
+        if coarse > p.max_slope {
+            let (d, near) = plan
+                .sources
+                .iter()
+                .map(|s| (s.distance(at[0], at[1]), s.tile))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .expect("two tiles");
+            eprintln!(
+                "stitch: {:.3} at ({:.0}, {:.0}) on the coarse lattice, {:.0} ft from {}'s interior, past {}: widening the gaps",
+                coarse, at[0], at[1], d, tiles[near].id, p.max_slope
+            );
+        } else {
+            if joins.exists() {
+                std::fs::remove_dir_all(&joins).map_err(|e| format!("{}: {e}", joins.display()))?;
+            }
+            let results: Mutex<Vec<Done>> = Mutex::new(Vec::new());
+            solve(&plan, &tiles, p.chunk, p.threads, &|pc: Piece| {
+                let jd = joins.join(&pc.name);
+                std::fs::create_dir_all(&jd).map_err(|e| format!("{}: {e}", jd.display()))?;
+                std::fs::write(jd.join(format!("{}.ps2.trn", pc.name)), &pc.trn).map_err(|e| e.to_string())?;
+                std::fs::write(jd.join(format!("{}.blend", pc.name)), &pc.blend).map_err(|e| e.to_string())?;
+                results.lock().expect("lock").push(Done { name: pc.name, at: pc.at, samples: pc.samples, between: pc.between, far: pc.far_slope, near: pc.near_slope, clamped: pc.clamped });
+                Ok(())
+            })?;
+            let mut results = results.into_inner().expect("lock");
+            results.sort_by(|a, b| a.name.cmp(&b.name));
+            let far = results.iter().map(|r| r.far).fold(0.0, f64::max);
+            if far <= p.max_slope {
+                break (plan, results);
+            }
+            eprintln!("stitch: join ground {far:.3} steep away from the seams, past {}: widening the gaps", p.max_slope);
+        }
+        widen *= 1.25;
+        if widen > 20.0 {
+            return Err("the join ground stays too steep however wide the gaps".into());
+        }
+    };
+    for t in &tiles {
+        copy_dir(&t.dir, &dir.join("tiles").join(&t.id))?;
+    }
+
+    // Placements in the cut band.
+    let mut drops = Vec::new();
+    for (i, t) in tiles.iter().enumerate() {
+        let k = plan.placed[i].keep;
+        for (section, pos) in t.placements()? {
+            let (fx, fz) = (pos[0] / t.spacing, pos[2] / t.spacing);
+            let inside = fx >= f64::from(k[0]) && fx < f64::from(k[2]) && fz >= f64::from(k[1]) && fz < f64::from(k[3]);
+            if !inside {
+                let off = fx < 0.0 || fz < 0.0 || fx > f64::from(t.n.0) || fz > f64::from(t.n.1);
+                let why = if off {
+                    format!("off the terrain at ({:.1}, {:.1}) ft", pos[0], pos[2])
+                } else {
+                    format!("in the cut berm band at ({:.1}, {:.1}) ft, keep {:?}", pos[0], pos[2], k)
+                };
+                drops.push(o(vec![("tile", s(&t.id)), ("section", s(section)), ("why", s(why))]));
+            }
+        }
+    }
+    let sky = match &p.sky {
+        Some(sk) if tiles.iter().any(|t| &t.id == sk) => sk.clone(),
+        Some(sk) => return Err(format!("sky {sk} is not one of the tiles")),
+        None => tiles[0].id.clone(),
+    };
+    let spawn_tile = tiles
+        .iter()
+        .enumerate()
+        .find(|(i, t)| {
+            let k = plan.placed[*i].keep;
+            let sp = t.spawn();
+            let (fx, fz) = (sp[0] / t.spacing, sp[2] / t.spacing);
+            fx >= f64::from(k[0]) && fx < f64::from(k[2]) && fz >= f64::from(k[1]) && fz < f64::from(k[3])
+        })
+        .map(|(_, t)| t.id.clone())
+        .ok_or("no tile's spawn is inside its interior")?;
+
+    let mut games: Vec<String> = Vec::new();
+    for t in &tiles {
+        let g = t.game();
+        if !games.contains(&g) {
+            games.push(g);
+        }
+    }
+    let perms: Vec<String> = tiles.iter().map(|t| t.meta.get("permission").and_then(|v| v.str()).unwrap_or("").to_owned()).collect();
+    let permission = if perms.iter().all(|x| *x == perms[0]) { perms[0].clone() } else { "own-disc".into() };
+
+    let mut todo: Vec<J> = vec![s(
+        "joins/*: generated ground (tools/stitch), no source game's: a closed-form blend of the tiles' edges; \
+         no texture pages, the look is each <join>.blend over the tiles' own ground (openmx MD9)",
+    )];
+    todo.push(s("joins/*: surface bytes are the nearest tile's id with the top bit 0 (the bit's meaning is not known)"));
+    todo.push(s(
+        "the world's outer edge is flat join ground with no berm; the shootoff there is the world's (openmx MD8)",
+    ));
+    for (i, t) in tiles.iter().enumerate() {
+        if (t.spacing - plan.spacing).abs() > 1e-9 {
+            match plan.ratio[i] {
+                Some((pp, q)) => todo.push(s(format!(
+                    "{}: {} ft samples against the joins' {} ft: the seam is on the join lattice and meets it exactly at \
+                     the lattice points; between them (where the two lattices do not share a sample, {}:{}) the two \
+                     linear pieces differ by the tile's curvature; the joins bordering only this tile are not at its spacing (§3)",
+                    t.id, t.spacing, plan.spacing, pp, q
+                ))),
+                None => todo.push(s(format!(
+                    "{}: {} ft samples have no small ratio to the joins' {} ft: its seams are not on the join lattice and \
+                     meet the join only approximately",
+                    t.id, t.spacing, plan.spacing
+                ))),
+            }
+        }
+    }
+    let clamped: usize = results.iter().map(|r| r.clamped).sum();
+    if clamped > 0 {
+        todo.push(s(format!("joins: {clamped} samples of the blend fell below 0 ft and were raised to 0 (a raw height is unsigned)")));
+    }
+    let far_slope = results.iter().map(|r| r.far).fold(0.0, f64::max);
+    let near_slope = results.iter().map(|r| r.near).fold(0.0, f64::max);
+
+    let tiles_j: Vec<J> = tiles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let pl = &plan.placed[i];
+            o(vec![
+                ("tile", s(&t.id)),
+                ("at", J::A(vec![J::N(pl.at[0]), J::N(pl.at[1])])),
+                ("keep", J::A(pl.keep.iter().map(|k| J::N(f64::from(*k))).collect())),
+            ])
+        })
+        .collect();
+    let joins_j: Vec<J> = results
+        .iter()
+        .map(|r| {
+            o(vec![
+                ("join", s(&r.name)),
+                ("at", J::A(vec![J::N(r.at[0]), J::N(r.at[1])])),
+                ("between", J::A(r.between.iter().map(|&t| s(&tiles[t].id)).collect())),
+                // Not a §3 field: the piece's samples a side, for stitch check.
+                ("samples", J::A(vec![J::N(f64::from(r.samples[0])), J::N(f64::from(r.samples[1]))])),
+            ])
+        })
+        .collect();
+    let drops_n = drops.len();
+    let meta = o(vec![
+        ("standard", J::N(1.0)),
+        ("kind", s("world")),
+        ("id", s(&p.id)),
+        ("name", s(&p.name)),
+        ("source", o(vec![("game", s("Combined")), ("games", J::A(games.into_iter().map(J::S).collect()))])),
+        ("version", s(&p.version)),
+        ("author", s(AUTHOR)),
+        ("permission", s(permission)),
+        ("tiles", J::A(tiles_j)),
+        ("joins", J::A(joins_j)),
+        ("drop", J::A(drops)),
+        ("sky", s(sky)),
+        ("spawn", o(vec![("tile", s(spawn_tile))])),
+        ("todo", J::A(todo)),
+        (
+            "stitch",
+            o(vec![
+                ("spacing", J::N(plan.spacing)),
+                ("max_slope", J::N(p.max_slope)),
+                ("fade", J::N(plan.fade)),
+                ("radius", J::N(plan.radius)),
+                ("widen", J::N(plan.widen)),
+                ("far_slope", J::N((far_slope * 1e4).round() / 1e4)),
+                ("near_slope", J::N((near_slope * 1e4).round() / 1e4)),
+            ]),
+        ),
+    ]);
+    std::fs::write(dir.join("mod.json"), meta.pretty()).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(Built { dir, pieces: results.len(), drops: drops_n, far_slope, near_slope, plan })
+}
