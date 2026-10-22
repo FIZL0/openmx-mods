@@ -32,7 +32,6 @@ goes in mod.json's `todo` and notes/openmx-asks.md.
 - [ ] **M13** MX vs. ATV Untamed accuracy pass: the same as M12 for every imported Untamed map (M4), on Untamed running in PCSX2 (after M4, T7, M12) → tools/import-mxvatv/ · notes/mxvatv-later.md · notes/openmx-asks.md | t: tools/accuracy over every imported Untamed map | j: untamed-accuracy
 
 ### Music
-- [ ] **A1** music from MX vs. ATV Unleashed and Untamed as music mods. Unleashed: 20 songs, Aud\Music\*.vig in MXVSATV.PSR, titles and artists in Aud\Music\music.pb; Untamed: 22 Aud\Music\*.vig in MX08AUD.PSR (its own PSR, which openmx's Psr reads) with its playlist in that container's .bpb/.txt/.ini (M10 decodes BPB). Check each .vig against openmx's reader (crates/openmx/src/audio.rs: the 0x800-byte header, stereo, rate) and the titles against what each game's jukebox shows; package to out/mods/music/<game>/ per the standard's music section (T1): the streams as they are plus a playlist with title, artist and source. Never in git. Accuracy: the same samples the game plays, no re-encode (after T5, T1) → tools/import-music/ · notes/music.md | t: tools/import-music tests on a generated .vig and playlist; --ignored every song on both discs packages and reads back with openmx's reader | j: music-mods
 
 ### Combined maps
 
