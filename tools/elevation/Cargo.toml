@@ -17,3 +17,5 @@ ps2-float = { path = "../../openmx/crates/ps2-float" }
 game-render = { path = "../../openmx/crates/game-render" }
 # The standard's own check of a built folder (§5).
 modcheck = { path = "../modcheck" }
+# The MX vs. ATV Unleashed disc a site's sky, fog and lights are taken from (M17).
+discx = { path = "../discx" }

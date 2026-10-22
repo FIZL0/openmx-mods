@@ -21,6 +21,7 @@ pub mod dem;
 pub mod drape;
 pub mod geotiff;
 pub mod sites;
+pub mod sky;
 
 use dem::{Mosaic, Overlap};
 use drape::Rgb;
@@ -53,6 +54,9 @@ pub struct Request {
     /// `source.data` and `source.date` (§1).
     pub data: String,
     pub date: String,
+    /// The disc map whose sky, fog and lights the scene takes (M17). None: the scene has none, and the
+    /// mod holds only public-domain data.
+    pub sky: Option<sky::Donor>,
 }
 
 /// What the build found, for the log, `mod.json` and the journal.
@@ -206,7 +210,11 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
         feet[(cx + cz * samples.0) as usize],
         cz as f32 * scale,
     ];
-    let scene = SceneText::for_terrain(&t, &req.id, spawn, [0.0, 0.0, 1.0]).to_text();
+    let mut scene = SceneText::for_terrain(&t, &req.id, spawn, [0.0, 0.0, 1.0]).to_text();
+    if let Some(d) = &req.sky {
+        scene = d.scene_with(&scene)?;
+        d.prove(&scene)?;
+    }
 
     let corner = (g.x(corner_pixel.0 as f64), g.y(corner_pixel.1 as f64));
     let facts = Facts {
@@ -255,15 +263,42 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
             pixel_m / FOOT_M
         ),
         format!(
-            "{}.scn: no sky (CubeFile), [Fog] or [Light<n>]: the data has none, the port's defaults draw it",
-            req.id
-        ),
-        format!(
             "{}.scn: the start is the window's centre sample facing north, chosen by tools/elevation",
             req.id
         ),
         "no props, collision objects, ecosystem, detail map (<stem>_d.tga) or baked light map (<stem>_shadow_NN.pst)".to_owned(),
     ];
+    match &req.sky {
+        None => todo.push(format!(
+            "{}.scn: no sky (CubeFile), [Fog] or [Light<n>]: the data has none, the port's defaults draw it",
+            req.id
+        )),
+        Some(d) => {
+            todo.push(format!(
+                "{id}.scn: CubeFile={cube} and [{sections}] are {game}'s {map} ({name}) scene's ({res}:{scene}), copied line for line, and {path} is its sky, copied byte for byte: \
+                 the data has no sky, fog or lights, so they are a disc map's of the same kind (mod.json sky_from), not the place's",
+                id = req.id,
+                cube = d.cube_file,
+                sections = d.sections.join("], ["),
+                game = sky::GAME,
+                map = d.map,
+                name = d.name,
+                res = d.res,
+                scene = d.scene,
+                path = d.cube_path(),
+            ));
+            todo.push(format!(
+                "{}.scn: the sun's Position and TargetPosition are in {}'s frame (its 5760-ft map), not this map's: their direction is kept, and where the game puts the light or its shadow from the points themselves is not checked",
+                req.id, d.map
+            ));
+            todo.push(format!(
+                "{}: {}'s bytes, so this mod is own-disc; built without a sky it is public-domain",
+                d.cube_path(),
+                sky::GAME
+            ));
+            files.push((format!("{dir}/{}", d.cube_path()), d.cube.clone()));
+        }
+    }
     if req.naip.is_empty() {
         todo.push("no ground picture: built without an aerial image".to_owned());
     } else {
@@ -523,7 +558,7 @@ pub fn mod_json(req: &Request, f: &Facts, todo: &[String]) -> String {
     let dem = files(&req.dem);
     let naip = files(&req.naip);
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": \"public-domain\",\n  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.1.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": {permission},\n{sky_from}  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
         id = json_str(&req.id),
         name = json_str(&req.name),
         data = json_str(&req.data),
@@ -549,6 +584,18 @@ pub fn mod_json(req: &Request, f: &Facts, todo: &[String]) -> String {
         datum = f.datum,
         vu = f.vertical_unit_m,
         todo = list(todo),
+        permission = json_str(if req.sky.is_some() { "own-disc" } else { "public-domain" }),
+        sky_from = req.sky.as_ref().map_or(String::new(), |d| format!(
+            "  \"sky_from\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"map\": {},\n    \"name\": {},\n    \"members\": [{}],\n    \"scene\": {},\n    \"cube\": {},\n    \"sections\": [{}]\n  }},\n",
+            json_str(sky::GAME),
+            json_str(sky::BOOT),
+            json_str(&d.map),
+            json_str(&d.name),
+            json_str(&d.res),
+            json_str(&d.scene),
+            json_str(&d.cube_member),
+            d.sections.iter().map(|s| json_str(s)).collect::<Vec<_>>().join(", "),
+        )),
     )
 }
 
