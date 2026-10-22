@@ -118,7 +118,7 @@ The rules:
   It stops and names the path. It never chooses one.
 - **Loose members the game opens for the map are copied too.** When the source game, finding a name in
   none of its loaded archives, opens the container's loose member at that path (MX vs. ATV Unleashed
-  does, `notes/mxvatv.md` *Loose PSR members*), that member is copied at its own path. It is listed in
+  and Untamed do, `notes/mxvatv.md` *Loose PSR members*, `notes/mxvatv-later.md` *The importer (M4)*), that member is copied at its own path. It is listed in
   `source.members`, and the importer may give its reason in a field of its own. A path an archive holds
   is always the archive's.
 - **Lookups ignore case and slash style.** The port finds a file the way game-render's `disc::Res` does,

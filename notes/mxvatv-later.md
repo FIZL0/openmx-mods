@@ -94,6 +94,59 @@ Unleashed's Nat05 gallows door, carried over). Which shared `Col\` shapes a map 
 scene: the survey reads it (M14), and every shape an Untamed scene places is in the map's own
 archive or in `Col\`, except seven that are nowhere on the disc (*Survey tables*).
 
+### The importer (M4)
+
+`tools/import-mxvatv` reads Untamed too (`src/untamed.rs`): `import-mxvatv --disc <Untamed image>
+--out STAGE` writes `untamed_<map>/` for each chosen map. It uses M2's copy and checks with three
+additions: the archives opened through `discx::ResFile::unpadded`, `<MAP>.scn` decoded beside the
+`.scn.bpb` (§2a), and BPB materials and toys decoded in memory so they can be checked. Journal:
+`journal/2026-10-22-m4-import-untamed`.
+
+**Which maps.** `Env\Master.atyList.bpb` is the one activity list, with `[<MAP> General]`
+(`DisplayName`, `Activity` lines) for every map, and the activities' own sections (`Type`,
+`StartPosition`, `ATYFile`, …). The 40 archives whose activities include `free ride` or `national` are
+imported. Left out: BT_C–BT_F (opencross), HC_A (hill climb), SJ_A, SJ_B (ski jump), TR_A (a2b race).
+The list also has TestAG, MT_B, AM_AF and SM_IP with a Free Ride, but none of them has a map archive.
+Only Nat_MA's Free Ride gives a `StartPosition`. FS_A's gives `DefaultStartPosition`, a key the
+activity reader (`0x002cb110`) does not read: it is the scene's (`0x0030e490`).
+
+**Loose PSR members.** SLUS_217.01's resource manager is SLUS_211.04's (*Loose PSR members (M15)* in
+`notes/mxvatv.md`), at other addresses. `0x0011e950` and `0x0011eff0` look a name up among the
+loaded archives (`0x0011ec20`). On a miss `0x0011c7f0` opens the PSR member (`0x001bc760`, which
+hashes the name through `0x00256c50` into the table that `0x001bd090` fills from each PSR named in
+`MX08PS2.PSR,MX08AUD.PSR`). Flag `0x1000` turns the fallback off. Only `0x0011f250` sets it, from the
+`.res` loader `0x00222050` when its fifth argument is non-zero, and all 43 call sites pass
+`move $8, $zero`. What a map asks for, as the code builds it:
+- placed models, `Geo\<slt>.psg`, lowercased (`0x00186bd0`; `0x001c27d0` sets the model folder
+  `0x003fe640` to `Geo\`);
+- collision, `Col\<name>.col` (`0x00114f20`, the extension swapped from the last dot);
+- the sky, `Skies\<name>.ps2.cub` (`0x0030c4d0`: `%s.ps2.cub`, then `0x0018f230`: `Skies\%s`);
+- the map's material table, `Env\<MAP>\<MAP>.mst` (`0x001c2d20`, `%s%s\%s.mst`). Its `_mst.res` is
+  `res\env\<MAP>\<MAP>_mst.res`, and the archive holds it as `env\<map>\<MAP>.mst`;
+- each material, through the BPB loader: `0x00168ff0` → `0x001425c0` opens `<line>.psm.bpb`, then
+  `<line>.psm` as text, both through `0x0011e950`;
+- each material's textures: `%s%s` of the folder and `TextureMap_<n>` (`0x00163930`, skipping
+  `RenderTarget`, `RenderTarget2`, `FrameBuffer`, `DisplayBuffer`), tried as `.pst`, then `.atm`
+  (`0x0016cba0`). Unlike MX vs. ATV Unleashed's, there is no `.pss` or `.tga` step.
+- plants: the eco code is in GAME_REL.BIN (strings `EcoSystem.cpp`, `.esb`), which was not loaded.
+  `Eco\<model>.psg` is M15's rule, and on the disc it pulls nothing.
+
+Over the 40 maps the importer pulls **2,481 members (36 MB)**: 1,230 `.psm.bpb`, 1,202 `.pst`, 27
+`.col`, 18 `.psg`, 2 `.cub` and 2 `.atm`. These include each map's `Env\<MAP>\TerrainLOD.psm.bpb`,
+Nat_OR's 22 `Col\` shapes and 13 `Geo\` props (its archive has neither), AM_JY's and BT_B's shared
+pieces, `Geo\nat04_lightflare.psg` (AM_GFUC, SM_AS, SM_HS), and the skies of SM_CF
+(`Skies\sky04.ps2.cub`) and SX_B (`Skies\sky25.ps2.cub`).
+
+**What the port cannot read yet** (each mod's `todo`; `notes/openmx-asks.md`). The archives' padding.
+Every BPB but the decoded scene: 24 to 130 `.psm.bpb` a mod, the `.toy.bpb`, `.prt.bpb` and
+`.aud.bpb`. Through tools/bpb's decode, game-render's `world::Assets::resolve` finds a texture for
+every placed model's material but `screen.psm` (`RenderTarget`, the SX/FS/MT_A jumbotrons), SX_D's
+`skyline01` and SX_G's 14 `alt-02_*`. Those last have no `.psm` on the disc at all. `Blimp.mot`
+(Nat_CO, SM_S1) is refused by `skin::Clip::parse`. `DetailMapTilingMultiplier` is 6 on BT_B, SM_MB,
+SM_OF and SM_S1, and 16 on FS_C. SM_HS's scene says `TerrainWidth=5` over a 4-root-cell terrain, and
+Nat_OR's says 4.5 ft over a 4.499999-ft one. Both are kept (§2a). AM_CS places two
+`AM_CS_Concretein*.psg` that are nowhere on the disc.
+
 ### Survey tables
 
 `cargo run --release -p survey -- untamed`, 2026-10-22. † = the terrain read through the view. The
