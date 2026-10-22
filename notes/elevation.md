@@ -50,8 +50,8 @@ Downloads go in `extracted/elevation/dem/` and `extracted/elevation/naip/` (igno
   `terrainscreenspacemesh.psm` lays it once over the map, as free09's whole-map masks are laid
   (`UScale = 1/extent`, `VScale = −1/extent`, so the first row is north). game-render's `splat` reads it.
   Whether MX Unleashed itself takes a one-pass psm and a 1 MB texture is not known.
-- The start is the centre sample, facing north. Surface ids are all 0, because which of the bike's `.phy`
-  surfaces is sand is not known. Normals come from trnwrite's central differences.
+- The start is the centre sample, facing north. Normals come from trnwrite's central differences.
+- Surface ids come from the aerial picture (M16, *Surfaces* below): sand 4, dirt 0, grass 3.
 
 ## The four sites (built 2026-10-22)
 
@@ -115,3 +115,76 @@ archives), and MX vs. ATV Unleashed has Glamis itself.
   same fog numbers (bit for bit) and lights from the generated scene as from the donor's.
 
 Rebuild a site with the command in its journal entry (`journal/2026-10-22-m1-elevation/`).
+
+## Surfaces (M16)
+
+**What the id is.** A terrain sample's surface byte (low seven bits; game-sim's `Block::surface`) indexes
+the tire's per-surface tables, `NumberOfSurfaces = 16`. The bikes' `.phy` files name the rows in
+comments, numbered from 1, so id = zone − 1:
+
+| id | zone | the `.phy` comment (MX Unleashed) | rides differently from zone 1? |
+|---|---|---|---|
+| 0 | 1 | (black) Standard on-track dirt, "default when no friction zones present" | — |
+| 1 | 2 | (white) edge track sludge | yes: rear drive 2.0 against 2.2, the side-force curves' scales and fall-offs |
+| 2 | 3 | (red) off-track sludge | as zone 2, and rear `WheelDrag` 0.1 |
+| 3 | 4 | (green) standard off track zone, "presumably grassy areas" | as zone 2 |
+| 4 | 5 | (light brown) Sandy dirt, "sandy slippery section" | yes: front `SideForce` 0.12 against 0.165, softer curves |
+| 5 | 6 | (ice blue) ice | yes: `SideForce` 0.07 |
+| 6, 7 | 7, 8 | shallow / deep water or mud | as zone 2, with the front's `SideForce` 0.12 |
+| 8–15 | 9–16 | "(black) Standard on-track dirt" | **no: equal to zone 1, key for key** |
+
+That holds for all 224 bike `.phy` files on the MX Unleashed disc (every `Bike\*.res`, A and P, front and
+rear). The four-wheelers in `machine.res` (baja, buggy, monster truck) have one row repeated 16 times.
+MX vs. ATV Unleashed's `.phy` comments name 9–16 by paint colour ("(Yellow)", "(Blue)", "(Orange)",
+"(F. Green)", "(D. Brown)") and all of them "Standard on-track dirt": they are artists' tags, not grips.
+
+**What MX Unleashed's freeride ground uses.** `elevation surfaces` reads free06, 07, 09, 10 and 11 off the
+disc. For every sample it counts the surface id against the painted layer that shows most there (each
+layer's share is its mask's alpha times what the masks after it leave, as the GS blends them; masks read
+bilinear at the sample). Rows are ids, columns the share of that id's samples under each layer:
+
+| map | id | samples | under (most of) |
+|---|---|---|---|
+| free06 | 0 / 12 / 15 | 82,181 / 179,893 / 329,287 | dirt 78% / grass 65%, rock 26% / grass 87% |
+| free07 | 0 / 12 / 13 / 15 | 24,451 / 192,928 / 44,765 / 329,217 | dry grass 100% / dry grass 57%, erode 34% / burnt ambers 68%, dark ash 32% / dry grass 88% |
+| free09 | 0 / 12 / 13 / 15 | 9,403 / 23,302 / 229,439 / 329,217 | **sand 96%** / grass 90% / rock 39%, grass 33%, sand 15% / grass 86% |
+| free10 | 0 / 12 / 13 / 15 | 11,339 / 200,957 / 49,608 / 329,457 | dirt 48% / dirt 48%, grass 36% / **rock 92%** / grass 86% |
+| free11 | 0 / 9 / 12 / 14 / 15 | 7,615 / 1,412 / 110,375 / 142,742 / 329,217 | grass 87% / **sand 99%** / grass 70% / dirt 36%, grass 26% / grass 71% |
+
+id 15 is the ring outside the middle 512 × 512 samples (329,217 = 769² − 512² on four maps). So the ids follow
+the paint in places (free09's sand is 0, free11's is 9, free10's rock is 13), but not as one code, and
+**every id the freeride maps use (0, 9, 12–15) rides as zone 1**. MX Unleashed's sand, rock and grass
+all ride as dirt. Zone 5 (sand) appears on one map in the whole game (nat07, 0.4%, beside 11.6% ice), and
+zone 4 (grass) on none: `elevation surfaces nat01 … sx24` counts every track's ids.
+
+**What the elevation maps get.** The brief asks for real ground, so the maps go past the original here
+(each one says so in `todo`): sand is id 4 (zone 5), grass id 3 (zone 4), dirt id 0. Rock is dirt, since
+no zone is rock. Each sample's id comes from the NAIP picture over its square metre (the image's pixels
+whose centres fall in it, averaged in all four bands; `surfaces::seen`). The test is vegetation: NDVI,
+(NIR − red) / (NIR + red), averaged over a 5 × 5-sample square so a lone bush, a crown's shadow or a slip
+face's few pixels do not make a sample of their own. The picture does not tell sand from dirt or rock
+(all pale grey-brown from above), so the site's kind says what bare ground is:
+
+| site | kind | green from (averaged NDVI) | bare | green | result |
+|---|---|---|---|---|---|
+| `elev_glamis` | dunes | 0.03 | sand | dirt | sand 99.9%, dirt 0.1% |
+| `elev_littlesahara` | dunes | 0.0 | sand | dirt (sagebrush and juniper flats) | sand 64.8%, dirt 35.2% |
+| `elev_ocotillo` | desert | — | dirt | dirt | dirt 100% |
+| `elev_hatfield` | forest | −0.2 | dirt | grass | grass 96.5%, dirt 3.5% |
+
+NAIP's bands are uncalibrated counts, so NDVI sits lower than a reflectance one, differs by state and
+year, and falls on shaded slopes. The thresholds are per site and were set by eye with
+`elevation cover OUT.png SITE --picture RGB.png [--green T]`, which writes the classes and the picture
+side by side:
+
+- Glamis's sand is at about 0 everywhere. At 0.0 the slip faces turned to dirt (16%), and at −0.01 the
+  whole map did; 0.03 keeps the dune field sand.
+- Little Sahara at 0.0 follows the picture: the white dunes are sand, and the grey scrub strips and the
+  south-west flats are dirt. At 0.03 only the junipers were (4%).
+- Hatfield is all canopy. At 0.2 the shaded side of every hill was "bare" (47%). At −0.2 only the river, the
+  road, the stream beds, the town and a little speckle in the darkest crowns are dirt.
+- Ocotillo's NDVI is under 0.1 everywhere (badlands, washes, sparse creosote), so nothing is green. The
+  washes are likely sandier than the badlands, but the picture does not separate them, so the site is dirt.
+
+`elevation build` takes `--ground dunes|desert|forest --green T` for the same, or `--surface ID` for one id
+everywhere. `mod.json`'s `elevation.surfaces` counts the samples per id.

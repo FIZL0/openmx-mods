@@ -3,6 +3,7 @@
 //! step) builds every site whose files are present.
 
 use crate::Request;
+use crate::surfaces::Ground;
 use std::path::Path;
 
 /// A USGS 3DEP 1 m tile: its project and file name under `StagedProducts/Elevation/1m/Projects/`.
@@ -26,6 +27,17 @@ pub struct Site {
     /// The MX vs. ATV Unleashed map whose sky, fog and lights the scene takes (M17): its folder under
     /// `Env\` and its name in the game. `notes/elevation.md` says why each.
     pub sky: (&'static str, &'static str),
+    /// What the site's bare and green ground are (M16): with the aerial picture's vegetation test it
+    /// gives each sample its surface id. `notes/elevation.md`, *Surfaces*.
+    pub ground: Ground,
+    /// The averaged NDVI from which the site's ground is green, set by eye against its picture
+    /// (`elevation cover --picture`) and per site, because NAIP's bands are uncalibrated counts that
+    /// differ from one state and year to the next, and the index falls on shaded slopes. Glamis's sand
+    /// sits at about 0 everywhere, slip faces included (0.03 keeps it all sand); Little Sahara's bare
+    /// dunes stay under 0 and its sagebrush flats go over; under Hatfield's canopy even the shaded side
+    /// of a hill stays over −0.2, and only the river, the road, stream beds and the town fall under it.
+    /// Ocotillo's badlands have nothing green to find (all under 0.1), and desert ignores it.
+    pub green: f32,
 }
 
 pub const SITES: &[Site] = &[
@@ -42,6 +54,8 @@ pub const SITES: &[Site] = &[
         centre: (676634.0, 3648229.0),
         cells: (8, 8),
         sky: ("Nat03", "Glamis"),
+        ground: Ground::Dunes,
+        green: 0.03,
     },
     Site {
         id: "elev_ocotillo",
@@ -61,6 +75,8 @@ pub const SITES: &[Site] = &[
         centre: (584090.0, 3666421.0),
         cells: (8, 8),
         sky: ("Nat09", "Deadman Wash"),
+        ground: Ground::Desert,
+        green: f32::INFINITY,
     },
     Site {
         id: "elev_littlesahara",
@@ -80,6 +96,8 @@ pub const SITES: &[Site] = &[
         centre: (381994.0, 4397606.0),
         cells: (8, 8),
         sky: ("MC04", "Glamis South"),
+        ground: Ground::Dunes,
+        green: 0.0,
     },
     Site {
         id: "elev_hatfield",
@@ -94,6 +112,8 @@ pub const SITES: &[Site] = &[
         centre: (425114.0, 4166421.0),
         cells: (8, 8),
         sky: ("Nat15", "Smuggler's Notch"),
+        ground: Ground::Forest,
+        green: -0.2,
     },
 ];
 
@@ -179,6 +199,7 @@ impl Site {
             cells: self.cells,
             texture: 1024,
             surface: 0,
+            ground: Some((self.ground, self.green)),
             data: format!(
                 "USGS 3DEP 1 m DEM, {}; USDA NAIP {year} 0.6 m, {} (Microsoft Planetary Computer)",
                 tiles(self.dem),

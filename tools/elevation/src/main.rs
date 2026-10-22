@@ -16,6 +16,15 @@ const USAGE: &str = r#"elevation: a lidar DEM (USGS 3DEP GeoTIFF) and an aerial 
                                       is in --iso (default $DISCX_ISO, else iso/); --sky none, or no
                                       disc, builds them without (public-domain)
   elevation sites                     the sites, their windows and files
+  elevation surfaces [--iso DIR] [MAP...]
+                                      MX Unleashed's freeride maps (free06-free11): each terrain
+                                      sample's surface id against the painted layer that shows most
+                                      there (M16; the ids the sites use come from it). Other maps
+                                      named (nat01, sx05) get their ids counted
+  elevation cover OUT.png SITE [--from DIR] [--green NDVI] [--picture RGB.png]
+                                      a site's surfaces from its aerial picture, a pixel a sample
+                                      (sand yellow, dirt brown, grass green, no picture red), with
+                                      the shares and the picture's NDVI spread
   elevation fetch [--from DIR]        download the sites' files that are missing (curl; about 3.6 GB)
   elevation info FILE.tif...          where each GeoTIFF lies, its grid and units
   elevation relief FILE.tif... --cells N [--step M]
@@ -24,12 +33,14 @@ const USAGE: &str = r#"elevation: a lidar DEM (USGS 3DEP GeoTIFF) and an aerial 
                                       a shaded picture of the mosaic, one pixel every N (default 10), north up
   elevation build OUTDIR --id elev_x --name NAME --dem FILE.tif [--dem ...] --centre E,N
                   [--cells W[,D]] [--naip FILE.tif]... [--texture PX] [--surface ID]
+                  [--ground dunes|desert|forest --green NDVI]
                   --data TEXT --date YYYY-MM-DD [--sky MAP,NAME [--iso DIR]]
                                       write the mod folder OUTDIR (out/mods/tracks/<id>), then check it
                                       with modcheck (the standard's §5)
 
 --centre is in the DEM's projected coordinates (UTM easting, northing). --cells defaults to 8 (2049 samples,
-2 km at 1 m), --texture to 1024, --surface to 0. A map is 256 × cells + 1 DEM pixels a side, one sample a
+2 km at 1 m), --texture to 1024, --surface to 0. --ground classifies each sample from the picture's
+near infrared instead (sand 4, dirt 0, grass 3: notes/elevation.md, Surfaces). A map is 256 × cells + 1 DEM pixels a side, one sample a
 pixel; nothing is resampled. --sky takes CubeFile, [Fog] and [Light<n>] and the sky's .cub from MX vs.
 ATV Unleashed's Env\MAP (Nat03,Glamis). notes/elevation.md lists the sites, their tiles and where to fetch them.
 "#;
@@ -146,6 +157,8 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        "surfaces" => surfaces(&a),
+        "cover" => cover(&a),
         "relief" => relief(&a),
         "preview" => preview(&a),
         "build" => {
@@ -167,6 +180,13 @@ fn run(args: &[String]) -> Result<(), String> {
                 surface: a
                     .one("surface")
                     .map_or(Ok(0), |s| s.parse().map_err(|_| "--surface".to_owned()))?,
+                ground: match a.one("ground") {
+                    None => None,
+                    Some(g) => Some((
+                        elevation::surfaces::Ground::parse(&g).ok_or(format!("--ground {g:?}: dunes, desert or forest"))?,
+                        a.need("green")?.parse().map_err(|_| "--green".to_owned())?,
+                    )),
+                },
                 data: a.need("data")?,
                 date: a.need("date")?,
                 sky: None,
@@ -307,6 +327,140 @@ fn stage(a: &Args) -> Result<(), String> {
     } else {
         Err(format!("{} failed", failed.join(", ")))
     }
+}
+
+/// One site's surfaces as a picture, for looking at the classification (M16).
+fn cover(a: &Args) -> Result<(), String> {
+    use elevation::surfaces::{Cover, ndvi};
+    let [out, id] = &a.plain[..] else {
+        return Err(format!("cover wants OUT.png and a site\n\n{USAGE}"));
+    };
+    let site = SITES
+        .iter()
+        .find(|s| s.id == id)
+        .ok_or(format!("{id}: not a site (`elevation sites`)"))?;
+    let from = PathBuf::from(a.one("from").unwrap_or("extracted/elevation".into()));
+    let req = site
+        .request(&from)
+        .map_err(|m| format!("not fetched: {}", m.join(", ")))?;
+    let (corner, pixel, samples, epsg) = elevation::window_of(&req)?;
+    let seen = elevation::surfaces::seen(&req.naip, corner, pixel, samples, epsg)?;
+    let (w, h) = (samples.0 as usize, samples.1 as usize);
+    let green: f32 = a
+        .one("green")
+        .map_or(Ok(site.green), |s| s.parse().map_err(|_| "--green"))?;
+    let covers = site.ground.classify(&seen, w, green);
+    // The picture itself, beside the classes, when asked for.
+    if let Some(p) = a.one("picture") {
+        let mut rgb = vec![0u8; w * h * 3];
+        for z in 0..h {
+            for x in 0..w {
+                let c = seen[x + z * w].map_or([200, 0, 0], |s| [s[0], s[1], s[2]].map(|v| v as u8));
+                let at = 3 * (x + (h - 1 - z) * w);
+                rgb[at..at + 3].copy_from_slice(&c);
+            }
+        }
+        game_render::png::write_rgb(std::path::Path::new(&p), w, h, &rgb)?;
+    }
+    let mut rgb = vec![0u8; w * h * 3];
+    let mut count = [0u64; 4];
+    let mut hist = [0u64; 20];
+    for z in 0..h {
+        for x in 0..w {
+            let s = seen[x + z * w].as_ref();
+            if let Some(s) = s {
+                hist[((ndvi(s) + 1.0) * 10.0).clamp(0.0, 19.0) as usize] += 1;
+            }
+            let (c, k) = match (s, covers[x + z * w]) {
+                (None, _) => ([200, 0, 0], 3),
+                (_, Cover::Sand) => ([230, 210, 140], 0),
+                (_, Cover::Dirt) => ([120, 85, 50], 1),
+                (_, Cover::Grass) => ([40, 150, 40], 2),
+            };
+            count[k] += 1;
+            // Row 0 of the picture is north.
+            let at = 3 * (x + (h - 1 - z) * w);
+            rgb[at..at + 3].copy_from_slice(&c);
+        }
+    }
+    game_render::png::write_rgb(std::path::Path::new(out), w, h, &rgb)?;
+    let all = (w * h) as f64;
+    println!(
+        "{id} ({}): sand {:.1}%, dirt {:.1}%, grass {:.1}%, no picture {:.1}%",
+        site.ground.name(),
+        100.0 * count[0] as f64 / all,
+        100.0 * count[1] as f64 / all,
+        100.0 * count[2] as f64 / all,
+        100.0 * count[3] as f64 / all
+    );
+    let line: Vec<String> = hist
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .map(|(i, n)| format!("{:.1}: {:.1}%", i as f32 / 10.0 - 1.0, 100.0 * *n as f64 / all))
+        .collect();
+    println!("  NDVI from: {}", line.join(", "));
+    Ok(())
+}
+
+/// MX Unleashed's freeride maps: surface id against painted layer, a table per map (M16).
+fn surfaces(a: &Args) -> Result<(), String> {
+    use elevation::surfaces::survey;
+    use game_render::pst::Texture;
+    let iso = iso_dir(a);
+    let path = discx::images(&iso)?
+        .into_iter()
+        .find(|(_, b)| b.as_deref().is_some_and(|b| b.eq_ignore_ascii_case("SLUS_207.67")))
+        .map(|(p, _)| p)
+        .ok_or(format!("no MX Unleashed (SLUS_207.67) disc in {}", iso.display()))?;
+    let mut disc = discx::Disc::open(&path)?;
+    let free = ["free06", "free07", "free09", "free10", "free11"];
+    let maps: Vec<String> = if a.plain.is_empty() {
+        free.iter().map(|m| m.to_string()).collect()
+    } else {
+        a.plain.clone()
+    };
+    for map in maps.iter().map(String::as_str) {
+        let e = disc
+            .find(&format!("Tracks\\{map}.res"))
+            .cloned()
+            .ok_or(format!("no Tracks\\{map}.res"))?;
+        let res = disc.res(&e)?;
+        let read = |suffix: &str| -> Option<Vec<u8>> {
+            let m = res.dir.entries.iter().find(|m| {
+                let n = m.name.to_ascii_lowercase().replace('/', "\\");
+                n.ends_with(&format!("\\{suffix}"))
+            })?;
+            res.read(m).ok()
+        };
+        let trn = read(&format!("{map}.ps2.trn")).ok_or("no .trn")?;
+        if !free.contains(&map) {
+            let n = elevation::surfaces::ids(&trn)?;
+            let all: u64 = n.values().sum();
+            let row: Vec<String> = n
+                .iter()
+                .map(|(id, c)| format!("{id}: {:.1}%", 100.0 * *c as f64 / all as f64))
+                .collect();
+            println!("{map}: {}", row.join(", "));
+            continue;
+        }
+        let scn = game_sim::track::Scene::parse(&read(&format!("{map}.scn")).ok_or("no .scn")?)?;
+        let psm = game_render::ini::text(&read("terrainscreenspacemesh.psm").ok_or("no .psm")?);
+        let samples = scn.terrain.width * 256 + 1;
+        if scn.terrain.breadth != scn.terrain.width {
+            return Err(format!("{map}: not square"));
+        }
+        let s = survey(
+            &trn,
+            &psm,
+            |n| Texture::parse(&read(&format!("{n}.pst"))?).ok(),
+            samples,
+            scn.terrain.width_scale.0,
+        )?;
+        println!("{map}: {samples}×{samples} samples at {} ft", scn.terrain.width_scale.0);
+        print!("{}", s.table());
+    }
+    Ok(())
 }
 
 /// Download each site's files that are not there yet, with curl: the DEM tiles from USGS's bucket and
