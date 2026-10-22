@@ -18,6 +18,10 @@ is openmx's Phase 14 (MD1–MD6); this repo's half is getting the maps out and i
 - **Don't edit openmx from here.** `openmx` is a symlink to the user's checkout, which runs its own
   agents. When the port needs a change (a reader refuses a file, a size it cannot take), write it in
   `notes/openmx-asks.md` with the file and the failure, and say so in your journal. A human files it there.
+- **Accurate to the original game.** An imported map is the source game's map: the terrain, collision,
+  placements, textures, ecosystem, sky, fog and lights as its disc has them, nothing resampled, rescaled or
+  approximated (the combined maps change only the joins). Every gap goes in mod.json's `todo`. A map is
+  checked against that game running in PCSX2 (T7) before it counts as done.
 - **Say what you did not verify.** Every journal entry ends with `## Not verified`, listing what was not
   checked and why, or the single word `none`.
 
