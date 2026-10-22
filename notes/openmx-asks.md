@@ -319,3 +319,35 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   BPB only. A BPB reader in game-render would still let a mod drop the decoded copies.
 - **An elevation mod's ground paint, answered** (T11). With MD2 the four `elev_*` mods draw their NAIP
   ground through `splat::Splat::load` from the mod folder (checked from 150 ft up, looking down).
+- **New: MD3's edge and `TerrainBorderWidth`** (T10, `tools/accuracy ride`, `notes/accuracy.md` *Every
+  map in openmx*). openmx's edge is `256 × TerrainWidth × TerrainWidthScale` (and along), which is 896 ×
+  896 ft on the arenas. Their scenes also give `TerrainBorderWidth` (250–8,000 ft on the 46 one-level
+  maps of both games; 0 on every big map), and the game holds `256 × w × scale + 2 × border` across and
+  along (FS05: 6,896 × 6,896) as a float pair, exactly once in the RAM image of each of those 46 Free
+  Rides. openmx ignores the border, so on 11 of them (FS05, MC08, SX08, SX18; FS_A–D, SX_B, SX_F, SX_K)
+  the start is within 150 ft of its edge and the rider is thrown off the map (wreck 13) in the first
+  seconds, where the original rides from it (M12, M13). On MC08 and SX18 the edge is 768 ft (the scene's
+  scale 3.0) where the file's leaves reach 896 ft (its scale 3.5). What reads the pair in SLUS_211.04
+  and SLUS_217.01 was not decompiled. Fix: find the original's off-map test on MX vs. ATV and whether its
+  edge is the terrain grown by the border on each side; until then, a mod track's edge at least as far
+  out as the border.
+- **MD2, a Free Ride start under the ground, ridden** (T10; M12 and M13's entries above). openmx starts
+  the bike at the scene's `y`. Of the 14 maps whose start is under the ground, only SX_E and SX_H (2–3
+  ft) ride off cleanly. On the others the bike is pushed up and wrecks (landed on the rear, reason 11:
+  FS02, Nat10, Nat14, SM02, SM03, Nat_CO, SX_I), or it stays under the terrain on a prop: FS06 (−12 ft),
+  SM01 (−190 ft) and SM_MB (−288 ft on its start gate, over the bars) wreck there, and BT_A and BT_B sit
+  291 ft under the ground. The original stands the rider on the ground. The fix is the one asked above:
+  the spawn takes the ground's height where the scene's is below it. Also: on Untamed's Nat_PA the start
+  is 129.5 ft over the dirt, and openmx's rider drops and wrecks (landed too hard). M13's ride camera
+  there was 121 ft under the start, so the original drops too; whether it wrecks was not seen.
+- **New: `world::Ground::at` has no ground in the last sample row and column** (T10). `sx + 1 >=
+  samples_x` (and `z`) is `None`, so `World::ground` answers no ground at x or z ≥ (samples − 1) ×
+  spacing: 5,755.5 ft on the big maps. The terrain's cells reach the edge and the original's query
+  answers there (`tools/accuracy heights`: equal at those points). It is inside the 150 ft shoot-back
+  margin, so a ride does not reach it. Fix (low): let the last cell be read, as `contact_search::ground`
+  does.
+- **MD5, what a ride shows** (T10). `Collision::parse` takes the class-1 `.col` now, but nothing draws or
+  moves the animated objects it belongs to: MC01's three windmills stand without their blades, Nat10's
+  mill without its wheel, Nat04's Ferris wheel is its stand alone (toy shots in this slot's
+  `out/accuracy/<id>/`, not in git). That is openmx's own V43 (animated toys, open), and their `.mot`
+  are still refused (M2's `skin::Clip::parse` entry above). Nothing to file here beyond V43.

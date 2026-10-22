@@ -354,3 +354,143 @@ mods, every one named in its mod's `todo`.
 Not a cause anywhere: the lower-case `tex\` beside `Tex\` (85 of the 127 here; the brief counted 86). `Res` folds case in every lookup, and
 `Res::folder` refuses only one path spelt two ways, which no mod has (all 127 open). `.pst` against
 `.PST` is the same fold.
+
+## Every map in openmx (T10)
+
+`accuracy ride --mod DIR --ram IMAGE --openmx BIN` (`tools/accuracy/src/ride.rs`) runs openmx once on the
+mod: `--mods <mods> --track <id> --headless --no-sound --frames 180 --size 640x480 --overlay none
+--graphics original`, with `--shot-pose` from the map's overview pose on the first frame (MD10), so one
+run is the shot and six seconds of the start ridden with nobody on the pad (about 7 s). Where the `.toy`
+has an `[AnimatedToy<n>]` with `HasCollision=TRUE`, a second two-frame run shoots the first of them. It
+writes `openmx.txt` (the verdicts and openmx's log) and the shots in `--out` (default
+`out/accuracy/<map>/`; this run's are in the slot's `out/accuracy/<id>/`) and prints the table's row.
+
+- **loads**: openmx exits cleanly, prints `mods: <id>`, no `left out` line and nothing on stderr. A
+  collision mesh `solid:` could not load must be in the mod's `todo` (FS05's `Anaheim_pole.col` and
+  Nat10's `nat10_Mailbox_Closed.col` are).
+- **heights**: the ground as the shell builds it (`ride::Shell::load`: the folder by `Res::folder`, the one
+  `.scn`, the terrain by `track_mods::terrain_bytes`' suffix lookup, `mod.json`'s `spawn`), against the
+  original's own query on the RAM image at `accuracy heights`' 2,000 points in each of the four modes
+  (8,000), and the ride's own call (`World::ground`) against the harness's `look::height_at` at the same
+  2,000. The box (`object_checks`) is a note, not a height (M12's ask).
+- **start**: the dirt under the start that openmx prints is the shell ground's; at the end of the ride the
+  bike is within 3 ft of the ground under it, and nothing wrecked it (`wreck: reason N`). The original
+  stands the rider on the ground over a start under it (M12, M13), so the scene's own `y` is only noted.
+- **edge**: openmx's `map: W x D` is the scene's `256 × w × scale` (MD3), and the rider is not thrown off
+  the map (wreck 13). The file's box and `TerrainBorderWidth` are noted.
+- **look**: the overview shots of all 96 read by eye on six contact sheets, and the toy shots of MC01,
+  Nat04, Nat08 and Nat10.
+
+openmx `2e369b3`, built into the slot's `extracted/openmx-target`. RAM images: M12's (slot s2) and M13's.
+All 96 in 3 minutes, four at a time.
+
+**In short.** All 96 load with nothing refused. Every height equals the original's at 8,000 points on
+all 96, and the shell's ride query equals the harness's everywhere but the last sample row and column (†:
+`world::Ground::at` stops a sample short; inside the 150 ft shoot-back margin; asked). MD4 draws every
+map's ground from its own pages: no flat ground on any of the 96. The start fails on 24 maps: on 12 of
+the 14 whose scene start is under the ground openmx does not stand the rider on it (asked again, with
+the ride's evidence), on 11 arenas the rider is thrown off the map at once (openmx's edge leaves out
+`TerrainBorderWidth`, which the game holds; asked), and on Nat_PA the rider drops 129 ft and wrecks.
+MD5's windmill: the tower is drawn and its blades are not, and the same for Nat10's mill wheel and Nat04's
+Ferris wheel. Animated toys are openmx's V43, open.
+
+| map | loads | heights | start | edge | look |
+|---|---|---|---|---|---|
+| `mxvatv_fs01` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs02` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: start 20.9 ft under the dirt; wreck 11 (landed on the rear) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs03` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs04` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs05` | ok: taken; Anaheim_pole.col not loaded (todo) | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: start 23.5 ft under the dirt; bike ends -21.5 ft off the ground; wreck 13 (off the map) | **no**: 896×896; border 3000, game holds 6896×6896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs06` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: start 20.0 ft under the dirt; bike ends -12.1 ft off the ground; wreck 11 (landed on the rear), 11 (landed on the rear) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs07` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_fs08` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.3 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_mc01` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured; windmill tower drawn, its blades not (V43) |
+| `mxvatv_mc02` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_mc03` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.4 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_mc04` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_mc05` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_mc06` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1250, game holds 3396×3396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_mc07` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 2500, game holds 5896×5896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_mc08` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 768×768; file's box 896×896; border 3000, game holds 6768×6768; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_mc09` | ok: taken; Ring_Trigger.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_mc10` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat01` | ok: taken; recycling_can.col, trash_can.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat02` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat03` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat04` | ok: taken | ok: 8,000 of 8,000 equal; box 5760×5760, game's 4032×5760 | ok: on the ground (-0.5 ft) | ok: 5760×5760; file's box 4032×5760 | ground textured; Ferris wheel's stand drawn, the wheel not (V43) |
+| `mxvatv_nat05` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat06` | ok: taken; Dino_Egg_A.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat07` | ok: taken; Nat07_churchsnow.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat08` | ok: taken; NatDropGate.col, NatStartGate.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat09` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat10` | ok: taken; nat10_Mailbox_Closed.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 311.8 ft under the dirt; wreck 11 (landed on the rear) | ok: 5760×5760 | ground textured; mill house drawn, its wheel not (V43) |
+| `mxvatv_nat11` | ok: taken; NatDropGate.col, NatStartGate.col, SingleBale01.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat12` | ok: taken; Nat12_Sphinx.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat13` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat14` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 6.4 ft under the dirt; wreck 11 (landed on the rear) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat15` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat16` | ok: taken; NatDropGate.col, NatStartGate.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_nat17` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.4 ft) | ok: 5760×5760 | ground textured |
+| `mxvatv_sm01` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 201.4 ft under the dirt; bike ends -189.9 ft off the ground; wreck 11 (landed on the rear), 11 (landed on the rear) | ok: 5760×5760 | ground textured |
+| `mxvatv_sm02` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 172.6 ft under the dirt; wreck 11 (landed on the rear) | ok: 5760×5760 | ground textured |
+| `mxvatv_sm03` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 165.0 ft under the dirt; wreck 11 (landed on the rear) | ok: 5760×5760 | ground textured |
+| `mxvatv_sx01` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 1280×1280; border 3000, game holds 7280×7280 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx02` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 1280×1280; border 2000, game holds 5280×5280 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx03` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx04` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx05` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1250, game holds 3396×3396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx06` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1250, game holds 3396×3396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx07` | ok: taken | ok: 8,000 of 8,000 equal; 8 in the last strip †; box 896×1792, game's 896×896 | ok: on the ground (-0.4 ft) | ok: 896×1792; file's box 896×896; border 1000, game holds 2896×3792 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx08` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 896×896; border 1250, game holds 3396×3396; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx09` | ok: taken; Anaheim_pole.col not loaded (todo) | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 3000, game holds 6896×6896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx10` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 2500, game holds 5896×5896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx11` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1250, game holds 3396×3396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx12` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1250, game holds 3396×3396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx13` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.4 ft) | ok: 896×896; border 3500, game holds 7896×7896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx14` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx15` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx16` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 250, game holds 1396×1396 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx17` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 8000, game holds 16896×16896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `mxvatv_sx18` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 768×768; file's box 896×896; border 3000, game holds 6768×6768; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_am_cs` | ok: taken; AM_CS_Metal_Bracket.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_am_gfuc` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured; a grey slab (race prop, MD13) |
+| `untamed_am_jy` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 4480×4480 | ground textured |
+| `untamed_bt_a` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 360.0 ft under the dirt; bike ends -290.6 ft off the ground | ok: 5760×5760 | ground textured |
+| `untamed_bt_b` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 360.0 ft under the dirt; bike ends -290.6 ft off the ground | ok: 5760×5760 | ground textured |
+| `untamed_fs_a` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: bike ends +12.4 ft off the ground; wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_fs_b` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: bike ends +6.1 ft off the ground; wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_fs_c` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: bike ends +3.6 ft off the ground; wreck 13 (off the map) | **no**: 896×896; border 5000, game holds 10896×10896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_fs_d` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: bike ends +3.2 ft off the ground; wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_mt_a` | ok: taken; FP06B6.col not loaded (todo) | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 2500, game holds 5896×5896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_nat_az` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_nat_co` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 7.8 ft under the dirt; wreck 11 (landed on the rear) | ok: 4480×4480 | ground textured |
+| `untamed_nat_dvca` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: start 0.6 ft under the dirt | ok: 4480×4480 | ground textured |
+| `untamed_nat_in` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured; a grey slab (race prop, MD13) |
+| `untamed_nat_ma` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: start 0.8 ft under the dirt | ok: 4480×4480 | ground textured; a grey slab (race prop, MD13) |
+| `untamed_nat_md` | ok: taken; NAT_MD_Drum2.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_nat_nc` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured; a grey slab (race prop, MD13) |
+| `untamed_nat_ny` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 4480×4480 | ground textured |
+| `untamed_nat_or` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_nat_pa` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: wreck 5 (landed too hard) | ok: 5760×5760 | ground textured |
+| `untamed_nat_sdca` | ok: taken; SDCA_Powerlines.col not loaded (todo) | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_nat_ut` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_sm_as` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_sm_cf` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 4480×4480 | ground textured |
+| `untamed_sm_hs` | ok: taken | ok: 8,000 of 8,000 equal; box 5760×5760, game's 4032×5760 | ok: on the ground (-0.5 ft) | ok: 5760×5760; file's box 4032×5760 | ground textured |
+| `untamed_sm_mb` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | **no**: start 334.1 ft under the dirt; bike ends -287.9 ft off the ground; wreck 1 (over the bars) | ok: 5760×5760 | ground textured |
+| `untamed_sm_of` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_sm_s1` | ok: taken | ok: 8,000 of 8,000 equal; 2 in the last strip † | ok: on the ground (-0.5 ft) | ok: 5760×5760 | ground textured |
+| `untamed_sx_a` | ok: taken; FP01A_E.col not loaded (todo) | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.4 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_b` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_c` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_d` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 5000, game holds 10896×10896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_e` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: start 3.2 ft under the dirt | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_f` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_g` | ok: taken; FP03B4.col not loaded (todo) | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_h` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: start 2.4 ft under the dirt | ok: 896×896; border 5000, game holds 10896×10896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_i` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: start 9.6 ft under the dirt; wreck 11 (landed on the rear) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_j` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_k` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
+| `untamed_sx_l` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
+
+† the last sample row and column: `World::ground` gives no ground at x or z ≥ (samples − 1) × spacing, where the original's query and the harness answer (notes/openmx-asks.md).

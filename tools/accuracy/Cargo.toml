@@ -13,6 +13,8 @@ ps2-float = { path = "../../openmx/crates/ps2-float" }
 ps2-oracle = { path = "../../openmx/crates/ps2-oracle" }
 # The disc found by its boot ELF, for `accuracy setup`.
 discx = { path = "../discx" }
+# The mod as openmx's shell opens it (T10): Res::folder.
+game-render = { path = "../../openmx/crates/game-render", default-features = false }
 # The MD1 view and mod.json's reader.
 modcheck = { path = "../modcheck" }
 

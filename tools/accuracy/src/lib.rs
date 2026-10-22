@@ -8,6 +8,8 @@
 //!
 //! - [`sceneram`] and [`loaded`] (M12): the scene's fog, environment and start as the game holds them,
 //!   and the files it opened for the map, against the mod.
+//! - [`ride`] (T10): the mod ridden in openmx headless, and what its log says against the map: loads,
+//!   the shell's ground at the harness's points, the start on the ground, the map's edge.
 //!
 //! [`source`] says where each game keeps the things this reads; `notes/accuracy.md` how they were found
 //! and how to run it.
@@ -19,6 +21,7 @@ pub mod look;
 pub mod modfiles;
 pub mod pose;
 pub mod ram;
+pub mod ride;
 pub mod sceneram;
 pub mod source;
 
