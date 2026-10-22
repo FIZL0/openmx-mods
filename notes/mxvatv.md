@@ -94,7 +94,8 @@ Its section differs by series:
 - **Supercross** (SX01–18): `ATYFile = FreeRide.aty` from the map's own folder (262 bytes: three camera-flash
   groups, three crowd groups), `AllowRadar = FALSE`.
 
-Where no start is given, where the game puts the rider is not known (not looked up in the ELF).
+Where no start is given, the game puts the rider at the scene's `DefaultStartPosition` (M12, seen in
+PCSX2 on every map; *Against the game*).
 
 Columns: **map**; **name**, the `.atyList`'s `DisplayName` (the store's text where it differs); **UI**,
 the map's place in `UI\Tracks.dat`, ✓ = unlocked at the start; **activities**, from `[General]`, by `Type`
@@ -206,7 +207,8 @@ because its archives lack them (M15, *Loose PSR members* below). Every loose mem
 
 - **Name and start**: the `.atyList`'s `DisplayName`, and its `[Free Ride]` `StartPosition` /
   `StartDirection` as `spawn` on MC01 and FS05. The other 54 spawn at the scene's
-  `DefaultStartPosition`, and their todo says that is not known to be the game's.
+  `DefaultStartPosition`, which M12 saw is the game's (*Against the game*); their todo now says so only
+  where that is under the ground.
 - **Scene keys MX Unleashed never has**, against MXU's 57 scenes (`src/mxu_keys.rs`):
   `EcoAmbientScale` and `EcoDiffuseScale` in every `[Environment]` (1,1,1 on all but two maps).
   On the 27 big maps (Nat01–17, SM01–03, MC01–05, MC09–10), `[Model<n>]` and `[Object<n>]` also carry
@@ -452,6 +454,132 @@ the two archives, except one on Nat16. The gaps are in names, a few model stream
   lower-cases them, so that is harmless. `Tex\Screen.psm` (the stadiums' jumbotrons) names
   `RenderTarget`, as on MXU.
 
+## Against the game (M12)
+
+Every map, 2026-10-22, in PCSX2 (kit copy 9, the USA disc): a Free Ride on it with a bike, a RAM image of
+the ride, and `tools/accuracy` (T7) on the image and the mod (`notes/accuracy.md`, *Every map*). Four
+things are checked, and the mods in `out/mods/tracks/` are the importer's after the fixes below:
+
+- **Heights** (`accuracy heights`): the game's two terrain queries (`0x4838f0`, the wheels' `0x4833c0`)
+  run on the image, against openmx's on the mod's `.trn`, at 2,000 points in each of the four ways a
+  terrain object can be set (8,000), every field bit for bit.
+- **Scene** (`accuracy scene`): `[SceneInfo]`, `[Fog]`, `[Environment]` and the two lights as the game's
+  readers left them, against the `.scn` read as openmx reads it. 28–31 fields a map.
+- **Files** (`accuracy files`): every name in the game's resource name pool that is the map's (props,
+  shapes, materials, species, sky, terrain, toys), against the mod's files.
+- **Shots** (`accuracy shoot`): the original's half of the pairs, from 9–11 poses a map (611 in all) (the scene's
+  start, the centre looking four ways, an overview, the highest ground looking across, two or three
+  landmarks, and the game's own camera as it was), in `out/accuracy/<map>/` (not in git). openmx's half
+  waits on MD2 and MD10 (T9).
+
+**What matches, on all 56.** Every height, surface and corner weight (8,000 points a map); every normal,
+once MX vs. ATV's cell-reader step is applied (`notes/openmx-asks.md`); the game's terrain box, which is
+the file's leaves; every scene field (the start, the fog's colour, visibility, haziness and distances,
+the terrain keys, `MinDivisionSize`, the eco distances, `ShrubberyDistLimit`, `DetailMapTilingMultiplier`,
+the eco scales, both lights' colours, the sun's position, and its direction to 1–2 ulp of `Target -
+Position` made unit); and every file the game opened for the map. No map turns on the packed normal
+table. Every scene gives every `[Fog]` and `[Environment]` key the readers default, except
+`EcosystemFile` (27 maps).
+
+**What the importer was missing, and now copies** (`pull_loose`; each pulled member is in mod.json's
+`loose` with the reason):
+
+- the shadow materials, `Tex\shadowCaster<n>.psm`, `terrainShadowReceiver<n>.psm` and
+  `shadowReceiver<n>.psm` for n = 1–6 (`0x0031bc90`, six sets on every map), 18 on each;
+- the toys' physics collections: the `.pco` of the first `NumberOfPhysicsCollections` sections
+  `[PhysicsCollection<n>]` of `<map>.toy` (`0x002171b0`, in the map's folder), and each part's
+  `Col\<Name>m.col` and `f.col` (GAME_REL.BIN `0x004922a0`). Lago's saloon doors; Nat01, Nat02, Nat05,
+  Nat06 and Nat07 have them;
+- the machines' particle sheets in the map's folder (`0x004a6810`): `<machine>particles.dat`,
+  `<machine>aiparticles.dat` and `mx`/`atvparticlezones.dat`, which the game takes over `Part\`'s.
+  On a bike MC10, Nat02 and SM01–03 open their own `mxparticlezones.dat` (seen in the pool); 15 maps have
+  some sheet for some machine.
+
+**Where the Free Ride starts.** At the scene's `DefaultStartPosition` facing `DefaultStartDirection`, or
+the `.atyList`'s `StartPosition` on MC01 and FS05 (MC01's camera was 15 ft from it, 1,203 ft from the
+scene's). About a minute in, the ride camera was 14 ft behind the start on 50 maps; on six the rider
+had rolled downhill (FS08, MC05, Nat05, Nat14, Nat17, SX06, 39–263 ft). On FS02, FS06, Nat10, Nat14 and
+SM01–03 the start is under the ground (6–312 ft), and the game stands the rider on the ground over it.
+The importer's todo now says so on those seven, and no longer says the start is unknown on the rest.
+
+**What differs, and why** (the port's side; `notes/openmx-asks.md`):
+
+- **Normals**, every map: openmx's query keeps the raw normal bytes, MX vs. ATV's divides by 127. 1–3
+  ulp a lane at 60–91 % of the points.
+- **The box**, the 28 arenas and Nat04: openmx's `world::Ground` sizes the terrain from the scene
+  (`TerrainWidth × 16^levels`), the game from the file. The heights still agree (the query does not
+  clamp to the box).
+- **Camera-following props**, MC01, Nat04, Nat16: `Type=CameraFollowing` (the rain sheet `CameraRain`
+  on MC01) follows the camera in the game, and openmx would draw it once at the map's centre.
+- **Physics objects**, Nat01, Nat02, Nat05, Nat06, Nat07: the `.pco` are in the mods now, but openmx has
+  no reader for them.
+- **The start under the ground**, FS02, FS06, Nat10, Nat14, SM01–03 (above).
+
+M2's todo items stand as they were (class-1 `.col`, the missing `.col`, the `.mot`, the activity keys, …):
+this pass found nothing that changes them. *Pool* below: on MC01–05, MC07 and MC08 a later file had
+overwritten the pool's head by the time of the capture, so the names from the scene's to the first left
+were not seen; *files* counts the rest. *Shots*: on MC09, MC10 and Nat16 only two landmarks are 300 ft
+apart (MC06: one), so ten poses (nine).
+
+| map | name | heights equal at, normals with the step | scene fields equal | map's files opened, in the mod | shots | the importer now copies | differs (the port's side) |
+|---|---|---|---|---|---|---|---|
+| fs01 | Little Rock FMX | 8000 ✓ | 28/28 | 381/381 | 11 | 18 shadow materials | normals 60 % 1–3 ulp (the step); Ground's box |
+| fs02 | Austin FMX | 8000 ✓ | 28/28 | 425/425 | 11 | 18 shadow materials | normals 60 % 1–3 ulp (the step); Ground's box; start under the ground |
+| fs03 | Boston FMX | 8000 ✓ | 28/28 | 384/384 | 11 | 18 shadow materials | normals 70 % 1–3 ulp (the step); Ground's box |
+| fs04 | St. Paul FMX | 8000 ✓ | 28/28 | 406/406 | 11 | 18 shadow materials | normals 68 % 1–3 ulp (the step); Ground's box |
+| fs05 | New Orleans FMX | 8000 ✓ | 28/28 | 412/412 | 11 | 18 shadow materials | normals 71 % 1–3 ulp (the step); Ground's box |
+| fs06 | Las Vegas FMX | 8000 ✓ | 28/28 | 393/393 | 11 | 18 shadow materials | normals 66 % 1–3 ulp (the step); Ground's box; start under the ground |
+| fs07 | Portland FMX | 8000 ✓ | 28/28 | 415/415 | 11 | 18 shadow materials | normals 61 % 1–3 ulp (the step); Ground's box |
+| fs08 | Orlando FMX | 8000 ✓ | 28/28 | 421/421 | 11 | 18 shadow materials | normals 70 % 1–3 ulp (the step); Ground's box |
+| mc01 | Killington | 8000 ✓ | 31/31 | 148/148 (head lost) | 11 | 18 shadow materials | normals 85 % 1–3 ulp (the step); camera-following prop |
+| mc02 | Desert Oasis | 8000 ✓ | 31/31 | 172/172 (head lost) | 11 | 18 shadow materials, 2 particle sheets | normals 90 % 1–3 ulp (the step) |
+| mc03 | Red Country | 8000 ✓ | 31/31 | 107/107 (head lost) | 11 | 18 shadow materials, 2 particle sheets | normals 90 % 1–3 ulp (the step) |
+| mc04 | Glamis South | 8000 ✓ | 31/31 | 136/136 (head lost) | 11 | 18 shadow materials, 2 particle sheets | normals 88 % 1–3 ulp (the step) |
+| mc05 | Woodstock | 8000 ✓ | 31/31 | 99/99 (head lost) | 11 | 18 shadow materials, 2 particle sheets | normals 88 % 1–3 ulp (the step) |
+| mc06 | Monster Stadium | 8000 ✓ | 28/28 | 149/149 | 9 | 18 shadow materials, 2 particle sheets | normals 70 % 1–3 ulp (the step); Ground's box |
+| mc07 | Trophy Stadium | 8000 ✓ | 28/28 | 391/391 (head lost) | 11 | 18 shadow materials | normals 76 % 1–3 ulp (the step); Ground's box |
+| mc08 | 19th Hole | 8000 ✓ | 28/28 | 690/690 (head lost) | 11 | 18 shadow materials | normals 74 % 1–3 ulp (the step); Ground's box |
+| mc09 | Quechee Gulch | 8000 ✓ | 31/31 | 131/131 | 10 | 18 shadow materials | normals 88 % 1–3 ulp (the step) |
+| mc10 | Land and Air | 8000 ✓ | 31/31 | 146/146 | 10 | 18 shadow materials, 2 particle sheets | normals 87 % 1–3 ulp (the step) |
+| nat01 | Goblin Gulch | 8000 ✓ | 31/31 | 203/203 | 11 | 18 shadow materials, 6 physics files | normals 90 % 1–3 ulp (the step); physics objects (.pco) |
+| nat02 | Tipperary | 8000 ✓ | 31/31 | 462/462 | 11 | 18 shadow materials, 2 particle sheets | normals 90 % 1–3 ulp (the step); physics objects (.pco) |
+| nat03 | Glamis | 8000 ✓ | 31/31 | 454/454 | 11 | 18 shadow materials, 2 particle sheets | normals 87 % 1–3 ulp (the step) |
+| nat04 | Oceanside | 8000 ✓ | 31/31 | 351/351 | 11 | 18 shadow materials | normals 80 % 1–3 ulp (the step); Ground's box; camera-following prop |
+| nat05 | Lago | 8000 ✓ | 31/31 | 326/326 | 11 | 18 shadow materials, 6 physics files, 2 particle sheets | normals 88 % 1–3 ulp (the step); physics objects (.pco) |
+| nat06 | Juniper Park | 8000 ✓ | 31/31 | 291/291 | 11 | 18 shadow materials, 30 physics files | normals 88 % 1–3 ulp (the step); physics objects (.pco) |
+| nat07 | Valhalla | 8000 ✓ | 31/31 | 218/218 | 11 | 18 shadow materials, 3 physics files, 2 particle sheets | normals 86 % 1–3 ulp (the step); physics objects (.pco) |
+| nat08 | Redwood Valley | 8000 ✓ | 31/31 | 238/238 | 11 | 18 shadow materials | normals 90 % 1–3 ulp (the step) |
+| nat09 | Deadman Wash | 8000 ✓ | 31/31 | 465/465 | 11 | 18 shadow materials, 2 particle sheets | normals 88 % 1–3 ulp (the step) |
+| nat10 | Maple Hill | 8000 ✓ | 31/31 | 334/334 | 11 | 18 shadow materials | normals 89 % 1–3 ulp (the step); start under the ground |
+| nat11 | Sutter Raceway | 8000 ✓ | 31/31 | 429/429 | 11 | 18 shadow materials | normals 90 % 1–3 ulp (the step) |
+| nat12 | Temple of Apophis | 8000 ✓ | 31/31 | 204/204 | 11 | 18 shadow materials | normals 89 % 1–3 ulp (the step) |
+| nat13 | Sienna Ridge | 8000 ✓ | 31/31 | 281/281 | 11 | 18 shadow materials | normals 86 % 1–3 ulp (the step) |
+| nat14 | Santiago | 8000 ✓ | 31/31 | 446/446 | 11 | 18 shadow materials | normals 90 % 1–3 ulp (the step); start under the ground |
+| nat15 | Smuggler's Notch | 8000 ✓ | 31/31 | 404/404 | 11 | 18 shadow materials | normals 90 % 1–3 ulp (the step) |
+| nat16 | Northern Lights | 8000 ✓ | 31/31 | 151/151 | 10 | 18 shadow materials, 2 particle sheets | normals 86 % 1–3 ulp (the step); camera-following prop |
+| nat17 | Keweni Falls | 8000 ✓ | 31/31 | 225/225 | 11 | 18 shadow materials | normals 87 % 1–3 ulp (the step) |
+| sm01 | Mesa | 8000 ✓ | 31/31 | 384/384 | 11 | 18 shadow materials, 6 particle sheets | normals 83 % 1–3 ulp (the step); start under the ground |
+| sm02 | Highlands | 8000 ✓ | 31/31 | 422/422 | 11 | 18 shadow materials, 6 particle sheets | normals 88 % 1–3 ulp (the step); start under the ground |
+| sm03 | The Glades | 8000 ✓ | 31/31 | 400/400 | 11 | 18 shadow materials, 6 particle sheets | normals 88 % 1–3 ulp (the step); start under the ground |
+| sx01 | Los Angeles | 8000 ✓ | 28/28 | 778/778 | 11 | 18 shadow materials | normals 68 % 1–3 ulp (the step); Ground's box |
+| sx02 | Denver | 8000 ✓ | 28/28 | 768/768 | 11 | 18 shadow materials | normals 73 % 1–3 ulp (the step); Ground's box |
+| sx03 | Savannah | 8000 ✓ | 28/28 | 721/721 | 11 | 18 shadow materials | normals 71 % 1–3 ulp (the step); Ground's box |
+| sx04 | San Diego | 8000 ✓ | 28/28 | 698/698 | 11 | 18 shadow materials | normals 74 % 1–3 ulp (the step); Ground's box |
+| sx05 | Austin | 8000 ✓ | 28/28 | 673/673 | 11 | 18 shadow materials | normals 79 % 1–3 ulp (the step); Ground's box |
+| sx06 | Little Rock | 8000 ✓ | 28/28 | 673/673 | 11 | 18 shadow materials | normals 83 % 1–3 ulp (the step); Ground's box |
+| sx07 | St. Paul | 8000 ✓ | 28/28 | 709/709 | 11 | 18 shadow materials | normals 77 % 1–3 ulp (the step); Ground's box |
+| sx08 | Boston | 8000 ✓ | 28/28 | 687/687 | 11 | 18 shadow materials | normals 73 % 1–3 ulp (the step); Ground's box |
+| sx09 | New Orleans | 8000 ✓ | 28/28 | 753/753 | 11 | 18 shadow materials | normals 78 % 1–3 ulp (the step); Ground's box |
+| sx10 | Toronto | 8000 ✓ | 28/28 | 683/683 | 11 | 18 shadow materials | normals 80 % 1–3 ulp (the step); Ground's box |
+| sx11 | Orlando | 8000 ✓ | 28/28 | 676/676 | 11 | 18 shadow materials | normals 78 % 1–3 ulp (the step); Ground's box |
+| sx12 | Philadelphia | 8000 ✓ | 28/28 | 710/710 | 11 | 18 shadow materials | normals 76 % 1–3 ulp (the step); Ground's box |
+| sx13 | Las Vegas | 8000 ✓ | 28/28 | 717/717 | 11 | 18 shadow materials | normals 80 % 1–3 ulp (the step); Ground's box |
+| sx14 | Mexico City | 8000 ✓ | 28/28 | 670/670 | 11 | 18 shadow materials | normals 73 % 1–3 ulp (the step); Ground's box |
+| sx15 | Portland | 8000 ✓ | 28/28 | 715/715 | 11 | 18 shadow materials | normals 75 % 1–3 ulp (the step); Ground's box |
+| sx16 | Tucson | 8000 ✓ | 28/28 | 699/699 | 11 | 18 shadow materials | normals 81 % 1–3 ulp (the step); Ground's box |
+| sx17 | Charleston | 8000 ✓ | 28/28 | 747/747 | 11 | 18 shadow materials | normals 77 % 1–3 ulp (the step); Ground's box |
+| sx18 | Boulder | 8000 ✓ | 28/28 | 727/727 | 11 | 18 shadow materials | normals 75 % 1–3 ulp (the step); Ground's box |
+
 ## Survey tables
 
 `cargo run --release -p survey -- mxvatv`, 2026-10-22. † = read through the view above.
@@ -597,5 +725,8 @@ the two archives, except one on Nat16. The gaps are in names, a few model stream
 - Whether MX Unleashed's own loader takes an 80×80-leaf terrain (T3) is open.
 - M8's Free Ride table is read from the `.atyList`s, `UI\Tracks.dat` and `UI\Store.dat` only. That the
   game offers every one of them in its Free Ride menu was not seen in PCSX2 (T7), and the type →
-  `Env\<Type>.aty` link is read from the ELF's strings, not its code. Where the game starts a Free Ride
-  that has no `StartPosition` was not looked up.
+  `Env\<Type>.aty` link is read from the ELF's strings, not its code. (M12 rode every map's Free Ride
+  and saw where each starts: *Against the game*.)
+- M12 (*Against the game*): the look was checked through what the game holds (scene, files) and the
+  original's shots; openmx's half of the pairs waits on MD2 and MD10 (T9), so no picture was compared.
+  Ecosystem density, `[DistanceFade]` and the lights' shadow keys were not read from RAM.

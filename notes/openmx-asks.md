@@ -189,6 +189,41 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   where openmx's misses; (2) a global (`0x541518`) switches the reader to a packed normal table (`0x39e320`).
   It is off on Lago. Fix: a per-source variant of the query for MX vs. ATV mod tracks (the normal step
   and the clamp), chosen from mod.json's `source.boot`, if wheels on those tracks are to be bit-exact.
+- **New: `world::Ground` sizes a terrain from the scene, the game from the file** (M12, `notes/mxvatv.md`
+  *Against the game*). `Ground::new` takes `TerrainWidth × 16^levels` samples a side. MX vs. ATV
+  Unleashed's terrain object (its box at `+0x30/+0x40`, read in a ride on every map) reaches as far as
+  the file's leaves do, 16 samples a leaf. On the 28 one-level terrains (FS01–08, MC06–08, SX01–18) the
+  port's box is 56 × 56 ft (SX01–02: 80) where the game's is 896 × 896 (1,280); on SX07 (`TerrainBreadth=2`)
+  56 × 112; on Nat04 (56 × 80 leaves, the scene says 5 × 5) 5,760 × 5,760 where the game's is
+  4,032 × 5,760. `contact_search::ground` does not clamp to the box, so every height on those maps is still
+  the game's (`tools/accuracy heights`, 8,000 points a map). What reads `Ground::extent` (the edge, the
+  radar, the spawn checks) gets the wrong size. Fix: the field's size from the file's leaves (as
+  `tools/accuracy/src/look.rs` `leaf_extent` walks them), part of MD3.
+- **MX vs. ATV's normal step, on every map** (M12). The T7 entry above (`0x47b300` hands the normals back
+  over 127) holds on all 56 MX vs. ATV Unleashed maps: heights, surfaces and weights equal at 8,000 points
+  a map in the four modes, normals 1–3 ulp off at 61–91 % of them, every field equal with the step. No
+  map turns on the packed normal table (`0x541518`).
+- **New: camera-following props** (M12). MC01, Nat04 and Nat16 place a `[Model<n>]` with
+  `Type=CameraFollowing`, `FollowCamera=TRUE` (`SLT=CameraRain` on MC01, at the map's centre): the rain
+  (snow) sheet the game draws round the camera (MC01's shots in `out/accuracy/mc01/`). `track::Scene`
+  reads no `Type`, so the port draws it once, fixed where the scene puts it. Fix: a model whose `Type` is
+  `CameraFollowing` follows the camera (its `MaxTiltAngle`, `MaxVelocity` and `RenderLoop<n>Camera` keys
+  say how), and is not drawn in place.
+- **New: physics collections** (M12). The game opens `<map folder>\<Name>.pco` for the first
+  `NumberOfPhysicsCollections` `[PhysicsCollection<n>]` of the map's `.toy` (SLUS_211.04 `0x002171b0`), and
+  each part's `Col\<Name>m.col` and `f.col` (GAME_REL.BIN `0x004922a0`): Lago's saloon doors, swinging on
+  pins (`[Constraint<n>] Type = Pin`, ±70°). Nat01, Nat02, Nat05, Nat06 (ten) and Nat07 have them. The mods
+  carry them now; no openmx reader takes a `.pco`, so the doors stand as fixed props, if at all. Fix: a
+  `.pco` reader and the rigid bodies (a later MD task; the class-1 animated `.col` of MD5 are the same
+  family).
+- **New: a Free Ride start under the ground** (M12). Every MX vs. ATV Unleashed Free Ride starts at the
+  scene's `DefaultStartPosition` (or the `.atyList`'s `StartPosition` on MC01 and FS05), seen in PCSX2 on
+  all 56 maps: about a minute in, the ride camera is 14 ft behind it on 50 (and 5 ft up), and the other
+  six had rolled downhill from it (FS08, MC05, Nat05, Nat14, Nat17, SX06: 39–263 ft). On FS02, FS06,
+  Nat10, Nat14 and SM01–03 that position is under the ground (6–312 ft; `y` 90 or 135 on all but Nat14),
+  and the game stands the rider on the ground over it (the camera 5 ft over the ground, 20–310 ft over
+  the start; Nat14 had rolled away). Fix (MD2): a mod track's spawn takes the ground's height where the
+  scene's is below it. Each such mod's `todo` says so.
 - **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
   --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
   Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive

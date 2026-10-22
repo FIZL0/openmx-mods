@@ -22,6 +22,11 @@ pub fn pair_png(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}.pair.png"))
 }
 
+/// Whether a file is a whole PNG: it ends in the `IEND` chunk (its name and CRC, the last 8 bytes).
+pub fn png_complete(path: &Path) -> bool {
+    std::fs::read(path).is_ok_and(|b| b.len() > 12 && b.starts_with(b"\x89PNG") && &b[b.len() - 8..b.len() - 4] == b"IEND")
+}
+
 /// The folder's poses, in file order.
 pub fn read_poses(dir: &Path) -> Result<Vec<(String, Pose)>, String> {
     let p = dir.join(POSES);
@@ -174,6 +179,49 @@ pub fn openmx_ready(openmx: &Path, template: &str) -> Result<(), String> {
 /// The ride camera's field of view on MX vs. ATV, which the generated poses keep.
 pub const FOV: f32 = 85.0;
 
+/// The terrain's box as the game's object has it (M12): as far as the file's leaves reach, 16 samples a
+/// leaf at the file's scale. On every MX vs. ATV map it is the object's own box (`heights`' box check).
+/// openmx's `world::Ground` takes the scene's `TerrainWidth x 16^levels` samples instead, which on a
+/// one-level terrain (the arenas) is 16, not 256, and on Nat04 (56 x 80 leaves, the scene says 5 x 5)
+/// is 1280 across, not 896 (notes/openmx-asks.md).
+pub fn terrain_box(_m: &crate::modfiles::TrackMod, terrain: &game_sim::track::Terrain) -> (f32, f32) {
+    let (x, z) = leaf_extent(terrain);
+    let s = terrain.scale.0;
+    (x as f32 * s, z as f32 * s)
+}
+
+/// How many samples across and along the file's leaves reach: the farthest leaf's far edge.
+pub fn leaf_extent(t: &game_sim::track::Terrain) -> (u32, u32) {
+    fn walk(t: &game_sim::track::Terrain, node: &game_sim::track::TerrainNode, left: u32, ox: u32, oz: u32, max: &mut (u32, u32)) {
+        if left == 0 {
+            max.0 = max.0.max(ox + 16);
+            max.1 = max.1.max(oz + 16);
+            return;
+        }
+        let span = 16u32.pow(left);
+        for cz in 0..16 {
+            for cx in 0..16 {
+                if let Some(child) = t.child(node, cx, cz).and_then(|at| t.node(at)) {
+                    walk(t, &child, left - 1, ox + cx * span, oz + cz * span, max);
+                }
+            }
+        }
+    }
+    let mut max = (0, 0);
+    if let Some(root) = t.root() {
+        walk(t, &root, t.levels, 0, 0, &mut max);
+    }
+    max
+}
+
+/// The ground's height at `x, z`: the port's terrain query (`contact_search::ground`, which the heights
+/// check proves equal to the original's), 0 off the terrain.
+pub fn height_at(field: &game_sim::contact_search::TerrainField, x: f32, z: f32) -> f32 {
+    let at = ps2_float::Vf::new(x, 0.0, z, 1.0);
+    let g = game_sim::contact_search::ground(field, at);
+    if g.point.y().is_finite() { g.point.y() } else { 0.0 }
+}
+
 /// A pose list for a map, from its own terrain: the scene's start seen from behind the rider, the map's
 /// centre looking north, east, south and west, an overview from high over the centre, and the highest
 /// ground found (a sample in 32 across) looking across to the centre. Heights are openmx's ground under
@@ -181,9 +229,9 @@ pub const FOV: f32 = 85.0;
 pub fn standard_poses(m: &crate::modfiles::TrackMod) -> Vec<(String, Pose)> {
     let terrain = m.parse();
     let ground = game_sim::world::Ground::new(&terrain, &m.layout);
-    let (ex, ez) = ground.extent();
-    let (ex, ez) = (ex.0, ez.0);
-    let y_at = |x: f32, z: f32| ground.at(ps2_float::F(x), ps2_float::F(z)).map_or(0.0, |h| h.y.0);
+    let field = ground.field();
+    let (ex, ez) = terrain_box(m, &terrain);
+    let y_at = |x: f32, z: f32| height_at(&field, x, z);
     let mut out = Vec::new();
 
     let [sx, sy, sz] = m.start;

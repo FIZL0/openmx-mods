@@ -8,7 +8,7 @@
   put at the pose over PINE) and openmx's (`--shot-pose`, openmx MD10), side by side in
   `out/accuracy/<map>/`.
 
-Proved on one map: MX vs. ATV Unleashed's **Lago** (`Nat05`, `mxvatv_nat05`). The heights are equal at
+Proved on one map by T7: MX vs. ATV Unleashed's **Lago** (`Nat05`, `mxvatv_nat05`); M12 ran it on all 56 (*Every map*, below). The heights are equal at
 every point. The original's half of the pairs is taken from 8 poses. openmx's half is waiting on openmx
 MD2 (a track from a mod folder) and MD10 (`--shot-pose`). Neither is in openmx yet.
 
@@ -179,6 +179,55 @@ that in mind, or find the HUD's switch first.
   bike a starting speed.
 - **The heights are copied exactly**, so the importer needs no change for the ground. For bit-exact
   wheels, openmx's query needs MX vs. ATV's normal step and its clamp (openmx-asks).
+
+## Every map (M12)
+
+M12 ran the harness over all 56 MX vs. ATV Unleashed maps, one Free Ride each, in kit copy 9. The
+per-map table is in `notes/mxvatv.md`, *Against the game (M12)*; this is how it was run.
+
+**Getting to each map.** A fresh profile has six maps open. The cheat `PITPASS` (Options > Cheat
+Codes; the game's list is `UI\CheatCodes.txt`, `TOOLAZY` opens everything) opens all tracks. State 5 of
+copy 9 is the Free Ride track list after it, cursor on the first track. Presses still drop while a
+preview loads, so the driver reads the list's place instead of counting presses: in that state the
+cursor's row in the window is the word at `0x124cea4` and the window's first track the word at
+`0x124cee4` (heap addresses, good for state 5 only); their sum + 1 is the map's place in
+`UI\Tracks.dat` (M8's *UI* column). Down (or Up) until it is the map's, then Cross, Cross (Start Event),
+about 35 s of loading, then `accuracy capture` until `accuracy pose` finds the ride camera. Per map
+(`one.sh` in the session's scratch, not kept): `capture`, `heights --points 2000`, `poses --landmarks
+3`, `shoot --live live`, `shoot`, `pair`; then `scene` and `files` on the image. About 2.5 minutes a map.
+
+**New commands.**
+
+- `accuracy scene --mod DIR --ram IMAGE`: `[SceneInfo]`, `[Fog]`, `[Environment]` and the lights as the
+  game holds them, against the `.scn` read the way openmx reads its numbers (`strtod`, then the
+  truncating double-to-float), bit for bit. The readers and offsets are in `tools/accuracy/src/sceneram.rs`.
+  A key the scene leaves out is compared with the reader's default; every MX vs. ATV scene gives all of
+  them except `EcosystemFile` (27 maps), and the five eco keys are not read without one.
+- `accuracy files --mod DIR --ram IMAGE`: the names the game opened, from its resource name pool
+  (names two NULs apart, `env\<map>\<map>.scn`, `geo\…`, `col\…`, `tex\…psm`, `eco\…`, the sky, then
+  the rider's and machine's), against the mod's files (`tools/accuracy/src/loaded.rs`). Names of the
+  rider, machines, UI and language are counted apart. With the disc in `$DISCX_ISO` it also says which
+  missing names are on no part of the disc (the game asked and fell back). The pool is a reused buffer:
+  on 7 maps (MC01–05, MC07, MC08) a later file's text overwrote its head, and the names from the scene's to
+  the first left are not known; `files` says so.
+- `accuracy poses --landmarks N` (default 3): a pose looking at each of the map's N biggest landmarks, a
+  `[Model<n>]` placed once with no activity keys, ranked by its `.psg`'s size, 300 ft apart at least
+  (`tools/accuracy/src/landmarks.rs`), from 90 ft out on the side of the map's centre.
+- The poses' box is the file's leaves (`look::leaf_extent`), not openmx's `Ground::extent`, which is 56 ft
+  across on the arenas (notes/openmx-asks.md).
+- `shoot` checks each PNG ends in `IEND`. `./kit shot` copies PCSX2's screenshot once its size holds for
+  0.3 s and caught it half written on 27 of the first 386 shots; then `shoot` waits for the newest file in
+  the copy's `snaps` folder to be whole and copies that.
+- `tools/accuracy/tests/every_map.rs` runs heights (1,000 points, the map's own mode, with the normal
+  step), `scene` and `files` on every mod with an image; 56 maps in 110 s in a debug build, skipped where
+  there are none.
+
+**Findings, in short.** On all 56: every height, surface and weight equal at 8,000 points; every normal
+equal with MX vs. ATV's step; the game's terrain box is the file's leaves; the scene's start, fog, terrain
+keys, eco distances and scales, and both lights' colours, the sun's position and direction equal (the
+direction to 1–2 ulp of `Target - Position` made unit here); every file the game opened for the map in
+the re-imported mod. The Free Ride starts at the scene's `DefaultStartPosition` (MC01, FS05: the
+`.atyList`'s), on the ground where that is under it.
 
 ## For M12 and M13
 

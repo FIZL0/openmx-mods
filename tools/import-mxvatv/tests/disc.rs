@@ -498,7 +498,9 @@ fn without_a_start_the_scene_spawns_and_todo_says_so() {
     assert!(m.spawn.is_none());
     let j = std::fs::read_to_string(m.dir.join("mod.json")).unwrap();
     assert!(!j.contains("\"spawn\""), "{j}");
-    todo_has(&m, &["Test.scn: the spawn is the scene's DefaultStartPosition (100.0,50.0,100.0)", "T7"]);
+    // The game starts such a Free Ride at the scene's start (M12): a todo only when that is under the
+    // ground, where the game stands the rider on it. The generated ground is far above y = 50.
+    todo_has(&m, &["Test.scn: the spawn, the scene's DefaultStartPosition (100.0,50.0,100.0), is", "under the ground", "M12"]);
     // No .atyList at all: the folder's name, and todo says so.
     let d = disc_with("noaty", BOOT, track(), mat(), "");
     let m = import_disc(&d).unwrap();
@@ -664,6 +666,59 @@ fn loose_members_the_game_opens_are_copied_and_listed() {
     // The model the ecosystem names is found now, so todo no longer says it is missing.
     assert!(!got.todo.iter().any(|t| t.contains("tree.psg (")), "{:#?}", got.todo);
 
+    let r = check(&got.dir, &mut Discs::new(Some(d.iso.clone())));
+    assert!(r.ok(), "{:#?}", r.fail);
+}
+
+#[test]
+fn the_toys_physics_the_shadows_and_the_particle_sheets_are_pulled() {
+    // The toy file lists three physics collections and says the first two count; a `*` group is not
+    // a file. The first's `.pco` is loose, the second's is in the archive; each part names two shapes.
+    let toy = "[PhysicsCollections]\r\nNumberOfPhysicsCollections=2\r\n[PhysicsCollection1]\r\nName=Door\r\n\
+               [PhysicsCollection2]\r\nName=Held\r\n[PhysicsCollection3]\r\nName=Gate\r\n";
+    let pco = |name: &str| format!("[PhysicsParts]\r\nNumberOfPhysicsParts = 1\r\n[PhysicsPart1]\r\nType = RigidBody\r\nName = {name}\r\n").into_bytes();
+    let mut t = track();
+    t.push((r"Env\test\Test.toy", toy.as_bytes().to_vec()));
+    t.push((r"Env\test\Held.pco", pco("Held")));
+    let loose = vec![
+        (r"Env\Test\Door.pco", pco("Door")),
+        (r"Col\DoorM.col", mesh_col(30)),
+        (r"Col\DoorF.col", mesh_col(31)),
+        (r"Col\HeldM.col", mesh_col(32)),         // the archive's .pco names it: pulled
+        (r"Env\Test\Gate.pco", pco("Gate")),     // past NumberOfPhysicsCollections
+        (r"Col\GateM.col", mesh_col(33)),
+        (r"Tex\shadowCaster1.psm", psm(&["RenderTarget"])),
+        (r"Tex\terrainShadowReceiver6.psm", psm(&["RenderTarget"])),
+        (r"Tex\shadowReceiver7.psm", psm(&["RenderTarget"])), // past the six sets
+        (r"Env\Test\mxparticlezones.dat", bytes(34, 100)),
+        (r"Env\Test\atvparticles.dat", bytes(35, 100)),
+        (r"Env\Test\other.dat", bytes(36, 100)),  // no machine's name
+    ];
+    let want = [
+        r"Env\Test\Door.pco",
+        r"Col\DoorM.col",
+        r"Col\DoorF.col",
+        r"Col\HeldM.col",
+        r"Tex\shadowCaster1.psm",
+        r"Tex\terrainShadowReceiver6.psm",
+        r"Env\Test\atvparticles.dat",
+        r"Env\Test\mxparticlezones.dat",
+    ];
+    let d = disc_loose("physics", t, mat(), Vec::new(), loose.clone());
+    let got = import_disc(&d).unwrap();
+    assert_eq!(got.pulled, want);
+    for (name, data) in &loose {
+        let path = got.dir.join(name.replace('\\', "/"));
+        if want.contains(name) {
+            assert_eq!(&std::fs::read(&path).unwrap(), data, "{name}");
+        } else {
+            assert!(!path.exists(), "{name} was copied");
+        }
+    }
+    let j = Json::parse(&std::fs::read_to_string(got.dir.join("mod.json")).unwrap()).unwrap();
+    let why = j.get("loose").unwrap();
+    assert_eq!(why.get(r"Env\Test\Door.pco").and_then(Json::str), Some("physics collection Door of env/test/test.toy"));
+    assert_eq!(why.get(r"Col\HeldM.col").and_then(Json::str), Some("part Held of Held.pco"));
     let r = check(&got.dir, &mut Discs::new(Some(d.iso.clone())));
     assert!(r.ok(), "{:#?}", r.fail);
 }
