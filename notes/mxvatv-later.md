@@ -243,6 +243,103 @@ SM_MB (334), Nat_CO (7.8), SX_I (9.6), SX_E (3.2), SX_H (2.4), and the camera th
 | AM_JY | TK's Salvage Yard | 4480 × 4480 | same | 35 | 148 (head lost) | 11 | -16 ft along, +8 up |
 | AM_GFUC | Chesterbridge | 5760 × 5760 | same | 35 | 164 (head lost) | 11 | -16 ft along, +6 up |
 
+### The giant map (C3)
+
+`world_untamed` (`tools/stitch/worlds/world_untamed.json`, built by build.sh's stitch step from the
+`untamed_` tracks the M4 import step made) joins the 23 open maps of the 40 that M4 imports: AM_CS,
+AM_GFUC, AM_JY, BT_A, BT_B, Nat_AZ, Nat_CO, Nat_DVCA, Nat_IN, Nat_MA, Nat_MD, Nat_NC, Nat_NY, Nat_OR,
+Nat_PA, Nat_SDCA, Nat_UT, SM_AS, SM_CF, SM_HS, SM_MB, SM_OF and SM_S1. Left out are the 17 stadium
+maps: SX_A–L, FS_A–D and MT_A, each 16×16 leaves, 896 ft, inside its stands. The rule is C2's: a
+map is open when its terrain is more than 1,280 ft a side. Every map the master list names has a
+`Race` activity (FS has a `High Score Challenge`), so "non-racing" cannot mean maps without a race.
+It means what C2 took it to mean, the outdoor worlds and not the arenas. The other open maps on the
+disc are not in the world because M4 does not import them. BT_C–F (opencross), HC_A, SJ_A/B and TR_A
+have no Free Ride or national (*The importer (M4)*).
+
+- **BT_A and BT_B** (Corrido Armenta, day and night) are two maps on the disc, each with its own
+  `.ps2.trn` (the bytes differ) and scene. Both are in the world. Their cut edges are equal to
+  stitch's precision (keep, mean edge 408.5 ft, steepest edge cell 1.096), so the ground is probably
+  the same. That was not compared sample by sample.
+- **Spacings.** Six maps are 3.5 ft (SM_CF, Nat_NY, Nat_MA, Nat_DVCA, Nat_CO, AM_JY), so stitch puts a
+  collar round each at its own spacing (C1's mixed spacings). Nat_OR's 4.499999 ft has no small ratio
+  to the lattice's 4.5, so its seams meet the join only approximately (the world's todo). `stitch check`
+  still holds it to the same 0.0044 ft as the rest.
+- **Order and sky.** No menu order was found for Untamed's maps (MX vs. ATV Unleashed had
+  `UI\Tracks.dat`). The tiles are in `Env\Master.atyList.bpb`'s order of `[<MAP> General]` sections,
+  which is the disc's own order. So the first tile, and the world's sky and spawn, is SM_OF, Fort Wayne.
+
+Built 2026-10-22 at stitch's defaults (`max_slope` 0.5, no spec todo), release, 32 threads:
+
+- **Build** 25 s from the 23 imported tracks. The seam gates took 2.7 s. The layout widened four times,
+  each time beside AM_GFUC: 0.867, 0.708, 0.602 and 0.503. AM_GFUC's 408 ft edge sits below Nat_OR's
+  43 ft one. Nat_OR and Nat_DVCA are the two low maps, both about 44 ft. The layout passed at widen
+  2.441: 32,764 × 33,844 ft, 674 join pieces at 4.5 ft, six 3.5 ft collars, join slope 0.492 away from
+  the seams and 3.149 near them. Tile radii are 1,267–13,953 ft.
+- **`stitch check`** with the disc took 123 s: **ok**. It covered 213,608 seam points (worst height step
+  0.00439 ft, worst slope step 0.00236), plus 4,852 tile samples between join lattice points (worst
+  0.0010 ft). At 51,696 points the 3.5 ft collars meet the 4.5 ft lattice. There the worst height
+  step is 0.00824 ft and the worst slope step 0.2005, which the check reports but does not fail (C1's
+  rule). Every tile's files are byte for byte its imported map's, and modcheck compared each against
+  the SLUS_217.01 disc. `Res::parse` refuses `res\Shadows.res` for its directory padding and reads it
+  through the view (M13's ask).
+- **Seam gates past C1's 153 ft** (C9, each in the world's todo; edges x0 z0 x1 z1): SM_HS 158, 351, –,
+  360; Nat_DVCA 261, –, 176, –; AM_JY 212, –, 167, –; Nat_AZ –, –, 203, 176; Nat_NY –, 185, –, 194;
+  Nat_MD 158, –, 189, 180; SM_AS –, –, –, 180; Nat_MA –, 171, –, –. The other 15 maps have none.
+- **Dropped placements** (54, in the world's `drop`):
+  - AM_GFUC 20: ten golf-course props and their collision (bench ×3, hole flag ×2, hole sign, restroom,
+    rope barrier ×2, golf cart), inside its cut.
+  - SM_HS 14: `Ocean_Waves_L` in the cut, and twelve `Nat04_Water01`–`12` planes with one collision
+    over the missing cells past x = 896. Like MX vs. ATV Unleashed's nat04 (C8), its 56×80 terrain has
+    no cells there, and the sea is a placed plane.
+  - Nat_UT 10: five `Rock_Jump` with their collision.
+  - Nat_NY 6: its three `NY_riversurface01`–`03`, each placed twice.
+  - Nat_DVCA 4: `sign_warning01`/`02` with their collision.
+
+Each map's place: `at` is where the tile's sample (0, 0) sits in the world, in feet. *edge* is the mean
+height of its cut edge (from stitch's log), which the layout uses to match neighbours.
+
+| row \ column | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| 1 | Nat_OR | Nat_DVCA | SM_AS | AM_CS | AM_JY |
+| 2 | AM_GFUC | SM_MB | SM_S1 | SM_OF | SM_CF |
+| 3 | BT_B | BT_A | Nat_SDCA | Nat_IN | Nat_MD |
+| 4 | Nat_UT | Nat_MA | Nat_NC | Nat_NY | Nat_PA |
+| 5 | Nat_CO | Nat_AZ | SM_HS | | |
+
+| map | name | spacing (ft) | at (ft) | keep (samples) | edge (ft) |
+|---|---|---|---|---|---|
+| SM_OF | Fort Wayne | 4.5 | 20664, 9000 | 38, 34, 1245, 1246 | 393.2 |
+| SM_MB | Camp Bennet | 4.5 | 6480, 9000 | 34, 39, 1220, 1239 | 405.9 |
+| SM_HS | Mar Del Sol | 4.5 | 15192, 27936 | 34, 64, 896, 1246 | 437.6 |
+| SM_CF | Colby County | 3.5 | 27496, 9632 | 46, 47, 1234, 1235 | 393.0 |
+| SM_S1 | Motoville Speedway | 4.5 | 14472, 9000 | 34, 46, 1243, 1233 | 401.0 |
+| SM_AS | Cayunga Air Field | 4.5 | 14472, 216 | 68, 34, 1209, 1236 | 358.0 |
+| Nat_UT | Mil Mesas | 4.5 | 216, 21384 | 34, 34, 1246, 1246 | 429.2 |
+| Nat_SDCA | West Junction | 4.5 | 14472, 15192 | 34, 34, 1223, 1246 | 411.2 |
+| Nat_PA | Wellington | 4.5 | 26856, 21384 | 34, 38, 1246, 1246 | 421.1 |
+| Nat_OR | Pine Summit | 4.499999 | 216, 216 | 34, 34, 1246, 1246 | 43.1 |
+| Nat_NY | Gaithersville | 3.5 | 21336, 22064 | 51, 50, 1230, 1229 | 424.7 |
+| Nat_NC | Dry Trough | 4.5 | 14400, 21384 | 34, 34, 1246, 1246 | 424.8 |
+| Nat_MD | Agawaska | 4.5 | 27000, 15192 | 34, 34, 1209, 1246 | 419.3 |
+| Nat_MA | Overlook Lake | 3.5 | 7056, 22064 | 45, 50, 1233, 1229 | 426.1 |
+| Nat_IN | Brown's Farm | 4.5 | 20664, 15192 | 34, 34, 1246, 1246 | 415.3 |
+| Nat_DVCA | Cactus Valley | 3.5 | 7056, 784 | 45, 118, 1233, 1180 | 44.0 |
+| Nat_CO | Progressive Invitational | 3.5 | 840, 28616 | 48, 50, 1236, 1229 | 431.1 |
+| Nat_AZ | Sawtooth Mills | 4.5 | 6408, 27936 | 34, 34, 1246, 1246 | 434.2 |
+| BT_B | Corrido Armenta Night | 4.5 | 216, 15264 | 34, 37, 1246, 1226 | 408.5 |
+| BT_A | Corrido Armenta | 4.5 | 6408, 15264 | 34, 37, 1246, 1226 | 408.5 |
+| AM_JY | TK's Salvage Yard | 3.5 | 27496, 840 | 46, 48, 1234, 1236 | 390.6 |
+| AM_GFUC | Chesterbridge | 4.5 | 216, 9000 | 34, 36, 1242, 1246 | 408.0 |
+| AM_CS | I.S. Construction | 4.5 | 20664, 216 | 67, 36, 1214, 1229 | 377.8 |
+
+The layout is stitch's, from these 23 tiles in this order. A different order, or a change to stitch's
+layout, moves them. `stitch check` and `tools/stitch/tests/world_untamed.rs` hold the seams, not the
+places. The world picture (`stitch map`, 18 ft a pixel) shows the grid as above. Nat_OR and Nat_DVCA
+are darker than the rest, and the joins fade between tiles with no step.
+
+**Not ridden.** openmx has no MD2 (mods folder) or MD8 (worlds), so no seam of this world has been ridden
+in the port. Each map's Free Ride start is its tile's own; the world's `spawn` names SM_OF.
+
 ### Survey tables
 
 `cargo run --release -p survey -- untamed`, 2026-10-22. † = the terrain read through the view. The
@@ -362,3 +459,5 @@ No discs yet. Reflex has deformable terrain, so likely a heightfield again.
 - Heights are read, not checked against the running game (T7). The 3.5 vs 4.5 spacing comes from the
   terrain header, not from a scene. (M13 checked the heights against the game on all 40 imported maps:
   *Against the game (M13)*.)
+- C3's world (*The giant map (C3)*): no seam was ridden in openmx (no MD2/MD8), and the world was not
+  seen in PCSX2 (it is not a map the game has). BT_A's and BT_B's heights were not compared.
