@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! stitch build OUT --id world_x --name NAME [--sky TILE] [--max-slope X] [--min-gap FT] [--chunk N]
-//!              [--fade FT] [--threads N] TILE_DIR...
+//!              [--fade FT] [--threads N] [--no-prune] TILE_DIR...
 //! stitch check WORLD_DIR [--mods DIR] [--iso DIR]
 //! stitch profile TILE_DIR [SAMPLES]       (each side's median height by distance from the edge)
 //! stitch map WORLD_DIR OUT.pgm [FEET]       (the world's heights as a greyscale picture, shaded)
@@ -74,6 +74,7 @@ fn cmd_build(args: &[String]) -> ExitCode {
                 "--fade" => p.fade = num(&take(args, &mut i, a)?, a)?,
                 "--chunk" => p.chunk = num(&take(args, &mut i, a)?, a)? as u32,
                 "--threads" => p.threads = num(&take(args, &mut i, a)?, a)? as usize,
+                "--no-prune" => p.prune = false,
                 _ if a.starts_with("--") => return Err(format!("unknown flag {a}")),
                 _ if out.is_none() => out = Some(PathBuf::from(a)),
                 _ => tiles.push(PathBuf::from(a)),
