@@ -1,20 +1,24 @@
-//! `import-mxvatv`: MX vs. ATV Unleashed's maps as track mods. `import-mxvatv --help` for usage.
+//! `import-mxvatv`: MX vs. ATV Unleashed's and Untamed's maps as track mods. `import-mxvatv --help`
+//! for usage.
 
 use discx::Disc;
-use import_mxvatv::{BOOT, import, load_map, map_folders};
+use import_mxvatv::{BOOT, Map, import, load_map, map_folders, untamed};
 use modcheck::{Discs, check};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "import-mxvatv: MX vs. ATV Unleashed's maps as track mods (standard §2)
+const USAGE: &str = "import-mxvatv: MX vs. ATV Unleashed's and Untamed's maps as track mods (standard §2)
 
   import-mxvatv --disc IMAGE --out STAGE [--map NAME,...] [--no-check]
 
-Writes STAGE/mxvatv_<map>/ for every map on the disc (Env\\<MAP>\\<map>.res, with its _mat and _mst
-archives), or the --map ones: the archives' members at their own paths and a mod.json. Each mod is
-then read back with modcheck against the same disc (the image's folder is searched for it by boot
-ELF); --no-check skips that. A map that fails is removed from STAGE and named; the exit is 1 if any did.
-A disc that is not SLUS_211.04 is skipped with a line (build.sh also runs this on Untamed, which is M4's).";
+MX vs. ATV Unleashed (SLUS_211.04): writes STAGE/mxvatv_<map>/ for every map on the disc
+(Env\\<MAP>\\<map>.res, with its _mat and _mst archives). MX vs. ATV Untamed (SLUS_217.01): writes
+STAGE/untamed_<map>/ for every map (res\\env\\<MAP>\\<MAP>.res, _mat, _mst) that Env\\Master.atyList
+gives a Free Ride or a national, its binary scene decoded beside it. --map takes any map archive's
+folder instead. Each mod holds the archives' members at their own paths, the loose PSR members the
+game opens for the map, and a mod.json. Each mod is then read back with modcheck against the same
+disc (the image's folder is searched for it by boot ELF); --no-check skips that. A map that fails is
+removed from STAGE and named; the exit is 1 if any did. Any other disc is skipped with a line.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -52,11 +56,13 @@ fn main() -> ExitCode {
         .and_then(|all| all.into_iter().find(|(p, _)| same_file(p, &disc_path)))
         .and_then(|(_, b)| b)
         .unwrap_or_default();
-    if !boot.eq_ignore_ascii_case(BOOT) {
+    let is_untamed = boot.eq_ignore_ascii_case(untamed::BOOT);
+    if !boot.eq_ignore_ascii_case(BOOT) && !is_untamed {
         println!(
-            "import-mxvatv: {} is {}, not {BOOT}; nothing imported (Untamed's maps are M4's)",
+            "import-mxvatv: {} is {}, not {BOOT} or {}; nothing imported",
             disc_path.display(),
-            if boot.is_empty() { "no disc this repo knows" } else { &boot }
+            if boot.is_empty() { "no disc this repo knows" } else { &boot },
+            untamed::BOOT
         );
         return ExitCode::SUCCESS;
     }
@@ -71,7 +77,30 @@ fn main() -> ExitCode {
         eprintln!("import-mxvatv: {}: {e}", out.display());
         return ExitCode::FAILURE;
     }
-    let mut folders = map_folders(&disc);
+    let master = if is_untamed {
+        match untamed::master(&mut disc) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                eprintln!("import-mxvatv: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    let mut folders = match &master {
+        None => map_folders(&disc),
+        Some(_) => untamed::map_folders(&disc),
+    };
+    if let (Some(m), None) = (&master, &only) {
+        folders.clear();
+        for (f, pick) in untamed::chosen(&disc, &m.1) {
+            match pick {
+                Ok(()) => folders.push(f),
+                Err(why) => println!("skip {f}: {why}"),
+            }
+        }
+    }
     if let Some(only) = &only {
         for m in only {
             if !folders.iter().any(|f| f.eq_ignore_ascii_case(m)) {
@@ -84,7 +113,11 @@ fn main() -> ExitCode {
     let mut discs = Discs::new(iso_dir);
     let (mut ok, mut failed) = (0, 0);
     for folder in &folders {
-        let result = load_map(&mut disc, folder).and_then(|m| import(&m, &out));
+        let loaded: Result<Map, String> = match &master {
+            None => load_map(&mut disc, folder),
+            Some(m) => untamed::load_map(&mut disc, folder, m),
+        };
+        let result = loaded.and_then(|m| import(&m, &out));
         match result {
             Err(e) => {
                 println!("FAIL {folder}: {e}");
@@ -109,7 +142,7 @@ fn main() -> ExitCode {
                     m.name,
                     m.files,
                     m.todo.len(),
-                    if m.spawn.is_some() { ", spawn from the .atyList" } else { "" },
+                    if m.spawn.is_some() { ", spawn from the activity list" } else { "" },
                     if prove { ", read back" } else { "" }
                 );
                 ok += 1;
