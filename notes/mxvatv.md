@@ -464,7 +464,7 @@ things are checked, and the mods in `out/mods/tracks/` are the importer's after 
   run on the image, against openmx's on the mod's `.trn`, at 2,000 points in each of the four ways a
   terrain object can be set (8,000), every field bit for bit.
 - **Scene** (`accuracy scene`): `[SceneInfo]`, `[Fog]`, `[Environment]` and the two lights as the game's
-  readers left them, against the `.scn` read as openmx reads it. 24–31 fields a map.
+  readers left them, against the `.scn` read as openmx reads it. 28–31 fields a map.
 - **Files** (`accuracy files`): every name in the game's resource name pool that is the map's (props,
   shapes, materials, species, sky, terrain, toys), against the mod's files.
 - **Shots** (`accuracy shoot`): the original's half of the pairs, from 9–11 poses a map (611 in all) (the scene's

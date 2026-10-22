@@ -51,7 +51,7 @@ map*; what only openmx can fix is at the end of `notes/openmx-asks.md`.
   step. The packed normal table is off on every map.
 - The game's terrain box (`+0x30/+0x40`) is the file's leaves on every map (`tests/every_map.rs`), which
   is how the arenas' and Nat04's box differ from openmx's `Ground` (an ask).
-- `scene`: all 24–31 fields a map equal, bit for bit, once the text is read as openmx reads it; the sun's
+- `scene`: all 28–31 fields a map equal, bit for bit, once the text is read as openmx reads it; the sun's
   direction is computed here and comes within 1–2 ulp.
 - `files`: every name the game opened for the map is in the re-imported mod, on all 56 (on 7 the pool's
   head was overwritten; see Not verified). Before the fixes Lago lacked 24 (its doors and the shadow
