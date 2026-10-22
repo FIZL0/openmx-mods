@@ -1,0 +1,15 @@
+[package]
+name = "trnwrite"
+description = "Writes PLN v7 terrains (.ps2.trn) and their scenes (.scn), proved by reading them back with openmx"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The terrain reader and the game's floats: openmx's, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+
+[dev-dependencies]
+# The disc round trip (`--ignored`) finds the images and unpacks the archives with discx.
+discx = { path = "../discx" }
