@@ -116,6 +116,11 @@ The rules:
   bytes exactly (the import's check, §5).
 - When two archives hold the same path: identical bytes make one file. Different bytes break the import.
   It stops and names the path. It never chooses one.
+- **Loose members the game opens for the map are copied too.** When the source game, finding a name in
+  none of its loaded archives, opens the container's loose member at that path (MX vs. ATV Unleashed
+  does, `notes/mxvatv.md` *Loose PSR members*), that member is copied at its own path. It is listed in
+  `source.members`, and the importer may give its reason in a field of its own. A path an archive holds
+  is always the archive's.
 - **Lookups ignore case and slash style.** The port finds a file the way game-render's `disc::Res` does,
   by the end of its path compared in lowercase (`read_suffix`), so the scene's `SLT=bale_single_02` finds
   `Geo/bale_single_02.psg` wherever it sits. Two files whose paths differ only in case break the mod.

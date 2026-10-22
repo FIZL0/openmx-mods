@@ -553,6 +553,120 @@ fn the_binary_imports_a_disc_and_skips_another_game() {
     assert!(std::fs::read_dir(&uout).map_or(true, |mut r| r.next().is_none()));
 }
 
+// ---- loose PSR members the game opens for a map (M15) ----
+
+/// A version-1 `.esb` with these species and no plants: each a model name and a billboard.
+fn esb(models: &[&str]) -> Vec<u8> {
+    let mut e = 1u32.to_le_bytes().to_vec();
+    for slot in 0..256 {
+        let Some(m) = models.get(slot) else {
+            e.push(0);
+            continue;
+        };
+        e.push(1);
+        for name in [format!("{m}\0"), format!("{m}BB.tga\0")] {
+            e.push(name.len() as u8);
+            e.extend_from_slice(name.as_bytes());
+        }
+        for f in [10.0f32, 8.0, 12.0, 2.0, 1.0, 3.0, 0.0, 1.0, 0.0, 1.0, 0.5] {
+            e.extend_from_slice(&f.to_le_bytes());
+        }
+        e.extend_from_slice(&[0u8; 12]);
+        e.extend_from_slice(&0u32.to_le_bytes()); // no solids
+    }
+    e.push(0); // no shrubbery
+    e.extend_from_slice(&0u32.to_le_bytes()); // no plants
+    e
+}
+
+/// A `.psm` with one shader pass naming these textures.
+fn psm(textures: &[&str]) -> Vec<u8> {
+    let mut t = format!("[General]\r\nTotalShaderPasses = 1\r\n[ShaderPass_1]\r\ntotalTextureMaps = {}\r\n", textures.len());
+    for (n, x) in textures.iter().enumerate() {
+        t += &format!("TextureMap_{} = {x}\r\n", n + 1);
+    }
+    t.into_bytes()
+}
+
+/// [`disc_with`]'s disc plus a `_mst.res` and more loose members.
+fn disc_loose(
+    tag: &str,
+    track: Vec<(&'static str, Vec<u8>)>,
+    mat: Vec<(&'static str, Vec<u8>)>,
+    mst: Vec<(&'static str, Vec<u8>)>,
+    loose: Vec<(&'static str, Vec<u8>)>,
+) -> Disc {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("import-mxvatv-{tag}"));
+    let _ = std::fs::remove_dir_all(&root);
+    let iso = root.join("iso");
+    std::fs::create_dir_all(&iso).unwrap();
+    let mut psr = vec![
+        (r"Env\Freeride.aty", bytes(3, 100)),
+        (r"Env\Test\test.res", build_res(&track)),
+        (r"Env\Test\test_mat.res", build_res(&mat)),
+        (r"Env\Test\test_mst.res", build_res(&mst)),
+        (r"Env\Test\Test.atyList", ATYLIST.as_bytes().to_vec()),
+    ];
+    psr.extend(loose);
+    let cnf = format!("BOOT2 = cdrom0:\\{BOOT};1\r\nVER = 1.02\r\n").into_bytes();
+    let img = build_iso(&[(BOOT, bytes(6, 3000)), ("SYSTEM.CNF", cnf), ("MXVSATV.PSR", build_psr(&psr))]);
+    let image = iso.join("disc.iso");
+    std::fs::write(&image, img).unwrap();
+    Disc { root, iso, image, track, mat }
+}
+
+#[test]
+fn loose_members_the_game_opens_are_copied_and_listed() {
+    // The scene names its ecosystem without `.esb`, which the game adds.
+    let eco_scene = String::from_utf8(scene()).unwrap().replace("CubeFile=sky1.cub", "CubeFile=sky1.cub\r\nEcosystemFile=test");
+    let mut t = track();
+    t[0].1 = eco_scene.into_bytes();
+    t.push((r"Env\test\test.esb", esb(&["Tree", "Shrub"])));
+    t.push((r"Eco\Shrub.psg", bytes(20, 300)));
+    let mut m = mat();
+    m.push((r"Tex\Held.psm", psm(&["Held"])));
+    m.push((r"Tex\Held.pst", bytes(21, 400)));
+    let table = "#include \"MST\\Global.mst\"\r\n; the map's materials\r\nTex\\Held\r\nTex\\Loose ; a note\r\nTex\\Bare\r\nTex\\Nowhere\r\n";
+    let mst = vec![(r"MST\Env\Test.mst", table.as_bytes().to_vec())];
+    let loose = vec![
+        (r"Eco\Tree.psg", bytes(22, 300)),           // a species' model the archives lack
+        (r"Eco\Shrub.psg", bytes(23, 300)),          // the archive's is opened, not this
+        (r"Tex\Loose.psm", psm(&["LooseTex", "RenderTarget"])),
+        (r"Tex\LooseTex.pss", bytes(24, 200)),       // .pst first, then .pss: this one
+        (r"Tex\LooseTex.tga", bytes(25, 200)),       // never reached
+        (r"Tex\Bare.tga", bytes(26, 200)),           // a material with no .psm is its own texture
+        (r"Tex\Unasked.pst", bytes(27, 200)),        // nothing names it
+        (r"MST\Global.mst", b"Tex\\Shared\r\n".to_vec()), // the shared table, not the map's
+    ];
+    let want = [r"Eco\Tree.psg", r"Tex\Loose.psm", r"Tex\LooseTex.pss", r"Tex\Bare.tga"];
+    let d = disc_loose("loose", t, m, mst, loose.clone());
+    let got = import_disc(&d).unwrap();
+    assert_eq!(got.pulled, want);
+    for (name, data) in &loose {
+        let path = got.dir.join(name.replace('\\', "/"));
+        if want.contains(name) {
+            assert_eq!(&std::fs::read(&path).unwrap(), data, "{name}");
+        } else if !name.starts_with(r"Eco\Shrub") {
+            assert!(!path.exists(), "{name} was copied");
+        }
+    }
+    assert_eq!(std::fs::read(got.dir.join("Eco/Shrub.psg")).unwrap(), bytes(20, 300), "the archive's member wins");
+
+    let j = Json::parse(&std::fs::read_to_string(got.dir.join("mod.json")).unwrap()).unwrap();
+    let members: Vec<&str> = j.get("source").and_then(|s| s.get("members")).and_then(Json::arr).unwrap().iter().filter_map(Json::str).collect();
+    let mut all = vec![r"Env\Test\test.res", r"Env\Test\test_mat.res", r"Env\Test\test_mst.res"];
+    all.extend(want);
+    assert_eq!(members, all);
+    let why = j.get("loose").unwrap();
+    assert_eq!(why.get(r"Eco\Tree.psg").and_then(Json::str), Some("species Tree of env/test/test.esb"));
+    assert_eq!(why.get(r"Tex\LooseTex.pss").and_then(Json::str), Some(r"texture Tex\LooseTex of material Tex\Loose in mst/env/test.mst"));
+    // The model the ecosystem names is found now, so todo no longer says it is missing.
+    assert!(!got.todo.iter().any(|t| t.contains("tree.psg (")), "{:#?}", got.todo);
+
+    let r = check(&got.dir, &mut Discs::new(Some(d.iso.clone())));
+    assert!(r.ok(), "{:#?}", r.fail);
+}
+
 // ---- against the user's discs (`cargo test -p import-mxvatv -- --ignored`) ----
 
 /// The image with this boot ELF in `$DISCX_ISO`, or else this repo's `iso/`.
@@ -624,4 +738,28 @@ fn mxu_scene_keys_are_the_discs() {
     let print: Vec<String> = have.iter().map(|(a, b)| format!("    (\"{a}\", \"{b}\"),")).collect();
     assert_eq!(have, listed, "src/mxu_keys.rs should be:\n{}", print.join("\n"));
     assert_eq!(scenes, 57);
+}
+
+#[test]
+#[ignore = "needs the MX vs. ATV Unleashed disc (SLUS_211.04) in iso/ or $DISCX_ISO"]
+fn the_loose_members_the_maps_lack_are_pulled() {
+    let (_, image) = real_disc(BOOT);
+    let mut disc = discx::Disc::open(&image).unwrap();
+    let pulled = |disc: &mut discx::Disc, f: &str| -> Vec<String> {
+        load_map(disc, f).unwrap().pulled.iter().map(|p| p.member.to_ascii_lowercase()).collect()
+    };
+    // Nat02's ten plants, loose only in Eco\ (notes/mxvatv.md, M9).
+    let nat02 = pulled(&mut disc, "Nat02");
+    for m in ["busha", "bushb", "bushc", "bushf", "bushg", "treea", "treeb", "treec", "treed", "treee"] {
+        assert!(nat02.contains(&format!(r"eco\nat02_{m}.psg")), "Nat02 lacks {m}: {nat02:?}");
+    }
+    // The maps that borrow another map's plants, and its two eco materials with them.
+    for (f, from) in [("MC03", "nat11"), ("MC04", "nat03"), ("MC05", "nat11"), ("MC09", "nat11"), ("MC10", "nat15"), ("Nat13", "nat11"), ("SM01", "nat11")] {
+        let p = pulled(&mut disc, f);
+        for m in [format!(r"tex\{from}bb.psm"), format!(r"tex\{from}eco.psm")] {
+            assert!(p.contains(&m), "{f} lacks {m}: {p:?}");
+        }
+    }
+    let sm03 = pulled(&mut disc, "SM03");
+    assert!(sm03.contains(&r"tex\nat17eco.psm".to_string()), "{sm03:?}");
 }

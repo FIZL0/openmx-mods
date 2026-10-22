@@ -8,7 +8,7 @@ across is a repack plus the gaps below, not a new decompilation.
 ## Where things are
 
 ```
-SLUS_211.04, GAME_REL.BIN, UI_REL.BIN    the boot ELF and two overlays (not looked at yet)
+SLUS_211.04, GAME_REL.BIN, UI_REL.BIN    the boot ELF and two overlays (boot and GAME_REL in Ghidra since M15)
 MXVSATV.PSR   1.64 GB   the one container: PSR version 2, 20,391 members, the same directory layout
                         as MX.PSR (openmx's Psr::parse reads it unchanged)
   Env\<MAP>\<map>.res        the map: <MAP>.ps2.trn, <MAP>.scn, <MAP>.toy, .esb, Col\*.col, Geo\*.psg,
@@ -200,7 +200,8 @@ members of `Env\<MAP>\<map>.res`, `<map>_mat.res` and `<map>_mst.res` at their o
 over the 56 maps, 449 MB), and a `mod.json`. Nothing is edited. No two archives of a map hold one path
 with different bytes, and none spells one path two ways (the import would stop on either). Every mod
 reads back through `modcheck` against the disc. The loose members beside the archives are not copied
-(race, AI, camera, replay, the activities' `.aty`, `Anim\`). Every loose member at the path of an archive member
+(race, AI, camera, replay, the activities' `.aty`, `Anim\`), except those the game opens for the map
+because its archives lack them (M15, *Loose PSR members* below). Every loose member at the path of an archive member
 (the scene, `.toy`, `.esb`, `.aud`, …) has the same bytes as that member. Every gap is a `todo` entry (1,112 over the 56). By kind:
 
 - **Name and start**: the `.atyList`'s `DisplayName`, and its `[Free Ride]` `StartPosition` /
@@ -222,7 +223,7 @@ reads back through `modcheck` against the disc. The loose members beside the arc
   Nat02's ecosystem names ten models (`nat02_busha.psg` … `nat02_treee.psg`) that its archives lack,
   and they sit loose in the PSR's `Eco\`. MC03, MC04, MC05, MC09, MC10, Nat13, SM01 and SM03 (maps that reuse
   another map's plants) lack that map's `<map>eco.psm` and `<map>bb.psm`, which are loose in `Tex\`.
-  Whether the game reads such loose members for a map was not looked up.
+  The game reads them loose, and since M15 the importer copies them (*Loose PSR members* below).
 - **Models**: 2,772 `.psg`, all read by `psg::Model::parse` except Nat12's five `Eco\` plants
   (`unexpected UNPACK of 12 x 2 x 8 bits at 489`) and Nat16's `Geo\northernlights.psg` (`the file ends
   at 23513 but 3933048 bytes were wanted at 373`).
@@ -237,6 +238,80 @@ reads back through `modcheck` against the disc. The loose members beside the arc
 - **Kinds no reader here takes**: `.mst`, `.pco`, `.prt`, `.mcf`, `.vut`, `.emt`, kept as they are.
   So are `<MAP>.aud` (the port reads only `tracks\<stem>\<stem>.aud`, MD2), `DetailMapTilingMultiplier`
   where it is not 8 (12 maps, MD4), the texture pages (MD1, MD4) and the 80×80-leaf size (27 maps, MD3).
+
+## Loose PSR members (M15)
+
+Read 2026-10-22 from SLUS_211.04 and its GAME_REL.BIN overlay, in Ghidra (`extracted/mxvatv/ghidra`,
+set up as M10 did Untamed's: `kit.toml` there, `KIT_CONFIG=… ../ps2-decomp-kit/kit fn <addr>`).
+GAME_REL.BIN starts `MWo3`, version 2, and loads whole, header included, at the address in its third
+word, `0x0045c580` (`[[overlay]] load = "0x45c580"`). **The game opens a loose PSR member when the
+archives it has loaded lack the name.** The importer now copies every such member a map needs.
+
+**The loader.** At boot `0x00155300` opens `cdrom0:\MXVSATV.PSR;1`, and `0x001c72d0` reads its
+directory (version 1 or 2, a count, then a length-prefixed full path, a size and a sector per member)
+into a table of every member (`0x0040c798`, count `0x0040c7a8`). `0x001c6a70` opens a member by full
+path from that table, compared without case (`0x00357158` is `stricmp`). Every file a loader wants goes
+through the resource manager at `0x003ea990`: `0x00120750`, `0x0011ff70` and `0x00120490` look the name
+up, lowercased and whole, in a hash of the members of the `.res` files loaded so far (`0x00122e70`).
+When none holds it, they call `0x0011dcf0`, which opens the PSR member at the same path through
+`0x001c6a70`. That is how a map reaches past its archives. Two switches could stop it, and neither is
+set on the disc:
+- flag `0x1000` on the manager turns the fallback off. Only `0x001209e0` sets it, called from the
+  `.res` loader `0x0022cda0` when its fifth argument is non-zero. None of its 43 callers passes one
+  (the map's `.res` and `_mat.res` load at `0x002c8310` and `0x002c871c` with 0).
+- flag `0x800` makes a loose file win even over an archive's. It comes from an INI's
+  `ResourceFileOverride` (`0x00127640`), default 0.
+
+**What a map asks for**, each as the code builds the name:
+- **Plants.** GAME_REL `0x0046f070` swaps `EcosystemFile`'s extension for `.esb`, or adds it when there
+  is none. So `EcosystemFile=mc02` finds `MC02.esb` in the game (M2's todo said this was not looked up).
+  Each species is loaded by `0x0046d040`. It sets the model folder (`0x003ddb80`, normally `Geo\`) to
+  `Eco\` and the material folder (`0x003ddc90`) to `Tex`, then puts both back. The model loader
+  `0x0018b690` adds a `\` when the folder lacks one and swaps the extension for `.psg`. A species is
+  therefore `Eco\<model>.psg`.
+- **Materials.** Materials are not loaded by name on demand. `0x001339b0` looks a name up in the
+  material table (`MaterialStringTable`, `0x003f3528`). On a miss it returns the first material and
+  sets a "missing" flag. The table is the map's `.mst`, its *Material String Table*
+  (`MST\Env\<MAP>.mst` in `<map>_mst.res`, read by `0x0019db30`/`0x0019dd90`): one material per line,
+  `;` comments, and `#include "MST\Global.mst"` for the shared ones. A listed material is parsed the
+  first time something draws with it (`0x00133630`, when its count is above 0), from `<line>.psm`
+  through the resource manager (`0x001a0e90` → `0x00143c30` → `0x0011ff70`). Every map's table lists
+  the borrowed eco materials ("NOTE: include only needed eco materials here!"): MC03 lists `Tex\Nat11BB`
+  and `Tex\nat11Eco`.
+- **Textures.** For each `[ShaderPass_<p>]`, `p` ≤ `[General] TotalShaderPasses` (default 0),
+  `0x00167720` takes `TextureMap_1` … `TextureMap_<totalTextureMaps>` (default 1). It skips
+  `RenderTarget`, `RenderTarget2`, `FrameBuffer` and `DisplayBuffer`, and puts the `.psm`'s own folder
+  in front: `Tex\` + `nat11eco`. A material with no `.psm` gets its own name as its one texture
+  (`0x00167f10`). `0x00170500` swaps the extension (from the last dot) and tries `.pst`, `.pss`, `.tga`,
+  then `.atm`, each through `0x00120750`. That makes it archive `.pst`, loose `.pst`, archive `.pss`,
+  and so on. One side effect: `Nat05_liverystable_detail.dxm` becomes `…_detail.pst`, which the
+  archive has (M2's todo, M9).
+- **Collision.** `0x001bb770` asks for `Col\<name>.col` through `0x00120750`. When nothing answers, it
+  returns 0 and builds no shape. The 16 `.col` the scenes place but the disc lacks are on no part of
+  the PSR, so the fallback finds nothing for them either. What the scene loader does with the
+  placement then was not followed.
+
+**What the importer copies** (`tools/import-mxvatv` `pull_loose`): it follows those three chains on
+each map's own files. That is the `.esb` its scene names, the lines of its own `MST\Env\<MAP>.mst`
+(not the `#include`s), and the textures of those materials. At each step a path an archive holds is
+the archive's. A path only the PSR holds is copied at its member path, byte for byte, listed in
+`source.members`, and given a reason in mod.json's `loose` (`"Tex\\Nat11BB.psm": "material
+Tex\\Nat11BB in mst/env/mc03.mst"`). Over the 56 maps that is **3,490 members, 44 MB**: 1,735 `.psm`,
+1,679 `.pst`, 66 `.atm` and 10 `.psg`, from 5 (MC06) to 159 (FS08) a map. They include Nat02's ten
+plants, the borrowed eco and billboard materials and textures of MC03/04/05/09/10, Nat13, SM01 and
+SM03, every map's `Env\<MAP>\TerrainLOD.psm`, and the `<MAP>_d.pst` detail map (named by the archive's
+`TerrainPlain.psm`, `TextureMap_2 = NAT01_d`). Each pulled path is either in no `.res` at all (1,075)
+or only in other maps' archives (2,415). None is in an archive outside `Env\`, so no shared archive the
+game might have loaded answers first. The todo entries that named these files as loose are gone,
+and every map still reads back through modcheck.
+
+- **The table is taken whole.** The game parses a listed material only when something draws with it.
+  1,676 of the 1,735 pulled `.psm` are named, as text, by a file in the mod (a model, the scene, the
+  `.esb`, another `.psm`). The other 59, such as `TerrainLOD.psm`, are named by the code or by
+  nothing. Which of them the game actually opens on a Free Ride was not checked (T7).
+- **Folder spelling.** A pulled member keeps the PSR's spelling, so a mod can hold both `Env/mc03/…`
+  (the archive's) and `Env/MC03/TerrainLOD.psm` (the PSR's). The files differ, so the standard's lookup
+  is not ambiguous. modcheck passes them, and on a case-insensitive file system the two folders are one.
 
 ## Embedded textures
 
@@ -308,7 +383,8 @@ the two archives, except one on Nat16. The gaps are in names, a few model stream
   (MC03's holds `nat08econew2.psm` instead). `Tex\Nat11BB.psm` and `Tex\Nat11bb.pst` are loose on the PSR,
   and in Nat11's `_mat.res`. On Nat02 all 10 species' models are missing from the archive but loose
   under `Eco\` (`Eco\nat02_treea.psg`, …). So the game also reads loose PSR members, and an importer
-  (M2) has to take these from there.
+  (M2) has to take these from there. M15 found the loader that does it and the importer now does
+  (*Loose PSR members*).
 - **Models game-render refuses.**
   - Nat12: 5 eco models (`Eco\nat12_busha/bushb/bushc/weedsb/waitaminute.psg`, 6 of the 10 species)
     fail with `unexpected UNPACK of 12 x 2 x 8 bits`. That is 8-bit texture coordinates (V2-8), where
