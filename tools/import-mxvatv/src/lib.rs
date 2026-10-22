@@ -608,7 +608,10 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     // .atyList's StartPosition where it gives one (MC01, FS05), else at the scene's DefaultStartPosition,
     // the ride camera 14 ft behind it. So the entry above is no gap there, except where that position is
     // under the ground (FS02, FS06, Nat10, Nat14, SM01-03): the game stands the rider on the ground over it.
-    if spawn.is_none() && map.origin.boot == BOOT {
+    // The same on MX vs. ATV Untamed (M13, every map ridden): the master list's StartPosition on Nat_MA,
+    // else the scene's DefaultStartPosition, the ride camera 16 ft behind it; under the ground on SM_MB.
+    let seen = if map.origin.boot == untamed::BOOT { "M13" } else { "M12" };
+    if spawn.is_none() && (map.origin.boot == BOOT || map.origin.boot == untamed::BOOT) {
         let unknown = format!("{scn_name}: the spawn is the scene's DefaultStartPosition ");
         todo.0.retain(|t| !t.starts_with(&unknown));
         let field = game_sim::world::Ground::new(&terrain, &scene.terrain);
@@ -618,7 +621,7 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
         if y < ground - 1.0 {
             todo.push(format!(
                 "{scn_name}: the spawn, the scene's DefaultStartPosition {}, is {:.1} ft under the ground there ({ground:.2}); \
-                 the game stands the rider on the ground over it (M12, seen in PCSX2), and whether openmx does was not checked",
+                 the game stands the rider on the ground over it ({seen}, seen in PCSX2), and whether openmx does was not checked",
                 vec3(&sections, "SceneInfo", "DefaultStartPosition"),
                 ground - y
             ));

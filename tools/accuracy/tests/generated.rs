@@ -342,3 +342,17 @@ fn openmx_is_ready_only_with_every_flag_as_a_word() {
     let ready = format!("{today}  --mod DIR\n  --shot-pose x,y,z,yaw,pitch,fov\n");
     assert!(look::openmx_missing(&ready, look::OPENMX_ARGS).is_empty());
 }
+
+/// Untamed (M13): its gameplay module goes in at 0x48ea80, and its ride camera's fov is 75.
+#[test]
+fn untamed_kit_config_and_fov() {
+    let t = accuracy::source::kit_toml(&accuracy::source::UNTAMED, Path::new("/d.iso"), Path::new("/x"));
+    assert!(t.contains("serial  = \"SLUS-21701\"") && t.contains("file = \"GAME_REL.BIN\"\nload = \"0x48ea80\""), "{t}");
+    assert_eq!(accuracy::look::ride_fov("SLUS_217.01"), 75.0);
+    assert_eq!(accuracy::look::ride_fov("SLUS_211.04"), 85.0);
+    assert_eq!(accuracy::source::find("untamed"), Some(accuracy::source::UNTAMED));
+    let cam = accuracy::source::UNTAMED.camera.unwrap();
+    // Held one word a function: the setter's and the look-at's first become `jr ra`.
+    assert_eq!((cam.update_slot, cam.stub), (0x111700, 0x03e00008));
+    assert_eq!(cam.also, &[(0x1117d0, 0x27bdffd0, 0x03e00008)]);
+}

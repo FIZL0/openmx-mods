@@ -1,5 +1,6 @@
-//! Every imported MX vs. ATV Unleashed map against the game (M12): for each `out/mods/tracks/mxvatv_*`
-//! with a RAM image of a Free Ride on it (`extracted/mxvatv/ram/<map>.bin`, `accuracy capture`):
+//! Every imported MX vs. ATV Unleashed map against the game (M12), and every MX vs. ATV Untamed one (M13):
+//! for each `out/mods/tracks/mxvatv_*` (`untamed_*`) with a RAM image of a Free Ride on it
+//! (`extracted/mxvatv/ram/<map>.bin`, `extracted/untamed/ram/<map>.bin`, `accuracy capture`):
 //!
 //! - the heights, surfaces, weights and (with MX vs. ATV's normal step) normals of the original's own
 //!   terrain query, at 1,000 points in the map's own mode, equal to openmx's on the mod's `.trn`;
@@ -8,7 +9,7 @@
 //! - every file the game opened for the map in the mod.
 //!
 //! The images and mods are game data, not in git; a map without one is skipped, and the test says how
-//! many it ran. notes/mxvatv.md has the table this proves.
+//! many it ran. notes/mxvatv.md and notes/mxvatv-later.md have the tables this proves.
 
 use accuracy::heights::{self, Oracle};
 use accuracy::loaded::{self, Have};
@@ -21,9 +22,8 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn discx_boot() -> &'static str {
-    source::MXVATV.boot
-}
+/// The games this runs on: the mods' id prefix and the folder of their images.
+const GAMES: [(&str, &str); 2] = [("mxvatv_", "mxvatv"), ("untamed_", "untamed")];
 
 #[test]
 fn every_imported_map_is_the_originals() {
@@ -32,16 +32,18 @@ fn every_imported_map_is_the_originals() {
         eprintln!("skipped: no {}", tracks.display());
         return;
     };
-    let mut dirs: Vec<PathBuf> = dirs.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("mxvatv_"))).collect();
+    let mut dirs: Vec<PathBuf> = dirs.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| GAMES.iter().any(|(pre, _)| n.to_string_lossy().starts_with(pre)))).collect();
     dirs.sort();
     let mut ran = Vec::new();
     // Names the game asked for and fell back from are on no part of the disc; without the disc, every
     // name the mod lacks counts.
     let iso = std::env::var("DISCX_ISO").map(PathBuf::from).unwrap_or_else(|_| root().join("iso"));
-    let psr = loaded::psr_names_in(&iso, discx_boot());
+    let mut psrs = std::collections::BTreeMap::new();
     for dir in dirs {
         let m = TrackMod::load(&dir).unwrap();
-        let image = root().join("extracted/mxvatv/ram").join(format!("{}.bin", m.map.to_ascii_lowercase()));
+        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        let game = GAMES.iter().find(|(pre, _)| name.starts_with(pre)).unwrap().1;
+        let image = root().join("extracted").join(game).join("ram").join(format!("{}.bin", m.map.to_ascii_lowercase()));
         if !image.exists() {
             eprintln!("{}: skipped, no {}", m.id, image.display());
             continue;
@@ -54,13 +56,13 @@ fn every_imported_map_is_the_originals() {
         let json = modcheck::json::Json::parse(&scn).unwrap();
         let scn = json.get("lookups").and_then(|l| l.get("scene")).and_then(|s| s.str()).unwrap().to_owned();
         let text = String::from_utf8_lossy(&std::fs::read(dir.join(&scn)).unwrap()).into_owned();
-        let fields = sceneram::compare(&bytes, &text).unwrap();
+        let fields = sceneram::compare_with(&bytes, &text, &sceneram::readers(&m.boot).unwrap()).unwrap();
         assert!(!fields.iter().any(|f| f.differs()), "{}", sceneram::text(&m.id, &fields));
         let names = loaded::pool(&bytes, &m.map);
         assert!(!names.is_empty(), "{}: no name pool", m.id);
         let (paths, files) = loaded::mod_files(&dir);
         let mut rows = loaded::audit(&names, &paths, &files);
-        if let Some(psr) = &psr {
+        if let Some(psr) = psrs.entry(m.boot.clone()).or_insert_with(|| loaded::psr_names_in(&iso, &m.boot)) {
             loaded::absent(&mut rows, psr);
         }
         let missing: Vec<_> = rows.into_iter().filter(|r| r.1 == Have::No).collect();

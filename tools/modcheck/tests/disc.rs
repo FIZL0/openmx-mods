@@ -372,12 +372,19 @@ fn fails_with(r: &Report, what: &str) {
 #[test]
 fn the_md1_view_reads_a_paged_terrain_exactly() {
     let paged = terrain(2, 3);
-    let refusal = Terrain::parse(&paged).unwrap_err();
-    assert!(refusal.contains("but the tree starts at"), "{refusal}");
     let view = md1_view(&paged).unwrap();
     assert_eq!((view.pages, view.gap), (3, 3 * (8 + 16 + 256)));
     assert_eq!(view.bytes.len(), paged.len());
-    let t = Terrain::parse(&view.bytes).unwrap();
+    // openmx reads the pages itself since its S98 (MD1, 2026-10-22), and then the file, not the view,
+    // is what it reads; before that it refused the file and read the view.
+    let read = match Terrain::parse(&paged) {
+        Err(refusal) => {
+            assert!(refusal.contains("but the tree starts at"), "{refusal}");
+            view.bytes.clone()
+        }
+        Ok(_) => paged.clone(),
+    };
+    let t = Terrain::parse(&read).unwrap();
     let plain_bytes = terrain(2, 0);
     let plain = Terrain::parse(&plain_bytes).unwrap();
     assert_eq!((t.levels, t.blocks, t.scale), (plain.levels, plain.blocks, plain.scale));
@@ -405,7 +412,10 @@ fn a_packaged_map_passes() {
     let r = run(&m, &dir);
     assert!(r.ok(), "{:#?}", r.fail);
     let notes = r.note.join("\n");
-    assert!(notes.contains("read through the MD1 view: 2 texture pages"), "{notes}");
+    // Only while openmx refuses a paged terrain (before its S98, MD1) is the view needed.
+    if Terrain::parse(&terrain(1, 2)).is_err() {
+        assert!(notes.contains("read through the MD1 view: 2 texture pages"), "{notes}");
+    }
     assert!(notes.contains("1 × 1 root cells, 2 levels, 256 × 256 samples at 9 ft"), "{notes}");
     assert!(notes.contains("2 shapes: 1 read, 1 listed in todo"), "{notes}");
     // Seven members, one path in both archives with the same bytes: six files.

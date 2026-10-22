@@ -224,10 +224,33 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   and the game stands the rider on the ground over it (the camera 5 ft over the ground, 20–310 ft over
   the start; Nat14 had rolled away). Fix (MD2): a mod track's spawn takes the ground's height where the
   scene's is below it. Each such mod's `todo` says so.
+- **Untamed, the same as M12's three above** (M13, `notes/mxvatv-later.md` *Against the game (M13)*).
+  MX vs. ATV Untamed's terrain query is Unleashed's (GAME_REL.BIN `0x4b0e30`, `0x4b0910`; the cell
+  reader `0x4a8ea0` hands normals back over 127): on all 40 imported maps every height, surface and weight
+  equals openmx's at 8,000 points, normals are 1–3 ulp off at 67–92 % of them, and every field is equal
+  with the step, so the per-source query of the T7 entry should take `SLUS_217.01` too. `world::Ground`'s
+  box is 56 × 56 ft on the 17 one-level maps (SX_A–L, FS_A–D, MT_A) where the game's is 896 × 896, and
+  5,760 × 5,760 on SM_HS where the game's is 4,032 × 5,760. The Free Ride start is under the ground on
+  BT_A and BT_B (360 ft), SM_MB (334), Nat_CO, SX_E, SX_H and SX_I (2–10 ft); the game stands the rider
+  on the ground over it.
+- **New: Untamed's `[SceneInfo]` makes the start's direction unit** (M13). SLUS_217.01 `0x30e490` reads
+  `DefaultStartDirection` and normalises it (VU0 `vrsqrt`) before anything uses it; `track::Scene::parse`
+  keeps the text's vector. Most Untamed scenes give a direction that is not unit (`0.50,0.00,-0.90`,
+  `-0.71,0.00,0.70`, …: 26 of the 40; Nat_OR's is `-0.00,0.00,0.54`, 0.54 long), so a mod from
+  Untamed faces, or moves, by a vector that is not the game's. Fix: normalise `start_direction` for a
+  mod whose `source.boot` is `SLUS_217.01`. (Whether MX vs. ATV Unleashed's reader normalises too was not
+  looked at: M12 found its held directions equal to the text's.)
+- **New: Untamed's `[Fog]` and `[Environment]` keys** (M13). The readers (`0x310180`, `0x30f0b0`) also
+  take `FogStart` and `FogEnd` (their defaults the minimum and maximum distance), `DetailMapLODBias` and
+  `EcosystemZone`, which `track::Scene` does not read. Only FS_C gives one (`DetailMapLODBias=-1`, in its
+  todo); the rest take the defaults, which the port's behaviour matches as long as it reads none of them.
+- **`Res::parse` and Untamed's padding, one more archive** (M13). Every Untamed mod now also holds the
+  members of `res\Shadows.res` (the six shadow sets' 18 `.psm.bpb`, opened in every ride), padded by
+  1,250 bytes like the map archives; the same fix covers it.
 - **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
   --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
   Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive
-  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera). Whether 85
+  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera, 75 on Untamed's). Whether 85
   spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
   so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
   side decides whether the pairs compare HUDs too.

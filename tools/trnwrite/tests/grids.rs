@@ -189,8 +189,11 @@ fn pages_sit_between_the_blocks_and_the_tree() {
             h.pages_at as u32 + 131_120
         ]
     );
-    // Today's openmx refuses the file as written (MD1); the view is what it reads.
-    assert!(Terrain::parse(&bytes).is_err());
+    // openmx refused the file as written until its S98 (MD1, 2026-10-22), and read the view; since
+    // then it reads the file itself, its pages where the header says.
+    if let Ok(direct) = Terrain::parse(&bytes) {
+        assert_eq!(direct.root_at() as usize, h.tree_at);
+    }
     // The root of a one-level terrain is the node over the root cell, and carries its pages.
     assert_eq!(t.root.pages[0], Some(0));
     assert_eq!(t.root.pages[5], Some(2));
