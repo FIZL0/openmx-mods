@@ -683,6 +683,29 @@ fn loose_members_the_game_opens_are_copied_and_listed() {
 }
 
 #[test]
+fn a_name_openmx_s_suffix_lookup_answers_with_another_file_is_in_todo() {
+    // The ecosystem's two billboards are the materials `treebb` and `shrubbb`. `ShrubBB.psm` is there,
+    // and `AShrubBB.psm` comes first in path order and ends the same; the map has no `TreeBB.psm`, and
+    // `BigTreeBB.psm` ends the same.
+    let eco_scene = String::from_utf8(scene()).unwrap().replace("CubeFile=sky1.cub", "CubeFile=sky1.cub\r\nEcosystemFile=test.esb");
+    let mut t = track();
+    t[0].1 = eco_scene.into_bytes();
+    t.push((r"Env\test\test.esb", esb(&["Tree", "Shrub"])));
+    let mut m = mat();
+    m.push((r"Tex\ShrubBB.psm", psm(&["Shrub"])));
+    m.push((r"Tex\AShrubBB.psm", psm(&["Other"])));
+    m.push((r"Tex\BigTreeBB.psm", psm(&["Big"])));
+    let d = disc_loose("suffix", t, m, Vec::new(), Vec::new());
+    let got = import_disc(&d).unwrap();
+    let has = |all: &[&str]| assert!(got.todo.iter().any(|t| all.iter().all(|w| t.contains(w))), "no todo has all of {all:?}: {:#?}", got.todo);
+    has(&["Res::find_suffix", "answers with another file", "MD2", r"shrubbb.psm → Tex\AShrubBB.psm (Tex/ShrubBB.psm is the file)"]);
+    has(&["names the map has no file for", r"treebb.psm → Tex\BigTreeBB.psm"]);
+    // modcheck still reads it back: the todo is a note, not a fault.
+    let r = check(&got.dir, &mut Discs::new(Some(d.iso.clone())));
+    assert!(r.ok(), "{:#?}", r.fail);
+}
+
+#[test]
 fn the_toys_physics_the_shadows_and_the_particle_sheets_are_pulled() {
     // The toy file lists three physics collections and says the first two count; a `*` group is not
     // a file. The first's `.pco` is loose, the second's is in the archive; each part names two shapes.
