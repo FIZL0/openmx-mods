@@ -162,9 +162,10 @@ pub fn lattice_spacing(tiles: &[Tile]) -> f64 {
 }
 
 /// The gap two edges at these heights need so the blend between them stays under the slope: the
-/// Shepard profile is at most about 1.6 times the mean slope, plus the two tapers.
-fn gap_for(dh: f64, p: &Params, step: f64, widen: f64) -> f64 {
-    (1.6 * dh.abs() / p.max_slope + 2.0 * (step + p.fade)).max(p.min_gap) * widen
+/// Shepard profile is at most about 1.6 times the mean slope, plus the two edges' room. An edge's room
+/// is `step + fade` (its taper), and as much more as its seam gate is past C1's `2 step + 3 fade` (C9).
+fn gap_for(dh: f64, p: &Params, rooms: f64, widen: f64) -> f64 {
+    (1.6 * dh.abs() / p.max_slope + rooms).max(p.min_gap) * widen
 }
 
 /// Place one interior's near edge at or past `want` (world feet) along one axis: the tile's origin on a
@@ -189,7 +190,8 @@ fn place_axis(want: f64, s: f64, lo: u32, hi: u32, ratio: Option<(i64, i64)>) ->
 
 /// Lay the tiles out in a grid, ordered by the height of their interiors' edges and filled in a snake,
 /// so neighbours are close in height; each gap is as wide as its two facing edges' heights need.
-pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result<Plan, String> {
+/// `gates` are each tile's seam gates per edge ([`gates`], measured on its cut).
+pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, widen: f64) -> Result<Plan, String> {
     if tiles.len() < 2 {
         return Err("a world needs two tiles or more".into());
     }
@@ -245,7 +247,8 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result
                 for (a, b) in pairs {
                     if let (Some(a), Some(b)) = (a, b) {
                         let dh = rings[a].edge_mean(axis + 2) - rings[b].edge_mean(axis);
-                        gap = gap.max(gap_for(dh, p, step, widen));
+                        let room = |t: usize, e: usize| gates[t][e] - (step + 2.0 * p.fade);
+                        gap = gap.max(gap_for(dh, p, room(a, axis + 2) + room(b, axis), widen));
                     }
                 }
             }
@@ -265,7 +268,7 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result
             ];
             far[0] = far[0].max(rect[2]);
             far[1] = far[1].max(rect[3]);
-            Source { tile: t, rect, at: at[t], spacing: s, keep: k, ring: tiles[t].ring(k) }
+            Source { tile: t, rect, at: at[t], spacing: s, keep: k, ring: tiles[t].ring(k), gates: gates[t] }
         })
         .collect();
     let size = [((far[0] + pad) / step).ceil() as u32, ((far[1] + pad) / step).ceil() as u32];
@@ -275,6 +278,31 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result
     let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
     let (collars, uncollared) = collars(&sources, &ratios, step, size, p.fade);
     Ok(Plan { spacing: step, size, placed, sources, radius, radii, bins, prune: p.prune, fade: p.fade, ratio: ratios, widen, collars, uncollared })
+}
+
+/// The share of `max_slope` a tile's extension alone may take past its seam gate: the rest is left for
+/// the blend between tiles, which the widening brings down (C9).
+pub const GATE_SHARE: f64 = 0.75;
+
+/// A source's seam gates (C9): `2 lattice + 3 fade` (C1's), or farther out on an edge whose own
+/// extension is steeper than [`GATE_SHARE`] of `max_slope` there.
+pub fn gates(src: &Source, step: f64, p: &Params) -> [f64; 4] {
+    src.edge_gates(step, p.fade, GATE_SHARE * p.max_slope, 2.0 * step + 3.0 * p.fade)
+}
+
+/// One tile as a source on its own at the origin, with its gates on a lattice of its own spacing (for
+/// `stitch edges`).
+pub fn lone_source(t: &Tile, p: &Params) -> Source {
+    cut_source(t, t.find_keep(), t.spacing, p)
+}
+
+/// A tile's interior `k` as a source at the origin, with its gates on a lattice of `step` feet.
+pub fn cut_source(t: &Tile, k: [u32; 4], step: f64, p: &Params) -> Source {
+    let s = t.spacing;
+    let rect = [f64::from(k[0]) * s, f64::from(k[1]) * s, f64::from(k[2]) * s, f64::from(k[3]) * s];
+    let mut src = Source { tile: 0, rect, at: [0.0; 2], spacing: s, keep: k, ring: t.ring(k), gates: [0.0; 4] };
+    src.gates = gates(&src, step, p);
+    src
 }
 
 /// Each source's Shepard radius: twice the farthest any world point is from its nearest interior, over
@@ -507,6 +535,23 @@ impl Plan {
         Point { h, surface: nearest.surface, w, near: nearest.d }
     }
 
+    /// How far a point is past every seam gate (C9): the least, over the sources, of its distance to
+    /// the interior less that source's gate there. The rideable gate holds a cell to `max_slope` where
+    /// this is above 0 at its corners. `srcs` are the sources that can be nearer than their gate.
+    pub fn clear(&self, srcs: &[usize], x: f64, z: f64) -> f64 {
+        srcs.iter().map(|&c| self.sources[c].distance(x, z) - self.sources[c].gate_at(x, z)).fold(f64::INFINITY, f64::min)
+    }
+
+    /// The sources whose seam gate reaches into a world rectangle grown by `margin`.
+    pub fn gated(&self, rect: [f64; 4], margin: f64) -> Vec<usize> {
+        (0..self.sources.len())
+            .filter(|&c| {
+                let g = self.sources[c].gates.iter().copied().fold(0.0, f64::max);
+                rect_gap(rect, self.sources[c].rect) < g + margin
+            })
+            .collect()
+    }
+
     /// The sources within reach of a world rectangle (and one lattice step round it): from the spatial
     /// grid, each within its own radius; every source when pruning is off.
     pub fn candidates(&self, rect: [f64; 4]) -> Vec<usize> {
@@ -575,7 +620,7 @@ impl Plan {
         let row = (nx + 1) as usize;
         // Rows on threads; each point keeps only its height and distance (not its weights), so a world
         // of tens of maps fits in memory however often the gaps are widened.
-        let mut h = vec![Coarse { h: 0.0, near: 0.0 }; row * (nz as usize + 1)];
+        let mut h = vec![Coarse { h: 0.0, clear: 0.0 }; row * (nz as usize + 1)];
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let rows_each = (nz as usize + 1).div_ceil(threads).max(1);
         std::thread::scope(|sc| {
@@ -583,21 +628,22 @@ impl Plan {
                 let near = &near;
                 sc.spawn(move || {
                     let terrains: Vec<Terrain> = tiles.iter().map(Tile::terrain).collect();
+                    let z0 = (part * rows_each) as f64 * step;
+                    let gated = self.gated([0.0, z0, nx as f64 * step, z0 + rows_each as f64 * step], step);
                     for (i, o) in out.iter_mut().enumerate() {
                         let (kx, kz) = (i % row, part * rows_each + i / row);
                         let (x, z) = (kx as f64 * step, kz as f64 * step);
                         let pt = self.at(tiles, &terrains, near(x, z), x, z);
-                        *o = Coarse { h: pt.h, near: pt.near };
+                        *o = Coarse { h: pt.h, clear: self.clear(&gated, x, z) };
                     }
                 });
             }
         });
-        let far = 2.0 * self.spacing + 3.0 * self.fade + step;
         let mut worst = (0.0, [0.0; 2]);
         for kz in 0..nz as usize {
             for kx in 0..nx as usize {
                 let c = [&h[kx + kz * row], &h[kx + 1 + kz * row], &h[kx + (kz + 1) * row], &h[kx + 1 + (kz + 1) * row]];
-                if c.iter().any(|p| p.near < far) {
+                if c.iter().any(|p| p.clear < step) {
                     continue;
                 }
                 let g = cell_slope([c[0].h, c[1].h, c[2].h, c[3].h], step);
@@ -610,11 +656,11 @@ impl Plan {
     }
 }
 
-/// A coarse lattice point: the ground's height and the distance to the nearest interior.
+/// A coarse lattice point: the ground's height and how far it is past every seam gate.
 #[derive(Clone, Copy)]
 struct Coarse {
     h: f64,
-    near: f64,
+    clear: f64,
 }
 
 /// The slope of a cell's blend at its middle, from its four corners (sample, +x, +z, both).
@@ -666,6 +712,8 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &Spec) -> Resu
     let (mw, md) = (sw + 2, sd + 2);
     let mut h = vec![0.0; mw * md];
     let mut near = vec![0.0; sw * sd];
+    let mut clear = vec![0.0; sw * sd];
+    let gated = plan.gated(rect, step);
     let mut surfaces = vec![0u8; sw * sd];
     let mut shares = vec![0.0; sw * sd * cands.len()];
     for mz in 0..md {
@@ -676,6 +724,7 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &Spec) -> Resu
             if (1..=sw).contains(&mx) && (1..=sd).contains(&mz) {
                 let i = (mx - 1) + (mz - 1) * sw;
                 near[i] = pt.near;
+                clear[i] = plan.clear(&gated, spec.at[0] + kx * step, spec.at[1] + kz * step);
                 surfaces[i] = pt.surface & 0x7f;
                 shares[i * cands.len()..(i + 1) * cands.len()].copy_from_slice(&pt.w);
             }
@@ -698,8 +747,7 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &Spec) -> Resu
         .collect();
     let trn = trnwrite::build(&grid, &trnwrite::Options::new(step as f32, hs))?;
     let (bytes, _) = trnwrite::write(&trn)?;
-    // Slopes, away from the seams and anywhere.
-    let far = 2.0 * plan.spacing + 3.0 * plan.fade;
+    // Slopes, away from the seams (past every seam gate) and anywhere.
     let (mut far_slope, mut near_slope) = (0.0f64, 0.0f64);
     for z in 0..sd - 1 {
         for x in 0..sw - 1 {
@@ -709,7 +757,7 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &Spec) -> Resu
             }
             let hh = c.map(|i| h[(i % sw) + 1 + (i / sw + 1) * mw]);
             let g = cell_slope(hh, step);
-            if c.iter().all(|&i| near[i] > far) {
+            if c.iter().all(|&i| clear[i] > 0.0) {
                 far_slope = far_slope.max(g);
             } else {
                 near_slope = near_slope.max(g);
@@ -836,6 +884,17 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             t.id, t.n.0, t.n.1, t.spacing, k, ring.mean(), steep
         );
     }
+    // The seam gates (C9), once: they hang on each tile's edge alone, not on the layout.
+    let t0 = std::time::Instant::now();
+    let step = lattice_spacing(&tiles);
+    let base = 2.0 * step + 3.0 * p.fade;
+    let gates: Vec<[f64; 4]> = tiles.iter().zip(&cuts).map(|(t, k)| cut_source(t, *k, step, p).gates).collect();
+    for (t, g) in tiles.iter().zip(&gates) {
+        if g.iter().any(|v| *v > base) {
+            eprintln!("stitch: {}: seam gates {:?} ft (C1's {base:.0}): its edges stay steep that far out", t.id, g.map(|v| v.round()));
+        }
+    }
+    eprintln!("stitch: seam gates measured in {:.1} s", t0.elapsed().as_secs_f64());
     let dir = out.join(&p.id);
     if dir.exists() {
         let old = std::fs::read_to_string(dir.join("mod.json")).unwrap_or_default();
@@ -848,7 +907,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
     let mut widen = 1.0;
     let (plan, results) = loop {
         let t0 = std::time::Instant::now();
-        let plan = plan(&tiles, &cuts, p, widen)?;
+        let plan = plan(&tiles, &cuts, &gates, p, widen)?;
         let (rmin, rmax) = plan.radii.iter().fold((f64::INFINITY, 0.0f64), |(a, b), r| (a.min(*r), b.max(*r)));
         eprintln!(
             "stitch: widen {widen:.3}: world {:.0} × {:.0} ft, {} pieces, radius {rmin:.0}–{rmax:.0} ft, planned in {:.1} s",
@@ -1003,6 +1062,19 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             ),
         }));
     }
+    let base = 2.0 * plan.spacing + 3.0 * plan.fade;
+    let gated: Vec<&Source> = plan.sources.iter().filter(|g| g.gates.iter().any(|v| *v > base)).collect();
+    for g in &gated {
+        let far = g.gates.iter().copied().fold(0.0, f64::max);
+        todo.push(s(format!(
+            "{}: its edges' own relief (hills its cut runs through) keeps the join ground beside it steeper than \
+             max_slope {} for up to {far:.0} ft out (seam gates x0 z0 x1 z1: {}); the joins are held to max_slope \
+             only past them (C9)",
+            tiles[g.tile].id,
+            p.max_slope,
+            g.gates.map(|v| format!("{v:.0}")).join(" ")
+        )));
+    }
     let clamped: usize = results.iter().map(|r| r.clamped).sum();
     if clamped > 0 {
         todo.push(s(format!("joins: {clamped} samples of the blend fell below 0 ft and were raised to 0 (a raw height is unsigned)")));
@@ -1073,6 +1145,16 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                                     ("band", J::N(c.band)),
                                 ])
                             })
+                            .collect(),
+                    ),
+                ),
+                // Per tile, the seam gates past C1's `2 lattice + 3 fade` (C9), for stitch check.
+                (
+                    "gates",
+                    J::A(
+                        gated
+                            .iter()
+                            .map(|g| o(vec![("tile", s(&tiles[g.tile].id)), ("edges", J::A(g.gates.iter().map(|v| J::N(*v)).collect()))]))
                             .collect(),
                     ),
                 ),
