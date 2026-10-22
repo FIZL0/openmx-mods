@@ -167,6 +167,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             r.fail.push(format!("tiles[{name}]: keep {keep:?} is not inside its {}×{} samples", tile.n.0, tile.n.1));
             continue;
         }
+        let g = tile.ground;
+        if keep[0] < g[0] || keep[1] < g[1] || keep[2] > g[2] || keep[3] > g[3] {
+            r.fail.push(format!("tiles[{name}]: keep {keep:?} runs over missing cells (its cells are all there only in {g:?})"));
+            continue;
+        }
         if let Some(m) = mods {
             let src = [m.join(name), m.join("tracks").join(name)].into_iter().find(|p| p.join("mod.json").exists());
             match src {

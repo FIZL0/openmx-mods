@@ -922,8 +922,12 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             let inside = fx >= f64::from(k[0]) && fx < f64::from(k[2]) && fz >= f64::from(k[1]) && fz < f64::from(k[3]);
             if !inside {
                 let off = fx < 0.0 || fz < 0.0 || fx > f64::from(t.n.0) || fz > f64::from(t.n.1);
+                let g = t.ground.map(f64::from);
+                let hole = fx < g[0] || fz < g[1] || fx > g[2] || fz > g[3];
                 let why = if off {
                     format!("off the terrain at ({:.1}, {:.1}) ft", pos[0], pos[2])
+                } else if hole {
+                    format!("over the terrain's missing cells at ({:.1}, {:.1}) ft, ground {:?}", pos[0], pos[2], t.ground)
                 } else {
                     format!("in the cut berm band at ({:.1}, {:.1}) ft, keep {:?}", pos[0], pos[2], k)
                 };
@@ -966,6 +970,16 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
     todo.push(s(
         "the world's outer edge is flat join ground with no berm; the shootoff there is the world's (openmx MD8)",
     ));
+    for t in &tiles {
+        let g = t.ground;
+        if g != [0, 0, t.n.0, t.n.1] {
+            todo.push(s(format!(
+                "{}: its terrain has no cells outside samples {}..{} × {}..{} of its {}×{} (as on its disc): its \
+                 interior is cut inside the cells that are there, so the ground past the hole is not in the world",
+                t.id, g[0], g[2], g[1], g[3], t.n.0, t.n.1
+            )));
+        }
+    }
     for c in &plan.collars {
         todo.push(s(format!(
             "{}: {} ft samples against the lattice's {} ft: its joins (c{:02}_*) are at its own spacing for {} ft round \

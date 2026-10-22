@@ -24,6 +24,12 @@ tiles are not all built is skipped with a line.
    loses more for as long as the side's profile keeps falling inward faster than 2%. The profile is the
    median height at each distance from the edge. This loss is the berm's inner slope. It is capped at
    400 ft past the band and at a quarter of the map.
+   The sides are those of the tile's **ground** (C8, `Tile::ground`, `whole_cells`): the largest
+   rectangle of whole 16-sample leaves whose cells all exist. That is the whole field on every map but
+   nat04. Where the tree has a hole at an edge, the side is the hole's edge. Only what is left of the
+   shootoff band past the hole is cut there, since the game has no shootoff at a hole, only no ground.
+   Then the berm test runs as on any side. So no cell outside the ground is ever read, and the world's
+   `todo` names the tile and its ground.
 2. **The layout** (`build::plan`). Tiles are sorted by the mean height of their interior's edge and
    laid in a near-square grid, filled snake-wise, so neighbours are close in height. Each gap is
    `max(min_gap, 1.6 |Δh| / max_slope + 2 (lattice + fade))`, where Δh is between the two facing edges.
@@ -160,7 +166,13 @@ vs. ATV Unleashed, imported by `import-mxvatv` into the scratchpad. 32 threads, 
 - **nat04 has missing cells** (C8). Its terrain is 1024 × 1280 samples, but there are no cells past x ≈ 896
   on its rows (`stitch profile`: NaN). `find_keep` keeps x up to 990, and the ring reads the missing cells
   as 0 ft. The join beside them drops 400 ft: near-seam slope 63, coarse slope 1.37 at 171 ft at every
-  widening, and 2,800 `no cell` failures in `stitch check`.
+  widening, and 2,800 `no cell` failures in `stitch check`. **Fixed in C8**: nat04's ground is
+  `[0, 0, 896, 1280]`, so its keep is `[34, 34, 896, 1246]`. The hole's edge is a flat at 291 ft at the
+  foot of a slope down from the 400 ft base, with no berm and nothing cut. With that keep, the 30 maps
+  build at 1.7 on the first pass (405 pieces, where C7 needed 505), and `stitch check` passes: 261,352
+  seam points, worst height step 0.0041 ft. At 0.5 every widening stops at mc09 (C9). Without mc09 they
+  stop at nat11 (0.619 at 171 ft, steepest edge cell 2.76). A world of nat04, nat05, nat06 and mc05 stops
+  at 0.516 beside nat04's z = 1246 edge, not the hole's. These are all C9's kind.
 - **Steep edges** (C9). Without nat04, the 29 maps still fail: 0.726 at 171 ft from mc09 (steepest
   edge cell 3.1) at every widening, and 0.608 at 315 ft with `--fade 96`. The edge's own slope carries
   just past the gate's `2 lattice + 3 fade`.
