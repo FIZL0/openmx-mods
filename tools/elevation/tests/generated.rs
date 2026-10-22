@@ -287,6 +287,7 @@ fn request(
         surface: 3,
         data: "generated GeoTIFF (test)".into(),
         date: "2026-10-22".into(),
+        sky: None,
     }
 }
 

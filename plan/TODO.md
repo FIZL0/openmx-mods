@@ -10,7 +10,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 ### Tooling
 
 - [~] **T9** the accuracy pairs' openmx half: once openmx has a track from a mod folder (MD2) and --shot-pose (MD10), set tools/accuracy pair's --openmx-args default to their real flags, settle the fov's axis with MD10 (notes/accuracy.md, Poses), and take Lago's (mxvatv_nat05) eight pairs end to end; read them and write what differs in notes/accuracy.md (after T7) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests — the openmx command line built from a pose | j: accuracy-pairs BLOCKED: openmx has neither MD2 (a track from a mod folder, by command-line flag) nor MD10 (--shot-pose); both open in openmx's plan/TODO.md at b63486a. Unblocks when both land: set look::OPENMX_ARGS to their flags, settle the fov axis, take Lago's 8 pairs with accuracy pair, write the differences in notes/accuracy.md
-- [ ] **M17** Elevation mods' sky, fog and lights: give tools/elevation's scenes a sky (CubeFile), [Fog] and [Light<n>] taken from a disc map of the same kind (a desert map for the dunes, a forest one for Hatfield), named in mod.json and its todo, since the data has none (M1 todo)
 - [ ] **M16** Elevation mods' surfaces: find which of the bike's .phy surface ids MXU's freeride ground uses for sand, dirt, rock and grass (free06–11's surface bytes against their splat layers), then give tools/elevation's maps real surface ids (dunes sand; Hatfield/Ocotillo from NAIP or a land-cover set), replacing today's all-0 (M1 todo)
 
 ### MX vs. ATV Unleashed

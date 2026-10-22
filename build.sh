@@ -48,6 +48,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# Data steps find a disc they borrow from themselves (elevation's skies, M17): the same folder.
+export DISCX_ISO=$iso
+
 if [ ! -d openmx/crates/game-sim ]; then
     echo "build: openmx is not linked: ln -s ../openmx openmx (see README)" >&2
     exit 1
