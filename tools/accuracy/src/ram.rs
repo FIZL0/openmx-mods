@@ -76,14 +76,15 @@ pub fn find_viewports(ram: &[u8], vp: &Viewport) -> Vec<u32> {
 }
 
 /// Of [`find_viewports`]' finds, the one whose eye is inside the box `[min, max]` (x and z), if exactly
-/// one is.
+/// one is. Strictly inside: the arenas' boxes start at 0, where the cube-map cameras (fov 90, eye at
+/// x = z = 0) sit on the edge (M12).
 pub fn pick_viewport(ram: &[u8], vp: &Viewport, found: &[u32], min: [f32; 4], max: [f32; 4]) -> Result<u32, String> {
     let inside: Vec<u32> = found
         .iter()
         .copied()
         .filter(|&at| {
             quad(ram, at + vp.eye)
-                .is_some_and(|e| e[0] >= min[0] && e[0] <= max[0] && e[2] >= min[2] && e[2] <= max[2])
+                .is_some_and(|e| e[0] > min[0] && e[0] < max[0] && e[2] > min[2] && e[2] < max[2])
         })
         .collect();
     match inside.as_slice() {

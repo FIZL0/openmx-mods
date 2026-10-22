@@ -6,14 +6,20 @@
 //! - [`look`]: screenshot pairs from the same camera poses, the original's (`./kit shot`, the pose read
 //!   out of its viewport over PINE) and openmx's (`--shot-pose`, openmx MD10), side by side.
 //!
+//! - [`sceneram`] and [`loaded`] (M12): the scene's fog, environment and start as the game holds them,
+//!   and the files it opened for the map, against the mod.
+//!
 //! [`source`] says where each game keeps the things this reads; `notes/accuracy.md` how they were found
 //! and how to run it.
 
 pub mod heights;
+pub mod landmarks;
+pub mod loaded;
 pub mod look;
 pub mod modfiles;
 pub mod pose;
 pub mod ram;
+pub mod sceneram;
 pub mod source;
 
 use std::fmt::Write as _;
