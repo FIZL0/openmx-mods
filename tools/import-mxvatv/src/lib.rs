@@ -8,6 +8,8 @@
 //! ```
 //!
 //! A map's archives are copied as the disc has them; nothing is edited, resampled or dropped (§2).
+//! The loose PSR members the game opens for the map because its archives lack them are copied
+//! beside them ([`pull_loose`]).
 //! Everything the port reads, or would read differently, is then looked at with openmx's own readers:
 //!
 //! - **game-sim**: `track::Scene` (spawn, terrain layout, placements), `track::Terrain` (through
@@ -54,6 +56,18 @@ pub struct Map {
     /// Every PSR member that is not a `.res`, by its base name lowercased: where a file the map names
     /// but its archives lack sits loose on the disc, for its `todo` entry.
     pub elsewhere: BTreeMap<String, Vec<String>>,
+    /// The loose PSR members the game opens for this map because its archives lack them (M15,
+    /// [`pull_loose`]); copied into the mod beside the archives' members and listed in
+    /// `source.members`.
+    pub pulled: Vec<Pulled>,
+}
+
+/// A loose PSR member the game opens for a map: the member as the PSR spells it, its bytes, and the
+/// map's file that names it.
+pub struct Pulled {
+    pub member: String,
+    pub bytes: Vec<u8>,
+    pub why: String,
 }
 
 /// The maps on the disc: every folder `Env\<MAP>\` with a `<map>.res`, in PSR order.
@@ -101,7 +115,8 @@ pub fn load_map(disc: &mut Disc, folder: &str) -> Result<Map, String> {
             elsewhere.entry(base(&e.name).to_ascii_lowercase()).or_default().push(e.name.clone());
         }
     }
-    Ok(Map { folder: folder.to_string(), archives, atylist, loose, elsewhere })
+    let pulled = pull_loose(disc, &archives)?;
+    Ok(Map { folder: folder.to_string(), archives, atylist, loose, elsewhere, pulled })
 }
 
 impl Map {
@@ -116,6 +131,156 @@ impl Map {
                 format!("loose on the PSR as {}{more}", shown.join(", "))
             }
         }
+    }
+}
+
+/// The texture names a `.psm` gives that are no file (SLUS_211.04 `0x00167720`).
+const NOT_FILES: [&str; 4] = ["RenderTarget", "RenderTarget2", "FrameBuffer", "DisplayBuffer"];
+
+/// The loose PSR members the game opens for a map (M15; notes/mxvatv.md, *Loose PSR members*).
+///
+/// SLUS_211.04's resource manager looks a name up, as a whole lowercased path, among the archives
+/// it has loaded (`0x00120750`, `0x0011ff70`). When none holds it, `0x0011dcf0` opens the PSR member
+/// at that path (`0x001c6a70`, any case), so a loose member stands in for a missing archive
+/// member. Three kinds of request reach past a map's archives on the disc, and each is followed as
+/// the game makes it:
+///
+/// - the ecosystem's species, `Eco\<model>.psg`: GAME_REL.BIN `0x0046d040` sets the model folder to
+///   `Eco\` around the model load (`0x0018b690`), which swaps the name's extension for `.psg`;
+/// - the map's material table, `MST\Env\<stem>.mst` (`0x0019db30`): each line names a material,
+///   opened as `<line>.psm` (`0x001a0e90`). Its `#include`s name the shared tables, not the map's;
+/// - those materials' textures: the `.psm`'s folder and the `TextureMap_<n>` of each
+///   `[ShaderPass_<p>]` (`0x00167720`), or the material's own name when it has no `.psm`
+///   (`0x00167f10`), tried as `.pst`, `.pss`, `.tga` and `.atm` in turn (`0x00170500`).
+///
+/// A path an archive holds is the archive's. One only the PSR holds, loose, is pulled.
+pub fn pull_loose(disc: &mut Disc, archives: &[(String, ResFile)]) -> Result<Vec<Pulled>, String> {
+    let mut held: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for (a, (_, r)) in archives.iter().enumerate() {
+        for (i, e) in r.entries().iter().enumerate() {
+            held.entry(normalise(&e.name)).or_insert((a, i));
+        }
+    }
+    let mut psr: BTreeMap<String, usize> = BTreeMap::new();
+    for (i, e) in disc.entries().iter().enumerate() {
+        if !e.name.to_ascii_lowercase().ends_with(".res") {
+            psr.entry(normalise(&e.name)).or_insert(i);
+        }
+    }
+    let mut o = Opener { disc, archives, held, psr, pulled: Vec::new() };
+
+    let scenes: Vec<String> = o.held.keys().filter(|k| k.ends_with(".scn")).cloned().collect();
+    let [scn] = scenes.as_slice() else {
+        return Ok(Vec::new()); // import_into refuses the map, and says why
+    };
+    let stem = base(scn).trim_end_matches(".scn").to_string();
+    let text = ini::text(&o.held_bytes(scn)?);
+    let sections = ini::parse(&text);
+
+    // The ecosystem's species.
+    let env = sections.iter().find(|s| s.name.eq_ignore_ascii_case("Environment"));
+    if let Some(file) = env.and_then(|e| e.get("EcosystemFile")).map(str::trim).filter(|f| !f.is_empty()) {
+        let esb = normalise(&with_ext(file, ".esb"));
+        let hits: Vec<String> = o.held.keys().filter(|k| **k == esb || k.ends_with(&format!("/{esb}"))).cloned().collect();
+        if let [esb] = hits.as_slice()
+            && let Ok(e) = eco::Ecosystem::parse(&o.held_bytes(esb)?, 1.0)
+        {
+            for s in &e.species {
+                let model = s.model.trim_end_matches('\0');
+                o.open(&with_ext(&format!("Eco\\{model}"), ".psg"), &format!("species {model} of {esb}"))?;
+            }
+        }
+    }
+
+    // The material table, and each material's textures.
+    let mst = format!("mst/env/{stem}.mst");
+    if o.held.contains_key(&mst) {
+        let table = ini::text(&o.held_bytes(&mst)?);
+        for line in table.lines() {
+            let m = line.split(';').next().unwrap_or("").trim();
+            if m.is_empty() || m.starts_with('#') {
+                continue;
+            }
+            let why = format!("material {m} in {mst}");
+            let psm = with_ext(m, ".psm");
+            let mut textures = Vec::new();
+            match o.open(&psm, &why)? {
+                None => textures.push(m.to_string()),
+                Some(bytes) => {
+                    let dir = &psm[..psm.rfind('\\').map_or(0, |i| i + 1)];
+                    let secs = ini::parse(&ini::text(&bytes));
+                    let get = |sec: &str, key: &str| {
+                        secs.iter().find(|s| s.name.eq_ignore_ascii_case(sec)).and_then(|s| s.get(key)).map(|v| v.trim().to_string())
+                    };
+                    let passes: usize = get("General", "TotalShaderPasses").and_then(|v| v.parse().ok()).unwrap_or(0);
+                    for p in 1..=passes {
+                        let pass = format!("ShaderPass_{p}");
+                        let maps: usize = get(&pass, "totalTextureMaps").and_then(|v| v.parse().ok()).unwrap_or(1);
+                        for n in 1..=maps {
+                            if let Some(t) = get(&pass, &format!("TextureMap_{n}")).filter(|t| !t.is_empty())
+                                && !NOT_FILES.iter().any(|x| x.eq_ignore_ascii_case(&t))
+                            {
+                                textures.push(format!("{dir}{t}"));
+                            }
+                        }
+                    }
+                }
+            }
+            for t in textures {
+                for ext in [".pst", ".pss", ".tga", ".atm"] {
+                    if o.open(&with_ext(&t, ext), &format!("texture {t} of {why}"))?.is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(o.pulled)
+}
+
+/// A name with its extension swapped, as the game does it: from the last dot, or added when there
+/// is none.
+fn with_ext(name: &str, ext: &str) -> String {
+    match name.rfind('.') {
+        Some(d) => format!("{}{ext}", &name[..d]),
+        None => format!("{name}{ext}"),
+    }
+}
+
+/// Opens a path the way the game's resource manager does: the map's archives, then the PSR.
+struct Opener<'a> {
+    disc: &'a mut Disc,
+    archives: &'a [(String, ResFile)],
+    /// Every archive member by its normalised path: (archive, entry).
+    held: BTreeMap<String, (usize, usize)>,
+    /// Every PSR member that is not a `.res`, by its normalised path.
+    psr: BTreeMap<String, usize>,
+    pulled: Vec<Pulled>,
+}
+
+impl Opener<'_> {
+    fn held_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
+        let (a, i) = self.held[key];
+        let (member, r) = &self.archives[a];
+        let e = &r.entries()[i];
+        r.read(e).map_err(|err| format!("{member}:{}: {err}", e.name))
+    }
+
+    fn open(&mut self, path: &str, why: &str) -> Result<Option<Vec<u8>>, String> {
+        let key = normalise(path);
+        if self.held.contains_key(&key) {
+            return self.held_bytes(&key).map(Some);
+        }
+        if let Some(p) = self.pulled.iter().find(|p| normalise(&p.member) == key) {
+            return Ok(Some(p.bytes.clone()));
+        }
+        let Some(&i) = self.psr.get(&key) else {
+            return Ok(None);
+        };
+        let e = self.disc.entries()[i].clone();
+        let bytes = self.disc.read(&e)?;
+        self.pulled.push(Pulled { member: e.name.clone(), bytes: bytes.clone(), why: why.to_string() });
+        Ok(Some(bytes))
     }
 }
 
@@ -137,6 +302,8 @@ pub struct Imported {
     pub todo: Vec<String>,
     /// The spawn `mod.json` gives, if the `.atyList` has one: (position, direction, from).
     pub spawn: Option<(String, String, String)>,
+    /// The loose PSR members copied beside the archives' ([`pull_loose`]).
+    pub pulled: Vec<String>,
 }
 
 /// The mod's id: `mxvatv_` and the map's folder, lowercased (§1).
@@ -292,6 +459,9 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     let mut same = 0;
     let mut by: BTreeMap<String, usize> = BTreeMap::new();
     for (l, bytes) in &map.loose {
+        if map.pulled.iter().any(|p| &p.member == l) {
+            continue;
+        }
         if let Some(b) = bytes {
             let twin = files.iter().find(|f| normalise(&f.path) == normalise(l)).expect("load_map found it");
             if &twin.bytes == b {
@@ -313,10 +483,13 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
         ));
     }
 
-    let members: Vec<String> = map.archives.iter().map(|(m, _)| m.clone()).collect();
-    let json = mod_json(id, &name, &map.folder, &members, spawn.as_ref(), &lookups, &todo.0);
+    let mut members: Vec<String> = map.archives.iter().map(|(m, _)| m.clone()).collect();
+    members.extend(map.pulled.iter().map(|p| p.member.clone()));
+    let loose: Vec<(&str, &str)> = map.pulled.iter().map(|p| (p.member.as_str(), p.why.as_str())).collect();
+    let json = mod_json(id, &name, &map.folder, &members, spawn.as_ref(), &lookups, &loose, &todo.0);
     std::fs::write(dir.join("mod.json"), json).map_err(|e| format!("{}: {e}", dir.display()))?;
-    Ok(Imported { id: id.to_string(), dir: dir.to_path_buf(), name, files: files.len(), todo: todo.0, spawn })
+    let pulled = map.pulled.iter().map(|p| p.member.clone()).collect();
+    Ok(Imported { id: id.to_string(), dir: dir.to_path_buf(), name, files: files.len(), todo: todo.0, spawn, pulled })
 }
 
 /// Every member of every archive at its own path. The same path twice is one file when the bytes are
@@ -350,6 +523,17 @@ fn unpack(map: &Map) -> Result<Vec<File>, String> {
                 }
             }
         }
+    }
+    // The loose members the game opens for the map ([`pull_loose`]): none is at an archive member's
+    // path, so none can clash with one, but the same path spelt two ways in the PSR would.
+    for p in &map.pulled {
+        let path = p.member.replace('\\', "/");
+        let key = path.to_ascii_lowercase();
+        if let Some(&k) = at.get(&key) {
+            return Err(format!("{} ({}) and {path} ({}): the same file spelt two ways", files[k].path, files[k].from, p.member));
+        }
+        at.insert(key, files.len());
+        files.push(File { path, bytes: p.bytes.clone(), from: p.member.clone() });
     }
     Ok(files)
 }
@@ -584,7 +768,7 @@ fn render(map: &Map, look: &Look, scn: &str, text: &str, scene: &Scene, terrain:
             if let Ok(Some(f)) = &found {
                 todo.push(format!(
                     "{scn}: EcosystemFile={file} names no file as written, and {} is {file}.esb; game-render's eco reader takes the name as \
-                     written, so the port draws no plants here (the game is taken to add .esb; not looked up in the ELF)",
+                     written, so the port draws no plants here (the game swaps or adds the extension: GAME_REL.BIN 0x0046f070)",
                     f.path
                 ));
             }
@@ -873,6 +1057,7 @@ fn q(s: &str) -> String {
     o
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mod_json(
     id: &str,
     name: &str,
@@ -880,6 +1065,7 @@ fn mod_json(
     members: &[String],
     spawn: Option<&(String, String, String)>,
     lookups: &[(&str, String)],
+    loose: &[(&str, &str)],
     todo: &[String],
 ) -> String {
     let list = |v: &[String], indent: &str| -> String {
@@ -900,6 +1086,10 @@ fn mod_json(
     o += &format!("  \"map\": {},\n", q(folder));
     let l: Vec<String> = lookups.iter().map(|(k, v)| format!("{}: {}", q(k), q(v))).collect();
     o += &format!("  \"lookups\": {{{}}},\n", l.join(", "));
+    if !loose.is_empty() {
+        let l: Vec<String> = loose.iter().map(|(m, why)| format!("    {}: {}", q(m), q(why))).collect();
+        o += &format!("  \"loose\": {{\n{}\n  }},\n", l.join(",\n"));
+    }
     o += &format!("  \"todo\": {}\n}}\n", list(todo, "  "));
     o
 }
