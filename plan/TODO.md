@@ -9,9 +9,9 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
+- [ ] **M18** Elevation surfaces past the NDVI test: tell Ocotillo's sandy washes from its badlands (texture, slope or a soils set such as SSURGO), and give water (Hatfield's river) zone 7 rather than dirt; see notes/elevation.md Surfaces (M16)
 - [ ] **C7** tools/stitch at C2/C5 scale: limit each join point's candidates to the tiles near it (a spatial grid, and a radius per neighbourhood rather than twice the world's farthest gap) and measure time and join size on a 30-map world before C2 runs it → tools/stitch/ | t: tools/stitch tests — the same world built with and without the pruning is identical within the height quantum | j: stitch-scale
 - [~] **T9** the accuracy pairs' openmx half: once openmx has a track from a mod folder (MD2) and --shot-pose (MD10), set tools/accuracy pair's --openmx-args default to their real flags, settle the fov's axis with MD10 (notes/accuracy.md, Poses), and take Lago's (mxvatv_nat05) eight pairs end to end; read them and write what differs in notes/accuracy.md (after T7) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests — the openmx command line built from a pose | j: accuracy-pairs BLOCKED: openmx has neither MD2 (a track from a mod folder, by command-line flag) nor MD10 (--shot-pose); both open in openmx's plan/TODO.md at b63486a. Unblocks when both land: set look::OPENMX_ARGS to their flags, settle the fov axis, take Lago's 8 pairs with accuracy pair, write the differences in notes/accuracy.md
-- [ ] **M16** Elevation mods' surfaces: find which of the bike's .phy surface ids MXU's freeride ground uses for sand, dirt, rock and grass (free06–11's surface bytes against their splat layers), then give tools/elevation's maps real surface ids (dunes sand; Hatfield/Ocotillo from NAIP or a land-cover set), replacing today's all-0 (M1 todo)
 
 ### MX vs. ATV Unleashed
 
