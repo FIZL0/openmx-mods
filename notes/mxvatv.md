@@ -211,6 +211,126 @@ block of all 56 terrains: through the view they are the file's own, byte for byt
 `Terrain::parse` takes as it is is read without the view, so the tables will show it once MD1 lands
 (no † on the page count).
 
+## Render-side formats (M9)
+
+Checked 2026-10-22 with `tools/renderprobe`. It runs a map's `<map>.res` and `<map>_mat.res` through
+openmx game-render's readers and loaders, and nothing of its own. It runs `Texture::parse`, `Material::parse`, `Model::parse`, `Scene::parse`,
+`Sky::parse`/`Sky::load`, `Ecosystem::parse`/`Grove::load`, `Splat::load`, `toy::cars`,
+`Assets::load_placed`, and `terrain::Terrain::parse`. All 56 maps were run
+(`renderprobe mxvatv <MAP>`), and the loose members by glob (`renderprobe mxvatv psg '**.psg'`,
+`pst '**.pst'`, `pst '**.atm'`, `skies`). MX Unleashed's `free06` and `nat01` were run as the baseline.
+game-render can only make a `Res` out of an ISO whose root holds `MX.PSR` (see openmx-asks, *game-render
+opens only MX.PSR*). So the probe puts each `.res`, byte for byte, as the one member of a PSR in a small
+ISO in memory, and opens that with game-render's own `Disc::read_from`.
+
+**Headline: the render side is MX Unleashed's too.** On all 56 maps:
+
+- every texture in the map archives decodes (`Texture::parse`, `.atm` by `parse_animation`)
+- every material parses
+- every sky decodes
+- every scene, and every ecosystem the scene names by its full file name, parses
+
+Every model in the map archives reads, except 6 on two maps (below). Every model a scene places loads with its textures from
+the two archives, except one on Nat16. The gaps are in names, a few model streams, and the terrain's own paint.
+
+### What reads unchanged
+
+| file | checked on | result |
+|---|---|---|
+| `<map>_mat.res`: `Tex\*.pst`, `*.atm`, `*.psm` | all 56; e.g. Nat01: 39 `.pst`, 41 `.psm` | 0 refused. Loose: 4,642 of 4,645 `.pst` and 30 of 30 `.atm` read |
+| `Geo\*.psg`, `Eco\*.psg` in `<map>.res` | all 56; e.g. Nat04: 104 | all version 5; refused only on Nat12 and Nat16 (below) |
+| `.scn` (game-render's reader) | all 56 | Same sections as MXU (`SceneInfo`, `Environment`, `Fog`, `Light`N, `Model`N, `Object`N, `StaticModels`, `CollisionObjects`). `[Environment]` adds `EcoAmbientScale` and `EcoDiffuseScale` (Nat01, SX01, every map), which MXU free06/nat01 do not have and game-render does not read |
+| placed models, `Assets::load_placed` | all 56; e.g. SX01: 50 of 50, Nat04: 92 of 92 | All but Nat16's `NorthernLights` load from the map's own two archives. No placed model needs a loose file |
+| `Skies\*.ps2.cub` | all 112 loose; the one in each map `.res` | 96 packets each, all read; Nat01's `sky28` face 0 looked at: clouds above, fog colour below, as on MXU |
+| `.esb` | the 23 that the scene names with `.esb` (Nat01–17, MC01, MC03–05, MC09–10) | version 2, 9–16 species, 2,245 (Nat04) to 14,738 (Nat05) plants. The farthest plant is within the map's side (Nat01: 5,746 of 5,760 ft), so the 65536ths-of-the-larger-side rule holds at 5,760 ft |
+
+### What differs
+
+- **Material texture names with an extension or a space.** `Material::parse` keeps `TextureMap_1` as
+  written, and `world::texture_files` appends `.pst`:
+  - `Tex\SunFlare<N>.psm` names `sunflare<N>.pst`, so it looks for `sunflare33.pst.pst`. That is all 56
+    maps; `MoonFlare01/02` on four. `SunFlare33.pst` is in Nat01's `_mat.res`. MXU has the same thing
+    (`free06`: `sunflare03.pst.pst`).
+  - Nat05 `Tex\Nat05_liverystable_detail.psm` names `….dxm`, and the `.pst` is beside it.
+  - Nat12 `Nat12_genericsandstone.psm` and `Nat12_pillarA.psm` name `Nat12 _genericsandstone` and
+    `Nat12 _pillarA` (with a space). The `.pst` is `Nat12_genericsandstone.pst`. That leaves 10 of
+    Nat12's placed meshes untextured (`Nat12_Temple`, `nat12_column`, …). The scene reader already drops spaces
+    (`scene::slt_name`); the material reader does not.
+- **`EcosystemFile` without `.esb`.** SM01–03 and MC02 say `EcosystemFile=sm01` (`mc02`). The archive holds
+  `Env\sm01\sm01.esb`. `Grove::load` matches the name as a suffix, so these four maps get no trees.
+- **Eco billboards and species that are not in the map's archives.** On MC03, MC04, MC05, MC09, MC10
+  and Nat13 every species names the billboard `Nat11BB.tga`, and no `nat11bb.psm` is in those archives
+  (MC03's holds `nat08econew2.psm` instead). `Tex\Nat11BB.psm` and `Tex\Nat11bb.pst` are loose on the PSR,
+  and in Nat11's `_mat.res`. On Nat02 all 10 species' models are missing from the archive but loose
+  under `Eco\` (`Eco\nat02_treea.psg`, …). So the game also reads loose PSR members, and an importer
+  (M2) has to take these from there.
+- **Models game-render refuses.**
+  - Nat12: 5 eco models (`Eco\nat12_busha/bushb/bushc/weedsb/waitaminute.psg`, 6 of the 10 species)
+    fail with `unexpected UNPACK of 12 x 2 x 8 bits`. That is 8-bit texture coordinates (V2-8), where
+    the reader knows only V2-16. Loose `Geo\nat12_jumpgatea.psg` fails the same way.
+  - Nat16: `Geo\northernlights.psg`, which is placed, fails with `the file ends at 23513 but 3933048 bytes
+    were wanted at 373`. Its one mesh has stream mask `0x1f`; the reader knows bits 1, 2, 4 and 8.
+  - Loose only, on no map's archive: `Tex\dallas_stadium.psg` (`UNPACK of 16 x 3 x 16 bits`, 16-bit
+    normals). `Env\Nat05\Anim\nat05_bank_sign2/3.psg` and `nat05_courthouse_sign2.psg` are 8-byte stubs
+    (`psg\0`, version 5, nothing else).
+- **Three loose `.pst` with another header**: `Tex\Box01.pst`, `Crushedcar.pst`, `SM2Bridge.pst` start
+  `1, 1, 4` and then what looks like a 16-entry palette. `Texture::parse` refuses them
+  (`4278190080 mips`). They are on no map's archive.
+
+### The terrain's texture pages, and the ground's paint
+
+- **The pages decode as `.pst`.** A page is `0x27`, a mip count of 1, and a 16-byte mip header
+  (`256, 256, 65536, 0`), then 65,536 one-byte pixels. That is a `.pst` without its palette. Put the
+  terrain's own header palette in front (`renderprobe::page_pst`: the `.pst` magic, the 1,024 palette
+  bytes, then the page from its mip count) and `Texture::parse` decodes every page of all 56 maps:
+  1,812 pages. The palette is in the same GS order as a `.pst`'s (`pst::unswizzle`, as game-render's
+  terrain reader already assumes), with alpha `0x80` everywhere, and the pages use all 256 entries.
+- **What the pages show** (looked at, Nat01 and SX01, written as PNGs to the scratchpad only): one aerial
+  painting of the whole map, cut into 256×256 tiles. On SX01 the 16 tiles are the supercross
+  track and the grass around it; neighbouring tiles continue one another. Which tile lies where, and
+  how the blocks pick theirs, was not worked out (MD4).
+- **MXU has them too.** MXU `nat01` has 32 pages that decode the same way. `free06` has none: it paints
+  its ground with the screen-space splat. So this is not new with MX vs. ATV; openmx draws neither
+  (MD4).
+- **game-render's terrain reader** (`terrain::Terrain::parse`, used only by `first-draw`) refuses the 27
+  2-level maps (`794 x 794 is not a whole number of patches`). On the 29 1-level maps it "reads" 257 × 257,
+  but only because the block counts sit where it expects a size (MD3). Its 1 MiB "ground texture" is
+  then page 0 from its 24-byte header on.
+- **No screen-space splat.** `Splat::load` finds no `terrainscreenspacemesh.psm` on any of the 56 maps. In each `_mat.res` the ground's material is
+  `Env\<map>\TerrainPlain.psm`: `Vu1TerrainRenderer.vuo`, two texture maps, the first unnamed (the pages)
+  and `TextureMap_2 = <MAP>_d`, alpha-blended. `Material::parse` reads only `TextureMap_1`.
+  `<MAP>_d.pst` is a 512×512 detail map. It is loose beside the map (`Env\Nat01\Nat01_d.PST`, all 56
+  read) and not in either archive. Loose `TerrainLOD.psm`, `TerrainUseScreenSpace.psm` and the screen-space
+  prologue/epilogue sit beside 31 of the maps, but no archive holds them. No `<map>_shadow_NN.pst` exists
+  anywhere.
+
+### Not read by game-render
+
+- **`.toy`.** `toy::cars` finds 0 cars on all 56 maps: no `.toy` has a `[Cars]` section. They hold
+  `AnimatedToy`N (`Name, Position, Box, LookVector, UpVector, MCFName, InitialMotion, HasCollision`: the
+  crowd, the windmills, …), `PhysicsCollection`N, `TerrainZone`N (16 on every map), `Trigger`N with
+  actions, `SunFlare`, `ParticleEmitter`N (SX/FS), `Balloons` (MC01). MXU's nationals have
+  `AnimatedToy` too (nat01: 4), so this is not new; game-render has no reader for it.
+- **Particles.** `Part\<map>particles.prt` and `_gpu.prt` are in every map `.res`. openmx reads `.prt` in
+  the shell crate (`crates/openmx/src/particles.rs`), which this repo cannot call (as with `.vig`).
+- **No reader anywhere in openmx**, in the map archives:
+  - `.aud` (all 56; the shell's audio reads MXU's by name)
+  - `.pco` (38)
+  - `.mcf` and `.mot` beside the animated toys (24)
+  - `.vut` (20)
+  - `.emt` (5)
+  - `<map>_mst.res`, which holds `MST\*.mst` (Nat01: 20 of them: `Global.mst`, `TerrainShadow.mst`,
+    `Vehicle.mst`, …), not looked into
+- **Microprograms** named by the maps' materials, all known to MXU's set or near it:
+  - `Vu1StripDiffuse`, `…Scaled`, `…GlossySpecularMap`, `…TexTransform`
+  - `Vu1StripPrelit`, `…Scaled`, `…TexTransform`
+  - `Vu1StripConstantColor`, `Vu1StripSkyUntextured`, `Vu1TerrainRenderer`, `Vu1Ecosystem2D`
+  - `Vu1Particles`, `Vu1ParticlePhysics`, `Vu1NopLoop`
+
+  Some are spelled in lower case (`Vu1Stripdiffuse`, `Vu1Stripprelit`). game-render's `Material::shading`
+  lower-cases them, so that is harmless. `Tex\Screen.psm` (the stadiums' jumbotrons) names
+  `RenderTarget`, as on MXU.
+
 ## Survey tables
 
 `cargo run --release -p survey -- mxvatv`, 2026-10-22. † = read through the view above.
@@ -346,8 +466,9 @@ block of all 56 terrains: through the view they are the file's own, byte for byt
 
 ## Not verified
 
-- `.psg` models, `.pst`/`.psm` textures, `_mat.res`, `.toy`, `.esb`, skies and particles were not run
-  through openmx's game-render readers. The texture pages were walked, not decoded (M9).
+- Render side (M9): readers accepting a file is all that was checked. Nothing was drawn and compared with
+  the running game (T7). Of the decoded pictures, only Nat01's and SX01's pages and Nat01's sky face 0 were looked at.
+  Particles, `.aud`, `.pco`, `.mst` and the animated toys were not read (no reader here).
 - The survey checks that each reader accepts each file and counts what it returns. It does not check that
   heights, placements or collision shapes are right against the running game (T7).
 - What the game does with a placement whose `.col` is not on the disc, and with a scene key that
