@@ -50,8 +50,148 @@ the PSR with openmx's readers alone: `Terrain::parse`, `Scene::parse`, `Collisio
   an `Anim\` folder: windmill blades, a Ferris wheel, swinging signs and doors, a tyre swing, animals.
   So class 1 is the animated-object class (openmx MD5).
 
-`MC` is the scenes' `SceneName=MachineChallenge0N`. Which maps the game offers as Freeride is in each
-map's `.atyList` (not read yet), and that decides the first mods (M8).
+`MC` is the scenes' `SceneName=MachineChallenge0N`. Which maps the game offers as Free Ride, and what each
+is called, is under *Free Ride: what each map is* (M8).
+
+## Free Ride: what each map is
+
+Read 2026-10-22 (M8) off the USA disc, every file named here pulled with `discx x mxvatv`:
+
+- **`Env\<MAP>\<MAP>.atyList`** (Nat02's is `NAT02.atylist`), an INI. `[General]` holds `DisplayName` and
+  one `Activity = "<section>"` per activity offered; each such section gives `Type`, `DisplayMenu`,
+  `DisplayTrack`, the `.tdf`/`.cs`/`.rpy` it loads, an optional `ATYFile`, `StartPosition` /
+  `StartDirection`, and `BarVehicleType` lines. No `Activity` line on the disc is commented out, and no
+  section is left unlisted.
+- **`Env\<Type>.aty`**, one per activity type, with the spaces dropped: `Freeride.aty`, `National.aty`,
+  `HillClimb.aty`, `MachineChallenge.aty`, … (`machine challenge ab` has `Machine Challenge ab.aty`, with
+  its spaces, and no space-free name in the ELF's list below). `Freeride.aty` turns everything off:
+  `OffTrackReset`, `UseTriggers`, `KeepLapRecords`, `ShowOffTrack`, `ShowWrongWay` all `FALSE`, no lap
+  count, no duration, no start delay, and no race audio (3-2-1, drop
+  gate, fireworks, waypoint). The type → file link is read from the boot ELF's strings, not its code: `SLUS_211.04` holds the type names (`free ride` at file offset `0x2a398b`) followed by the
+  same list without spaces (`freeride` at `0x2a3a50`), and the formats `%s%s.aty` (`0x2a81a6`) and
+  `%s%s\%s.atyList` (`0x2a8254`).
+- **`UI\Tracks.dat`**: the order the UI lists the maps in, and the six unlocked from the start (`[sx03]`,
+  `[sx09]`, `[nat05]`, `[nat06]`, `[mc02]`, `[FS04]` with `Locked = FALSE`). **`TrackList.res`** (named
+  in the ELF at `0x29b1d6`) is `UI\tracks.dat` plus the 56 `.atyList`s, each byte-identical to the loose
+  file.
+- **`UI\Store.dat`**: one store item per map (`AssetName = "NAT01"`, `StoreText = "GOBLIN GULCH"`), plus
+  the hill-climb and short-track unlocks. Its names agree with `DisplayName` except that it drops "FMX" on
+  the FS maps and calls MC04 "Glamis".
+- **`Loc\*.loc`, `Loc\L_*_ENG.bin`** have activity names (`STR_MODE_FREERIDE`), not map names. The map
+  names are the `.atyList`s' `DisplayName`s and nothing else.
+- **SceneName**: the survey table's *scene* column (`Env\<MAP>\<MAP>.scn`); it is a working title
+  (`National02:Ireland`, `Nat07[Quadzilla]`, MC03's is `MachineChallenge04`) and never what the UI shows.
+
+**All 56 maps offer Free Ride.** Every `.atyList` lists `Activity = "Free Ride"` with `Type = "free ride"`.
+Its section differs by series:
+
+- **Nationals and Supermoto** (Nat01–17, SM01–03): no `ATYFile`, so only `Env\Freeride.aty`. The map's own
+  `Nat0N.aty` (the drop gate `NatDropGate`, leader indicators) belongs to the National and is not named.
+  `StartPosition` is commented out on all of them (`;StartPosition = 300.0f, 90.0f, 500.0f`).
+- **Open class / machine maps** (MC01–10): `ATYFile = MC0N.aty`, the same file the race uses. Only MC01 sets
+  a start (its race's: 2465.5, 401.1, 1255.1).
+- **Freestyle** (FS01–08): `ATYFile = FS0N.aty`, `AllowRadar = FALSE`. Only FS05 sets a start.
+- **Supercross** (SX01–18): `ATYFile = FreeRide.aty` from the map's own folder (262 bytes: three camera-flash
+  groups, three crowd groups), `AllowRadar = FALSE`.
+
+Where no start is given, where the game puts the rider is not known (not looked up in the ELF).
+
+Columns: **map**; **name**, the `.atyList`'s `DisplayName` (the store's text where it differs); **UI**,
+the map's place in `UI\Tracks.dat`, ✓ = unlocked at the start; **activities**, from `[General]`, by `Type`
+(*Waypoint* is `open class waypoint`, *Machine A-B* is `machine challenge ab`); **Free Ride ATYFile**,
+**start** (an uncommented `StartPosition`) and **barred** (`BarVehicleType`; *air* = BiPlane and
+Helicopter) from the `[Free Ride]` section; **leaves, side (ft)** from the survey table above.
+
+| map | name | UI | activities | Free Ride ATYFile | start | barred | leaves, side (ft) |
+|---|---|---|---|---|---|---|---|
+| fs04 | St. Paul FMX (store: St. Paul) | 1 ✓ | High Score, Combo, Follow the Leader, Free Ride | FS04.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs05 | New Orleans FMX (store: New Orleans) | 2 | High Score, Combo, Follow the Leader, Free Ride | FS05.aty | yes | air, buggy, baja, sand rail | 16×16, 896 |
+| fs07 | Portland FMX (store: Portland) | 3 | High Score, Combo, Follow the Leader, Free Ride | FS07.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs02 | Austin FMX (store: Austin) | 4 | High Score, Combo, Follow the Leader, Free Ride | FS02.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs03 | Boston FMX (store: Boston) | 5 | High Score, Combo, Follow the Leader, Free Ride | FS03.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs06 | Las Vegas FMX (store: Las Vegas) | 6 | High Score, Combo, Follow the Leader, Free Ride | FS06.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs08 | Orlando FMX (store: Orlando) | 7 | High Score, Combo, Follow the Leader, Free Ride | FS08.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| fs01 | Little Rock FMX (store: Little Rock) | 8 | Follow the Leader, High Score, Combo, Free Ride | FS01.aty | no | air, buggy, baja, sand rail | 16×16, 896 |
+| mc02 | Desert Oasis | 9 ✓ | Machine, Free Ride | MC02.aty | no | — | 80×80, 5760 |
+| mc01 | Killington | 10 | Machine A-B ×2, Free Ride | MC01.aty | yes | — | 80×80, 5760 |
+| mc03 | Red Country | 11 | Machine A-B, Free Ride | MC03.aty | no | — | 80×80, 5760 |
+| mc04 | Glamis South (store: Glamis) | 12 | Machine, Free Ride | MC04.aty | no | — | 80×80, 5760 |
+| mc05 | Woodstock | 13 | Machine, Free Ride | MC05.aty | no | — | 80×80, 5760 |
+| mc06 | Monster Stadium | 14 | Machine, Free Ride | MC06.aty | no | air | 16×16, 896 |
+| mc07 | Trophy Stadium | 15 | Machine, Free Ride | MC07.aty | no | air | 16×16, 896 |
+| mc08 | 19th Hole | 16 | Machine, Free Ride | MC08.aty | no | air | 16×16, 896 |
+| mc09 | Quechee Gulch | 17 | Machine Waypoint, Free Ride | MC09.aty | no | — | 80×80, 5760 |
+| mc10 | Land and Air | 18 | Machine Waypoint, Free Ride | MC10.aty | no | — | 80×80, 5760 |
+| nat05 | Lago | 19 ✓ | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat06 | Juniper Park | 20 ✓ | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat03 | Glamis | 21 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat10 | Maple Hill | 22 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat02 | Tipperary | 23 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat01 | Goblin Gulch | 24 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat04 | Oceanside | 25 | National, Hill Climb ×6, Free Ride | — | no | air | 56×80, 4032 |
+| nat14 | Santiago | 26 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat09 | Deadman Wash | 27 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat16 | Northern Lights | 28 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat13 | Sienna Ridge | 29 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat07 | Valhalla | 30 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat11 | Sutter Raceway | 31 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat08 | Redwood Valley | 32 | National, Short Track, Waypoint, Free Ride | — | no | — | 80×80, 5760 |
+| nat17 | Keweni Falls | 33 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| nat12 | Temple of Apophis | 34 | National, Short Track, Waypoint, Free Ride | — | no | air | 80×80, 5760 |
+| nat15 | Smuggler's Notch | 35 | National, Hill Climb ×10, Free Ride | — | no | — | 80×80, 5760 |
+| sm01 | Mesa | 36 | Supermoto, Free Ride | — | no | — | 80×80, 5760 |
+| sm02 | Highlands | 37 | Supermoto, Free Ride | — | no | — | 80×80, 5760 |
+| sm03 | The Glades | 38 | Supermoto, Free Ride | — | no | — | 80×80, 5760 |
+| sx03 | Savannah | 39 ✓ | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx09 | New Orleans | 40 ✓ | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx01 | Los Angeles | 41 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 1280 |
+| sx18 | Boulder | 42 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx10 | Toronto | 43 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx07 | St. Paul | 44 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx16 | Tucson | 45 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx08 | Boston | 46 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx02 | Denver | 47 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 1280 |
+| sx04 | San Diego | 48 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx13 | Las Vegas | 49 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx14 | Mexico City | 50 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx11 | Orlando | 51 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx15 | Portland | 52 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx06 | Little Rock | 53 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx12 | Philadelphia | 54 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx17 | Charleston | 55 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+| sx05 | Austin | 56 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
+
+So by `.atyList` there are 56 freeride maps. What a freeride mod for OpenMX wants, an open outdoor world
+like MX Unleashed's `free06`, is the 33 big ones: Nat01–17, SM01–03, MC01–05, MC09–10 (80×80 leaves,
+5760 ft; Nat04 56×80). The FS, SX and MC06–08 maps are 896–1280 ft arenas.
+
+### The first mods
+
+The big maps sorted by what the survey above found against them:
+
+| group | maps | against them |
+|---|---|---|
+| clean | nat02 Tipperary, nat03 Glamis, nat09 Deadman Wash, nat13 Sienna Ridge, nat14 Santiago, nat15 Smuggler's Notch, nat17 Keweni Falls, mc02 Desert Oasis, mc03 Red Country, mc04 Glamis South, mc05 Woodstock, mc10 Land and Air, sm01 Mesa, sm02 Highlands, sm03 The Glades | nothing the survey found: every `.col` a placement names is on the disc and reads |
+| a placement's `.col` is on no part of the disc | nat01 (trash and recycling cans), nat06 (dino eggs), nat07 (`nat07_churchsnow`), nat08, nat11, nat16 (drop and start gates; nat11 also `singlebale01`), nat12 (`nat12_sphinx`), mc09 (`ring_trigger`) | what the game does with such a placement is open |
+| class-1 (animated) `.col` refused | mc01 (windmill blade), nat04 (Ferris wheel), nat05 (signs, gallows door), nat10 (mill wheel, tyre swing; also four missing `.col`) | needs openmx MD5 |
+
+**First: nat03 Glamis, nat09 Deadman Wash, nat02 Tipperary**, in that order, once M2's importer exists.
+Why these three:
+
+- All three are clean. Each is a National with 794 blocks and 48 pages, the shape MXU's own nat09 and
+  nat18 already have (`notes/mxu-terrain-limits.md`), so nothing about the terrain is new to the port
+  beyond MD1.
+- Their Free Ride is `Env\Freeride.aty` alone, so a mod needs nothing from the race's `.aty`. All three
+  have the same todo: the start position, since none is in the `.atyList`.
+- They differ from each other: Glamis (`SceneName=National03:Glamis`) and Tipperary
+  (`National02:Ireland`) are named for different places, and Deadman Wash has ten hill climbs in its
+  `.atyList` where the other two have a short track and a waypoint race. That they look different is a
+  guess from these names, not checked.
+- None is unlocked at the start; that does not matter to a mod.
+
+Next would be the rest of the clean list: nat14, nat15, nat17, nat13 (1050 blocks and 48 pages, the
+one big map whose page count breaks the one-page-per-16-blocks rule above), then sm01–03 and mc02–05,
+mc10. The other two groups wait on a decision about missing `.col` and on MD5.
 
 ## Embedded textures
 
@@ -213,3 +353,7 @@ block of all 56 terrains: through the view they are the file's own, byte for byt
 - What the game does with a placement whose `.col` is not on the disc, and with a scene key that
   disagrees with its terrain file (MC08, SX18, SX07, Nat04), was not looked up in the ELF.
 - Whether MX Unleashed's own loader takes an 80×80-leaf terrain (T3) is open.
+- M8's Free Ride table is read from the `.atyList`s, `UI\Tracks.dat` and `UI\Store.dat` only. That the
+  game offers every one of them in its Free Ride menu was not seen in PCSX2 (T7), and the type →
+  `Env\<Type>.aty` link is read from the ELF's strings, not its code. Where the game starts a Free Ride
+  that has no `StartPosition` was not looked up.
