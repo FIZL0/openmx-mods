@@ -9,6 +9,7 @@ stitch build OUT --id world_x --name NAME [--sky TILE] [--max-slope 0.5] [--min-
 stitch check WORLD_DIR [--mods DIR] [--iso DIR]     seams, slopes, look, tiles against their sources
 stitch profile TILE_DIR [SAMPLES]                   a map's edge profile and the cut find_keep makes
 stitch map WORLD_DIR OUT.pgm [FEET]                 the world's ground as a shaded greyscale picture
+stitch edges [--max-slope X] [--fade FT] TILE_DIR... each edge's height range, steepest cell, seam gate (C9)
 stitch --mods OUT/mods --out STAGE                  build.sh: every tools/stitch/worlds/*.json
 ```
 
@@ -32,7 +33,8 @@ tiles are not all built is skipped with a line.
    `todo` names the tile and its ground.
 2. **The layout** (`build::plan`). Tiles are sorted by the mean height of their interior's edge and
    laid in a near-square grid, filled snake-wise, so neighbours are close in height. Each gap is
-   `max(min_gap, 1.6 |Δh| / max_slope + 2 (lattice + fade))`, where Δh is between the two facing edges.
+   `max(min_gap, 1.6 |Δh| / max_slope + room_a + room_b)`, where Δh is between the two facing edges and
+   an edge's room is `lattice + fade` plus however far its seam gate (step 6) is past `2 lattice + 3 fade`.
    Each tile is centred in its cell. Its `at` is a whole leaf (16 samples). Where its spacing is a small
    fraction p/q of the lattice's, its interior's edges are moved onto lattice lines, by cutting at most
    q − 1 more samples per side.
@@ -76,14 +78,17 @@ tiles are not all built is skipped with a line.
    skipped. Each piece is written with trnwrite's `build`/`write`, with normals taken from the field
    across the piece's edges.
 6. **Rideable.** A coarse pass (every 4th sample) and then the full pass measure the steepest join cell
-   more than `2 lattice + 3 fade` from every interior. Past `max_slope`, every gap is widened by 1.25
-   and the build runs again.
+   past every tile's seam gate. Past `max_slope`, every gap is widened by 1.25 and the build runs again.
+   A seam gate is per edge (C9, `Source::edge_gates`): `2 lattice + 3 fade` (C1's), or farther where the
+   edge's own extension stays steeper than 0.75 `max_slope` (`build::GATE_SHARE`) farther out. Past a
+   corner the larger of the two edges' gates counts. See "Steep edges" below.
 
 mod.json gets two fields of the joiner's own (the loader ignores them, §1): `joins[].samples` (the
 piece's samples a side, which `check` and `map` read), and `stitch` (the lattice, `max_slope`, `fade`,
-the radius, the widening used, the collars, and the steepest join slope away from and near the seams).
+the radius, the widening used, the collars, the seam gates of every tile that has one past C1's, and the
+steepest join slope away from and near the seams). Each tile with a wider gate also gets a todo line.
 
-`stitch check` takes a tile's seam points from the join that covers each stretch of the edge (the
+`stitch check` holds join cells to `max_slope` past the same gates (read from `stitch.gates`). It takes a tile's seam points from the join that covers each stretch of the edge (the
 collar, round a collared tile). Where joins of two spacings meet, it also compares the two at every
 sample of either along the line (`join_seam_points`). Heights must agree to the join's quantum. The
 slope across is only reported, because each side's cell is at its own spacing.
@@ -161,7 +166,7 @@ vs. ATV Unleashed, imported by `import-mxvatv` into the scratchpad. 32 threads, 
   worst slope step 0.0018; 1,264 points between lattice points (mc06–08) step up to 0.72 ft (C6). It
   still FAILS, on the two problems below. 39 s.
 
-**Why the world does not build at the default `max_slope`**: two things, neither fixed by wider gaps.
+**Why the world did not build at the default `max_slope`**: two things, neither fixed by wider gaps.
 
 - **nat04 has missing cells** (C8). Its terrain is 1024 × 1280 samples, but there are no cells past x ≈ 896
   on its rows (`stitch profile`: NaN). `find_keep` keeps x up to 990, and the ring reads the missing cells
@@ -170,9 +175,50 @@ vs. ATV Unleashed, imported by `import-mxvatv` into the scratchpad. 32 threads, 
   `[0, 0, 896, 1280]`, so its keep is `[34, 34, 896, 1246]`. The hole's edge is a flat at 291 ft at the
   foot of a slope down from the 400 ft base, with no berm and nothing cut. With that keep, the 30 maps
   build at 1.7 on the first pass (405 pieces, where C7 needed 505), and `stitch check` passes: 261,352
-  seam points, worst height step 0.0041 ft. At 0.5 every widening stops at mc09 (C9). Without mc09 they
-  stop at nat11 (0.619 at 171 ft, steepest edge cell 2.76). A world of nat04, nat05, nat06 and mc05 stops
-  at 0.516 beside nat04's z = 1246 edge, not the hole's. These are all C9's kind.
-- **Steep edges** (C9). Without nat04, the 29 maps still fail: 0.726 at 171 ft from mc09 (steepest
-  edge cell 3.1) at every widening, and 0.608 at 315 ft with `--fade 96`. The edge's own slope carries
-  just past the gate's `2 lattice + 3 fade`.
+  seam points, worst height step 0.0041 ft. Before C9, at 0.5 every widening stopped at mc09. Without mc09 they
+  stopped at nat11 (0.619 at 171 ft, steepest edge cell 2.76). A world of nat04, nat05, nat06 and mc05
+  stopped at 0.516 beside nat04's z = 1246 edge, not the hole's. These are all C9's kind.
+- **Steep edges** (C9, fixed: next section). Without nat04, the 29 maps failed: 0.726 at 171 ft from
+  mc09 (steepest edge cell 3.1) at every widening, and 0.608 at 315 ft with `--fade 96`. The edge's own
+  slope carried just past the gate's `2 lattice + 3 fade`.
+
+## Steep edges (C9)
+
+Where a tile's cut runs through a hill, its edge has relief: heights that climb and fall along it, at
+up to 3.1 (mc09) or 22.5 (mxu_nat17's corner mountain) a cell. The extension blurs the edge along its
+length by `σ ≈ d′` (step 3), so the relief's slope across and along the join is about `relief / σ`
+at distance `d`, and the blur grows no faster than the distance. Ground beside such an edge cannot be
+held to `max_slope` within about `relief / max_slope` of it, however wide the gap, and C1's fixed gate
+(`2 lattice + 3 fade` = 153 ft) asked for it there. A wider fade only trades taper for blur (0.608 at
+315 ft for mc09).
+
+So the gate is per edge. `Source::edge_gates` evaluates the tile's own extension alone on lattice cells
+straight out from every lattice point of each edge, and on the corner squares, out to `2 lattice +
+3 fade` plus twice the edge's relief over the limit (its height range plus its steepest slope across
+carried over `lattice + fade`). The gate is the farthest steep cell plus one lattice step. The limit is
+0.75 `max_slope`: past every gate each extension is at most that, and the rest is left for the blend
+between tiles, which the widening brings down. It depends on the edge alone, so it is measured once per
+build on each tile's cut (a collared tile's interior can lose up to `q − 1` samples more in the layout;
+its gate is the cut's). That takes 3–5 s on 30 maps (eight threads per tile). The layout gives the
+wider gate room (step 2), so the ground past it exists in every gap.
+
+What the ground is did not change: only where it is held to `max_slope`. Inside a wider gate the join
+ground carries the edge's relief down at the slope the blend gives it, and the world's todo says so,
+per tile, with its gates.
+
+Measured on the real maps (`stitch edges`, at 0.5): MX vs. ATV's mc09 297–333 ft, nat01 207–270,
+nat13 306, nat17 189–315, the rest at most 306 and mostly 153; MX Unleashed's mxu_nat17 392, 315,
+1,206 and 2,808 ft (its x1 and z1 edges run up the mountain), mxu_nat21 230–473, mxu_nat10 441.
+
+- **The 29 MX vs. ATV maps** (C7's 30 without nat04) build at the default 0.5: widened to 2.44, 614
+  pieces, join slope 0.452 away from the seams, 3.95 near them; 26.6 s with the copying. `stitch check`
+  with the disc: ok, 253,012 seam points, worst height step 0.0041 ft, slope step 0.0018, join slope
+  0.451 away from the seams.
+- **All 27 MX Unleashed tiles** (world_mxu's) build at 0.5: widened to 1.56, 626 pieces, 0.472 away
+  from the seams; `stitch check` with the disc: ok, 256,196 seam points, worst 0.0106 ft. C10 puts
+  world_mxu.json back to 0.5.
+- **The 30 maps with nat04** now pass the build's gate at 0.5 too, but only because nat04's missing
+  cells (read as 0 ft, C8) count as relief: its z0 and z1 edges get gates of 657 and 662 ft, which take
+  in the 400 ft drop (near-seam slope 63). `stitch check` still fails there on the missing cells. C8 is
+  still needed, and a wide gate on a tile whose edge reads 0 ft is a sign of it. (Measured on C9's
+  branch, before C8 merged; with C8's keep nat04's edges no longer read missing cells. Not re-measured.)

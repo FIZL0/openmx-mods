@@ -483,6 +483,9 @@ pub struct Source {
     pub spacing: f64,
     pub keep: [u32; 4],
     pub ring: Ring,
+    /// Per edge (0 x = x0, 1 z = z0, 2 x = x1, 3 z = z1), how far out the join ground counts as near
+    /// the seam, feet: past this the rideable gate holds it to `max_slope` (C9, [`Source::edge_gates`]).
+    pub gates: [f64; 4],
 }
 
 /// What one tile's extension says at a point outside its interior.
@@ -517,6 +520,109 @@ impl Source {
         let fz = (z - self.at[1]) / s;
         let (qx, qz) = (fx.clamp(x0, x1), fz.clamp(z0, z1));
         ((fx - qx) * s).hypot((fz - qz) * s)
+    }
+
+    /// The edges a point outside the interior is past: (x side 0 or 2, z side 1 or 3), each if any.
+    fn sides(&self, x: f64, z: f64) -> (Option<usize>, Option<usize>) {
+        let [x0, z0, x1, z1] = self.rect;
+        let v = if x < x0 { Some(0) } else if x > x1 { Some(2) } else { None };
+        let h = if z < z0 { Some(1) } else if z > z1 { Some(3) } else { None };
+        (v, h)
+    }
+
+    /// The seam gate at a point outside the interior: the gate of the edge it is past, the larger of the
+    /// two past a corner.
+    pub fn gate_at(&self, x: f64, z: f64) -> f64 {
+        match self.sides(x, z) {
+            (Some(v), Some(h)) => self.gates[v].max(self.gates[h]),
+            (Some(e), None) | (None, Some(e)) => self.gates[e],
+            (None, None) => self.gates.iter().copied().fold(0.0, f64::max),
+        }
+    }
+
+    /// How far past each edge this tile's own extension stays steeper than `limit` (C9): the distance
+    /// from the interior past which every lattice cell of the extension alone is at most `limit`, and at
+    /// least `base`. A steep edge's relief (a hill the cut runs through) can only be carried down at a
+    /// slope the ground can take over a distance the relief sets, however wide the gap: the blur along
+    /// the edge brings its along-edge slope to about relief / σ, and σ grows no faster than the distance.
+    ///
+    /// Measured on lattice cells (`step` a side) straight out from every lattice point of each edge, and
+    /// on the corner squares (counted for both their edges), out to `base` plus twice the edge's
+    /// relief (its heights' range plus the steepest slope across it carried over `step + fade`) over
+    /// `limit`.
+    pub fn edge_gates(&self, step: f64, fade: f64, limit: f64, base: f64) -> [f64; 4] {
+        let [x0, z0, x1, z1] = self.rect;
+        let h = |x: f64, z: f64| self.extend(x, z, step, fade).h;
+        let steep = |x: f64, z: f64| {
+            let c = [h(x, z), h(x + step, z), h(x, z + step), h(x + step, z + step)];
+            let gx = (c[1] - c[0] + c[3] - c[2]) / (2.0 * step);
+            let gz = (c[2] - c[0] + c[3] - c[1]) / (2.0 * step);
+            gx.hypot(gz) > limit
+        };
+        let reach: [f64; 4] = std::array::from_fn(|e| {
+            let edge = &self.ring.edges[e];
+            let (lo, hi) = edge.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| (a.min(p.h), b.max(p.h)));
+            let across = edge.iter().map(|p| p.gx.abs().max(p.gz.abs())).fold(0.0, f64::max);
+            let relief = hi - lo + across * (step + fade);
+            (base + 2.0 * relief / limit).min(base.max(30_000.0))
+        });
+        let n = |len: f64| (len / step).ceil() as usize;
+        // Eight jobs on threads: straight out from each edge (the cell whose nearest corner is `k`
+        // steps out), and each corner square out to the larger of its two edges' reaches. Each gives
+        // the farthest steep cell's distance plus a step, per edge.
+        let job = |j: usize| -> [f64; 4] {
+            let mut g = [0.0f64; 4];
+            if j < 4 {
+                let e = j;
+                let along = if e % 2 == 0 { (z0, z1) } else { (x0, x1) };
+                for k in 1..=n(reach[e]) {
+                    let d = k as f64 * step;
+                    let steep_row = (0..n(along.1 - along.0)).any(|i| {
+                        let a = along.0 + i as f64 * step;
+                        let (x, z) = match e {
+                            0 => (x0 - d - step, a),
+                            1 => (a, z0 - d - step),
+                            2 => (x1 + d, a),
+                            _ => (a, z1 + d),
+                        };
+                        steep(x, z)
+                    });
+                    if steep_row {
+                        g[e] = d + step;
+                    }
+                }
+            } else {
+                let (v, hz) = [(0, 1), (2, 1), (0, 3), (2, 3)][j - 4];
+                let r = reach[v].max(reach[hz]);
+                for kz in 1..=n(r) {
+                    for kx in 1..=n(r) {
+                        let (ux, uz) = (kx as f64 * step, kz as f64 * step);
+                        if ux.hypot(uz) > r {
+                            break;
+                        }
+                        let x = if v == 0 { x0 - ux - step } else { x1 + ux };
+                        let z = if hz == 1 { z0 - uz - step } else { z1 + uz };
+                        if steep(x, z) {
+                            let d = ux.hypot(uz) + step;
+                            g[v] = g[v].max(d);
+                            g[hz] = g[hz].max(d);
+                        }
+                    }
+                }
+            }
+            g
+        };
+        let found: Vec<[f64; 4]> = std::thread::scope(|sc| {
+            let hs: Vec<_> = (0..8).map(|j| sc.spawn(move || job(j))).collect();
+            hs.into_iter().map(|h| h.join().expect("a gate job")).collect()
+        });
+        let mut gates = [base; 4];
+        for g in found {
+            for e in 0..4 {
+                gates[e] = gates[e].max(g[e]);
+            }
+        }
+        gates
     }
 
     /// The tile's ground carried past its edge: the edge's height plus its slope along the way out,
