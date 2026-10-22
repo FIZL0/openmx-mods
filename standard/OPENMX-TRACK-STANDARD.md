@@ -194,7 +194,9 @@ for T7 to see. A generated map (T2) has no such excuse: its scene must agree wit
 A scene that a source game writes differently (MX vs. ATV Untamed's binary `.scn.bpb`) is decoded to this
 INI text by the importer (M10's `tools/bpb`), not by the port. The decoded `.scn` sits beside the `.bpb`,
 which is still copied. Its `todo` says so, and the decode is proved by `Scene::parse` and the hash check
-in M10.
+in M10. The other BPB kinds the port reads as text are decoded beside themselves the same way (T11): the
+materials (`.psm.bpb`), the toys (`.toy.bpb`) and the particle sheets (`.prt.bpb`). One `todo` entry a
+kind names every decoded file.
 
 The scene keeps its own lengths and units: feet, positions in the terrain's world space with the origin
 at the tree's corner. A mod that is not in feet, or that is offset, is a resampled mod, and this

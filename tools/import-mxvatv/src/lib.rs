@@ -465,6 +465,7 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     let mut files = unpack(map)?;
     let mut todo = Todo::default();
     todo.extend(decode_scenes(&mut files)?);
+    todo.extend(decode_text_kinds(&mut files)?);
     for (member, r) in &map.archives {
         if r.padding > 0 {
             todo.push(format!(
@@ -483,7 +484,7 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
         std::fs::write(&p, &f.bytes).map_err(|e| format!("{}: {e}", p.display()))?;
     }
 
-    let look = Look { files: &files };
+    let look = Look { files: &files, asked: Default::default() };
 
     // The scene: the folder's only `.scn` (§2).
     let scenes: Vec<&File> = files.iter().filter(|f| f.path.to_ascii_lowercase().ends_with(".scn")).collect();
@@ -573,6 +574,7 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
 
     let mut lookups = vec![("scene", scn.path.clone()), ("terrain", trn.path.clone())];
     render(map, &look, &scn_name, &text, &scene, &terrain, &mut lookups, &mut todo);
+    suffix_picks(dir, &look, &mut todo);
     kinds(&files, &scn_name, &mut todo);
 
     // The Free Ride: its name and start from the `.atyList` (M8, §2b).
@@ -740,6 +742,53 @@ fn decode_scenes(files: &mut Vec<File>) -> Result<Vec<String>, String> {
     Ok(todo)
 }
 
+/// The other BPB kinds the port reads as text, each decoded beside itself as the scene is (§2a, T11):
+/// materials (`tex\nat_az_bowsaw.psm.bpb`, without which every Untamed model is drawn white), the toys
+/// (`<MAP>.toy.bpb`, which `toy::Traffic::load` looks for as `<MAP>.toy`) and the particle sheets
+/// (`.prt.bpb`). The `.bpb` stays as the disc has it. A file whose names' hashes do not recompute is
+/// not decoded and is said; one whose text name the archives already hold stops the import, as two
+/// spellings of one path do.
+pub const DECODED_KINDS: [&str; 3] = [".psm", ".toy", ".prt"];
+
+fn decode_text_kinds(files: &mut Vec<File>) -> Result<Vec<String>, String> {
+    let mut todo = Vec::new();
+    let mut add: Vec<File> = Vec::new();
+    let mut by_kind: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    let held: HashSet<String> = files.iter().map(|f| f.path.to_ascii_lowercase()).collect();
+    for f in files.iter() {
+        let Some(path) = f.path.strip_suffix(".bpb").or_else(|| f.path.strip_suffix(".BPB")) else { continue };
+        let lower = path.to_ascii_lowercase();
+        let Some(kind) = DECODED_KINDS.iter().find(|k| lower.ends_with(*k)) else { continue };
+        if held.contains(&lower) {
+            return Err(format!("{path}: the archives hold it and {} too; the import does not choose one", f.path));
+        }
+        let b = match bpb::parse(&f.bytes) {
+            Ok(b) => b,
+            Err(e) => {
+                todo.push(format!("{}: tools/bpb: {e}; not decoded, so the port reads no {kind} here", f.path));
+                continue;
+            }
+        };
+        let bad = b.bad_hashes();
+        if !bad.is_empty() {
+            todo.push(format!("{}: {} names whose hash does not recompute ({}); not decoded, so the port reads no {kind} here", f.path, bad.len(), bad.join(", ")));
+            continue;
+        }
+        by_kind.entry(kind).or_default().push(base(path).to_string());
+        add.push(File { path: path.to_string(), bytes: b.to_ini(), from: format!("{} decoded by tools/bpb", f.from) });
+    }
+    for (kind, names) in by_kind {
+        todo.push(format!(
+            "{} {kind} files are not disc members: each is the disc's <name>{kind}.bpb beside it (kept) decoded to INI text by tools/bpb (§2a), \
+             every name's hash recomputed, because the port reads only text: {}",
+            names.len(),
+            names.join(", ")
+        ));
+    }
+    files.extend(add);
+    Ok(todo)
+}
+
 /// The todo list, without repeats, in the order found.
 #[derive(Default)]
 struct Todo(Vec<String>);
@@ -761,6 +810,8 @@ impl Todo {
 /// that finds two files is an error (the port's plain suffix would take the first; modcheck fails it).
 struct Look<'a> {
     files: &'a [File],
+    /// Every name looked up, for [`suffix_picks`].
+    asked: std::cell::RefCell<BTreeSet<String>>,
 }
 
 impl<'a> Look<'a> {
@@ -779,6 +830,7 @@ impl<'a> Look<'a> {
     }
 
     fn one(&self, name: &str) -> Result<Option<&'a File>, String> {
+        self.asked.borrow_mut().insert(name.to_string());
         match self.all(name).as_slice() {
             [] => Ok(None),
             [f] => Ok(Some(f)),
@@ -1099,7 +1151,19 @@ fn material(
     }
     let by = base(by).to_string();
     if reader(&format!("{mat}.psm")).is_none() {
-        no_psm.entry(format!("{mat}.psm, {}", map.where_else(&format!("{mat}.psm")))).or_default().insert(by);
+        // The game draws a material with no `.psm` with the texture of its own name (`0x00167f10`,
+        // [`pull_loose`]), which world::Assets::resolve does not try (T11).
+        let own = [".pst", ".pss", ".tga", ".atm"].iter().find_map(|e| look.one(&format!("{mat}{e}")).ok().flatten());
+        let unchecked = if map.origin.boot == BOOT { "" } else { "; whether this game's own loader does the same was not looked up" };
+        let key = match own {
+            Some(f) => format!(
+                "{mat}.psm, in no archive of the map: MX vs. ATV Unleashed draws such a material with its own name's texture (SLUS_211.04 0x00167f10){unchecked}, \
+                 and the mod holds {} (openmx ask: Assets::resolve without a .psm)",
+                f.path
+            ),
+            None => format!("{mat}.psm, {}", map.where_else(&format!("{mat}.psm"))),
+        };
+        no_psm.entry(key).or_default().insert(by);
         return;
     }
     let psm = reader(&format!("{mat}.psm")).expect("just read");
@@ -1125,6 +1189,49 @@ fn material(
             }
         }
         no_tex.entry(format!("{mat}.psm wants {}{near}", wanted.join(" or "))).or_default().insert(by);
+    }
+}
+
+/// Every name the readers above looked up, asked again of the written folder the way openmx asks it
+/// (T11): `disc::Res::folder` and `find_suffix`, a plain suffix in path order with no `/` boundary. A
+/// name it answers with another file than §2's lookup found (`thq.psm` with `Tex\BaleTHQ.psm` where
+/// `Tex\thq.psm` is the file), or with some file where the map has none (`seating_blue.pst` with
+/// `Anaheim_seating_blue.pst`), is drawn with the wrong picture: one todo entry each way (openmx ask:
+/// MD2, lookups on a segment boundary).
+fn suffix_picks(dir: &Path, look: &Look, todo: &mut Todo) {
+    let res = match game_render::disc::Res::folder(dir) {
+        Ok(r) => r,
+        Err(e) => {
+            todo.push(format!("game-render disc::Res::folder refuses the mod's folder: {e}; openmx leaves the mod out"));
+            return;
+        }
+    };
+    let fold = |p: &str| p.replace('\\', "/").to_ascii_lowercase();
+    let (mut wrong, mut stand_in) = (Vec::new(), Vec::new());
+    let asked: Vec<String> = look.asked.borrow().iter().cloned().collect();
+    for name in &asked {
+        let Some(e) = res.find_suffix(name) else { continue };
+        match look.one(name) {
+            Ok(Some(f)) if fold(&f.path) != fold(&e.name) => wrong.push(format!("{name} → {} ({} is the file)", e.name, f.path)),
+            Ok(None) => stand_in.push(format!("{name} → {}", e.name)),
+            _ => {}
+        }
+    }
+    if !wrong.is_empty() {
+        todo.push(format!(
+            "{} names game-render's Res::find_suffix (a plain suffix, no path boundary) answers with another file of the mod, so the port reads that one \
+             (openmx ask: MD2, lookups on a segment boundary): {}",
+            wrong.len(),
+            wrong.join(", ")
+        ));
+    }
+    if !stand_in.is_empty() {
+        todo.push(format!(
+            "{} names the map has no file for, which game-render's Res::find_suffix answers with a file whose name only ends the same, so the port \
+             reads that one where the game's own lookup was not checked: {}",
+            stand_in.len(),
+            stand_in.join(", ")
+        ));
     }
 }
 
@@ -1177,6 +1284,15 @@ fn kinds(files: &[File], scn: &str, todo: &mut Todo) {
     for (ext, list) in binary {
         let shown: Vec<&str> = list.iter().take(3).copied().collect();
         let more = if list.len() > 3 { format!(", and {} more", list.len() - 3) } else { String::new() };
+        if DECODED_KINDS.iter().any(|k| ext.strip_suffix(".bpb") == Some(*k)) {
+            todo.push(format!(
+                "*{ext} ({} files: {}{more}): MX vs. ATV Untamed's binary INI (BPB), which no reader in game-sim or game-render takes; \
+                 each is decoded beside itself by tools/bpb (its own todo entry), and the port reads that text; kept as the disc has it",
+                list.len(),
+                shown.join(", ")
+            ));
+            continue;
+        }
         todo.push(format!(
             "*{ext} ({} files: {}{more}): MX vs. ATV Untamed's binary INI (BPB), which no reader in game-sim or game-render takes, so the port \
              reads none of them (openmx ask: a BPB reader); each decodes with tools/bpb, every hash recomputing; kept as the disc has it",

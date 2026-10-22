@@ -518,7 +518,12 @@ fn a_map_imports_with_its_scene_decoded_and_reads_back() {
     has(&[r"res\env\Test\Test_mst.res", "2003 zero bytes"]);
     has(&["*.psm.bpb (2 files", "BPB"]);
     has(&["*.toy.bpb (1 files"]);
-    has(&["Test.toy.bpb: the toys are BPB"]);
+    // The materials and the toys decoded beside their BPB as the scene is (T11), each named in todo.
+    has(&[".psm files are not disc members", "tools/bpb", "Rock.psm", "Loose.psm"]);
+    has(&["1 .toy files are not disc members", "Test.toy"]);
+    assert_eq!(std::fs::read(m.dir.join("tex/Rock.psm")).unwrap(), bpb::parse(&psm("Rock")).unwrap().to_ini());
+    assert_eq!(std::fs::read(m.dir.join("env/test/Test.toy")).unwrap(), bpb::parse(&bpb_of("[Toys]\nNumberOfToys=0\n")).unwrap().to_ini());
+    assert!(!m.todo.iter().any(|t| t.contains("the toys are BPB")), "{:#?}", m.todo);
     has(&["[Test Free Ride] ATYFile=Test.aty"]);
     // The pulled files are found where the scene names them: no entry calls one missing.
     assert!(!m.todo.iter().any(|t| t.contains("Shared.col") || t.contains("finds no file") || t.contains("in no archive")), "{:#?}", m.todo);
