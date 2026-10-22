@@ -10,3 +10,5 @@ publish.workspace = true
 game-sim = { path = "../../openmx/crates/game-sim" }
 # The disc image, its PSR and the globs.
 discx = { path = "../discx" }
+# Untamed's binary scenes (`<MAP>.scn.bpb`), decoded to the INI `Scene::parse` reads.
+bpb = { path = "../bpb" }

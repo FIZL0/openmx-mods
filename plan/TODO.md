@@ -9,7 +9,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
-- [ ] **M14** survey reads Untamed's scenes: `tools/survey untamed` decodes `<MAP>.scn.bpb` with `tools/bpb` and fills the scene columns (terrain keys, models, collision placements) in notes/mxvatv-later.md's table, which still say 'not read (M10)' (after M10) → tools/survey/ · notes/mxvatv-later.md | t: survey's ignored row test covers an Untamed scene | j: survey-bpb
 - [ ] **T7** accuracy harness: compare a mod against its source game running. Set up PCSX2 for each source disc with ../ps2-decomp-kit (a kit config per game under extracted/<game>/, PINE on), find each game's terrain query and its camera in RAM (as openmx's research did for MXU: terrain_point_query, the camera), and write tools/accuracy: (1) heights — read the original's own ground height and surface at ≥1,000 points per map over PINE and compare with openmx's Terrain on the imported file, which must be exact since the terrain is copied; (2) the look — screenshot pairs from the same poses, the original (./kit shot) and openmx (--shot from a pose, openmx MD10), side by side in out/accuracy/<map>/ for a person or an agent to read. Prove it on one MX vs. ATV Unleashed map end to end (after T5, M2) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests on generated data; the one map's heights all equal | j: accuracy-harness
 
 ### MX vs. ATV Unleashed

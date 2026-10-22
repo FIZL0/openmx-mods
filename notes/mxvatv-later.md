@@ -91,64 +91,86 @@ and the model and collision placement counts the BPB holds: 77,542 placements.
 `Veh\Col\` 67, `Env\Nat_DVCA\Anim\` 1. Two are refused. `Col\FS_Panel_Blue01.col` is a 0-byte file.
 `Env\Nat_DVCA\Anim\Nat05_Gallows_Door.col` is class 1, the animated-object class (MX vs. ATV
 Unleashed's Nat05 gallows door, carried over). Which shared `Col\` shapes a map places is in its
-scene (now decodable with `tools/bpb`; the survey does not read it yet).
+scene: the survey reads it (M14), and every shape an Untamed scene places is in the map's own
+archive or in `Col\`, except seven that are nowhere on the disc (*Survey tables*).
 
 ### Survey tables
 
 `cargo run --release -p survey -- untamed`, 2026-10-22. † = the terrain read through the view. The
-scene columns are empty: the survey predates `tools/bpb` (M10) and does not decode BPB yet.
+scene columns are from each map's `<MAP>.scn.bpb`, decoded by `tools/bpb` and read by `Scene::parse`
+(M14); "(BPB, n B)" is the file's size.
+
+Scene, read 2026-10-22 (M14):
+
+- All 49 scenes read: 69,331 models (`[ModelN]` with an `SLT`) and 8,211 collision placements
+  (`[ObjectN]` with a `COL`), 77,542 together, M10's count. The ignored test
+  `on_untamed_every_scene_is_read_from_its_bpb` in `tools/survey/tests/row.rs` checks each map's two
+  counts against the sections its BPB holds.
+- Every scene's `TerrainWidth` and `TerrainBreadth` are 5 (1 on the 16×16 FS, MT and SX maps), and the
+  scale is the terrain header's spacing on every map but Nat_OR, whose scene says 4.5 where its
+  terrain file says 4.499999.
+- `TerrainFile` is `<MAP>.trn` on 43 maps, where the archive holds `<MAP>.ps2.trn` (the table shows
+  it); SX_F to SX_K name `<MAP>.ps2.trn`. How the game gets from one to the other was not looked up.
+- SM_IP and TR_A, the two 1.6 KB stubs, place nothing: 0 models, 0 collision.
+- Seven `.col` that a scene places are on the disc nowhere, not in the map's archive, not in
+  `Col\`, not in any other map archive (only a `Geo\<name>.psg` of each is on the PSR): AM_CS
+  `AM_CS_Metal_Bracket.col` ×4 and `AM_CS_Metal_Bracket2.col` ×2, MT_A `FP06B6.col` ×1, Nat_MD
+  `NAT_MD_Drum2.col` ×1, Nat_SDCA `SDCA_Powerlines.col` ×2, SX_A `FP01A_E.col` ×1, SX_G
+  `FP03B4.col` ×1: 12 placements of 8,211. What the game does with them (skip the object, or collide
+  with nothing) was not looked up. Every other placed `.col` is in the map's own archive, or for
+  AM_JY (3 files), BT_B (2) and Nat_OR (22) in the PSR's shared `Col\` (the "loose" in the table).
 
 | map | levels | leaves | spacing (ft) | side (ft) | blocks | texture pages | scene | scene terrain keys | models | collision placements | `.col` read | `.col` refused |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| AM_CS | 2 | 80×80 | 4.5 | 5760 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 88736 B, not read (M10) | – | – | – | 58 of 58 | 0 |
-| AM_GFUC | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 62160 B, not read (M10) | – | – | – | 30 of 30 | 0 |
-| AM_JY | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 102528 B, not read (M10) | – | – | – | 30 of 30 | 0 |
-| BT_A | 2 | 80×80 | 4.5 | 5760 | 1050 | 64 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 37024 B, not read (M10) | – | – | – | 21 of 21 | 0 |
-| BT_B | 2 | 80×80 | 4.5 | 5760 | 1050 | 64 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 25328 B, not read (M10) | – | – | – | 13 of 13 | 0 |
-| BT_C | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 23392 B, not read (M10) | – | – | – | 25 of 25 | 0 |
-| BT_D | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 38240 B, not read (M10) | – | – | – | 25 of 25 | 0 |
-| BT_E | 2 | 56×80 | 4.5 | 4032 | 853 | 52 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 113488 B, not read (M10) | – | – | – | 82 of 82 | 0 |
-| BT_F | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 25936 B, not read (M10) | – | – | – | 25 of 25 | 0 |
-| FS_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 423072 B, not read (M10) | – | – | – | 5 of 5 | 0 |
-| FS_B | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 330144 B, not read (M10) | – | – | – | 3 of 3 | 0 |
-| FS_C | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 186752 B, not read (M10) | – | – | – | 16 of 16 | 0 |
-| FS_D | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 308912 B, not read (M10) | – | – | – | 3 of 3 | 0 |
-| HC_A | 2 | 80×80 | 4.5 | 5760 | 282 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 69392 B, not read (M10) | – | – | – | 1 of 1 | 0 |
-| MT_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 217408 B, not read (M10) | – | – | – | 28 of 28 | 0 |
-| Nat_AZ | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 61328 B, not read (M10) | – | – | – | 46 of 46 | 0 |
-| Nat_CO | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 46144 B, not read (M10) | – | – | – | 44 of 44 | 0 |
-| Nat_DVCA | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 67664 B, not read (M10) | – | – | – | 68 of 68 | 0 |
-| Nat_IN | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 58544 B, not read (M10) | – | – | – | 41 of 41 | 0 |
-| Nat_MA | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 38256 B, not read (M10) | – | – | – | 36 of 36 | 0 |
-| Nat_MD | 2 | 80×80 | 4.5 | 5760 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 54688 B, not read (M10) | – | – | – | 48 of 48 | 0 |
-| Nat_NC | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 66496 B, not read (M10) | – | – | – | 59 of 59 | 0 |
-| Nat_NY | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 63344 B, not read (M10) | – | – | – | 53 of 53 | 0 |
-| Nat_OR | 2 | 80×80 | 4.499999 | 5759.999 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 53232 B, not read (M10) | – | – | – | 29 of 29 | 0 |
-| Nat_PA | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 52208 B, not read (M10) | – | – | – | 43 of 43 | 0 |
-| Nat_SDCA | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 41104 B, not read (M10) | – | – | – | 37 of 37 | 0 |
-| Nat_UT | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 111984 B, not read (M10) | – | – | – | 32 of 32 | 0 |
-| SJ_A | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 70384 B, not read (M10) | – | – | – | 29 of 29 | 0 |
-| SJ_B | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 64384 B, not read (M10) | – | – | – | 29 of 29 | 0 |
-| SM_AS | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 83824 B, not read (M10) | – | – | – | 40 of 40 | 0 |
-| SM_CF | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 75024 B, not read (M10) | – | – | – | 39 of 39 | 0 |
-| SM_HS | 2 | 56×80 | 4.5 | 4032 | 853 | 52 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 124080 B, not read (M10) | – | – | – | 70 of 70 | 0 |
-| SM_IP | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 1648 B, not read (M10) | – | – | – | 0 of 0 | 0 |
-| SM_MB | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 105584 B, not read (M10) | – | – | – | 61 of 61 | 0 |
-| SM_OF | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 74944 B, not read (M10) | – | – | – | 54 of 54 | 0 |
-| SM_S1 | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 88752 B, not read (M10) | – | – | – | 44 of 44 | 0 |
-| SX_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 419552 B, not read (M10) | – | – | – | 16 of 16 | 0 |
-| SX_B | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 375408 B, not read (M10) | – | – | – | 17 of 17 | 0 |
-| SX_C | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 451280 B, not read (M10) | – | – | – | 16 of 16 | 0 |
-| SX_D | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 244160 B, not read (M10) | – | – | – | 17 of 17 | 0 |
-| SX_E | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 599216 B, not read (M10) | – | – | – | 17 of 17 | 0 |
-| SX_F | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 477744 B, not read (M10) | – | – | – | 16 of 16 | 0 |
-| SX_G | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 553872 B, not read (M10) | – | – | – | 15 of 15 | 0 |
-| SX_H | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 244608 B, not read (M10) | – | – | – | 15 of 15 | 0 |
-| SX_I | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 336176 B, not read (M10) | – | – | – | 19 of 19 | 0 |
-| SX_J | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 336960 B, not read (M10) | – | – | – | 17 of 17 | 0 |
-| SX_K | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 468368 B, not read (M10) | – | – | – | 20 of 20 | 0 |
-| SX_L | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 322992 B, not read (M10) | – | – | – | 20 of 20 | 0 |
-| TR_A | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BPB, 1616 B, not read (M10) | – | – | – | 0 of 0 | 0 |
+| AM_CS | 2 | 80×80 | 4.5 | 5760 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | AM_CS (BPB, 88736 B) | 5×5 @ 4.5, TerrainFile=AM_CS.trn | 391 | 378 (60 files: 58 here, missing am_cs_metal_bracket.col am_cs_metal_bracket2.col) | 58 of 58 | 0 |
+| AM_GFUC | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | AM_GFUC (BPB, 62160 B) | 5×5 @ 4.5, TerrainFile=AM_GFUC.trn | 243 | 218 (30 files: 30 here) | 30 of 30 | 0 |
+| AM_JY | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | AM_JY (BPB, 102528 B) | 5×5 @ 3.5, TerrainFile=AM_JY.trn | 445 | 443 (33 files: 30 here, 3 loose) | 30 of 30 | 0 |
+| BT_A | 2 | 80×80 | 4.5 | 5760 | 1050 | 64 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_A (BPB, 37024 B) | 5×5 @ 4.5, TerrainFile=BT_A.trn | 128 | 110 (21 files: 21 here) | 21 of 21 | 0 |
+| BT_B | 2 | 80×80 | 4.5 | 5760 | 1050 | 64 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_B (BPB, 25328 B) | 5×5 @ 4.5, TerrainFile=BT_B.trn | 112 | 84 (15 files: 13 here, 2 loose) | 13 of 13 | 0 |
+| BT_C | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_C (BPB, 23392 B) | 5×5 @ 4.5, TerrainFile=BT_C.trn | 113 | 109 (25 files: 25 here) | 25 of 25 | 0 |
+| BT_D | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_D (BPB, 38240 B) | 5×5 @ 4.5, TerrainFile=BT_D.trn | 187 | 163 (25 files: 25 here) | 25 of 25 | 0 |
+| BT_E | 2 | 56×80 | 4.5 | 4032 | 853 | 52 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_E (BPB, 113488 B) | 5×5 @ 4.5, TerrainFile=BT_E.trn | 649 | 538 (82 files: 82 here) | 82 of 82 | 0 |
+| BT_F | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | BT_F (BPB, 25936 B) | 5×5 @ 4.5, TerrainFile=BT_F.trn | 156 | 152 (25 files: 25 here) | 25 of 25 | 0 |
+| FS_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | FS_A (BPB, 423072 B) | 1×1 @ 3.5, TerrainFile=FS_A.trn | 3996 | 21 (5 files: 5 here) | 5 of 5 | 0 |
+| FS_B | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | FS_B (BPB, 330144 B) | 1×1 @ 3.5, TerrainFile=FS_B.trn | 3098 | 17 (3 files: 3 here) | 3 of 3 | 0 |
+| FS_C | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | FS_C (BPB, 186752 B) | 1×1 @ 3.5, TerrainFile=FS_C.trn | 1597 | 53 (16 files: 16 here) | 16 of 16 | 0 |
+| FS_D | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | FS_D (BPB, 308912 B) | 1×1 @ 3.5, TerrainFile=FS_D.trn | 2979 | 9 (3 files: 3 here) | 3 of 3 | 0 |
+| HC_A | 2 | 80×80 | 4.5 | 5760 | 282 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | HC_A (BPB, 69392 B) | 5×5 @ 4.5, TerrainFile=HC_A.trn | 316 | 12 (1 files: 1 here) | 1 of 1 | 0 |
+| MT_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | MT_A (BPB, 217408 B) | 1×1 @ 3.5, TerrainFile=MT_A.trn | 1935 | 176 (19 files: 18 here, missing fp06b6.col) | 28 of 28 | 0 |
+| Nat_AZ | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_AZ (BPB, 61328 B) | 5×5 @ 4.5, TerrainFile=Nat_AZ.trn | 300 | 296 (46 files: 46 here) | 46 of 46 | 0 |
+| Nat_CO | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_CO (BPB, 46144 B) | 5×5 @ 3.5, TerrainFile=Nat_CO.trn | 198 | 190 (44 files: 44 here) | 44 of 44 | 0 |
+| Nat_DVCA | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_DVCA (BPB, 67664 B) | 5×5 @ 3.5, TerrainFile=Nat_DVCA.trn | 282 | 266 (68 files: 68 here) | 68 of 68 | 0 |
+| Nat_IN | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_IN (BPB, 58544 B) | 5×5 @ 4.5, TerrainFile=Nat_IN.trn | 247 | 235 (41 files: 41 here) | 41 of 41 | 0 |
+| Nat_MA | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_MA (BPB, 38256 B) | 5×5 @ 3.5, TerrainFile=Nat_MA.trn | 170 | 150 (36 files: 36 here) | 36 of 36 | 0 |
+| Nat_MD | 2 | 80×80 | 4.5 | 5760 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_MD (BPB, 54688 B) | 5×5 @ 4.5, TerrainFile=Nat_MD.trn | 244 | 243 (49 files: 48 here, missing nat_md_drum2.col) | 48 of 48 | 0 |
+| Nat_NC | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_NC (BPB, 66496 B) | 5×5 @ 4.5, TerrainFile=Nat_NC.trn | 291 | 249 (59 files: 59 here) | 59 of 59 | 0 |
+| Nat_NY | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_NY (BPB, 63344 B) | 5×5 @ 3.5, TerrainFile=Nat_NY.trn | 329 | 238 (53 files: 53 here) | 53 of 53 | 0 |
+| Nat_OR | 2 | 80×80 | 4.499999 | 5759.999 | 538 | 32 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_OR (BPB, 53232 B) | 5×5 @ 4.5, TerrainFile=Nat_OR.trn | 256 | 246 (51 files: 29 here, 22 loose) | 29 of 29 | 0 |
+| Nat_PA | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_PA (BPB, 52208 B) | 5×5 @ 4.5, TerrainFile=Nat_PA.trn | 268 | 267 (43 files: 43 here) | 43 of 43 | 0 |
+| Nat_SDCA | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_SDCA (BPB, 41104 B) | 5×5 @ 4.5, TerrainFile=Nat_SDCA.trn | 215 | 205 (38 files: 37 here, missing sdca_powerlines.col) | 37 of 37 | 0 |
+| Nat_UT | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | Nat_UT (BPB, 111984 B) | 5×5 @ 4.5, TerrainFile=Nat_UT.trn | 524 | 509 (32 files: 32 here) | 32 of 32 | 0 |
+| SJ_A | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SJ_A (BPB, 70384 B) | 5×5 @ 4.5, TerrainFile=SJ_A.trn | 531 | 55 (29 files: 29 here) | 29 of 29 | 0 |
+| SJ_B | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SJ_B (BPB, 64384 B) | 5×5 @ 4.5, TerrainFile=SJ_B.trn | 531 | 55 (29 files: 29 here) | 29 of 29 | 0 |
+| SM_AS | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_AS (BPB, 83824 B) | 5×5 @ 4.5, TerrainFile=SM_AS.trn | 581 | 343 (40 files: 40 here) | 40 of 40 | 0 |
+| SM_CF | 2 | 80×80 | 3.5 | 4480 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_CF (BPB, 75024 B) | 5×5 @ 3.5, TerrainFile=SM_CF.trn | 490 | 321 (38 files: 38 here) | 39 of 39 | 0 |
+| SM_HS | 2 | 56×80 | 4.5 | 4032 | 853 | 52 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_HS (BPB, 124080 B) | 5×5 @ 4.5, TerrainFile=SM_HS.trn | 700 | 570 (70 files: 70 here) | 70 of 70 | 0 |
+| SM_IP | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_IP (BPB, 1648 B) | 5×5 @ 4.5, TerrainFile=SM_IP.trn | 0 | 0 (0 files: 0 here) | 0 of 0 | 0 |
+| SM_MB | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_MB (BPB, 105584 B) | 5×5 @ 4.5, TerrainFile=SM_MB.trn | 500 | 452 (61 files: 61 here) | 61 of 61 | 0 |
+| SM_OF | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_OF (BPB, 74944 B) | 5×5 @ 4.5, TerrainFile=SM_OF.trn | 331 | 319 (54 files: 54 here) | 54 of 54 | 0 |
+| SM_S1 | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | SM_S1 (BPB, 88752 B) | 5×5 @ 4.5, TerrainFile=SM_S1.trn | 542 | 238 (37 files: 37 here) | 44 of 44 | 0 |
+| SX_A | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_A (BPB, 419552 B) | 1×1 @ 3.5, TerrainFile=SX_A.trn | 4042 | 25 (13 files: 12 here, missing fp01a_e.col) | 16 of 16 | 0 |
+| SX_B | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_B (BPB, 375408 B) | 1×1 @ 3.5, TerrainFile=SX_B.trn | 3375 | 23 (13 files: 13 here) | 17 of 17 | 0 |
+| SX_C | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_C (BPB, 451280 B) | 1×1 @ 3.5, TerrainFile=SX_C.trn | 4377 | 24 (12 files: 12 here) | 16 of 16 | 0 |
+| SX_D | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_D (BPB, 244160 B) | 1×1 @ 3.5, TerrainFile=SX_D.trn | 2192 | 24 (13 files: 13 here) | 17 of 17 | 0 |
+| SX_E | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_E (BPB, 599216 B) | 1×1 @ 3.5, TerrainFile=SX_E.trn | 5713 | 24 (13 files: 13 here) | 17 of 17 | 0 |
+| SX_F | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_F (BPB, 477744 B) | 1×1 @ 3.5 | 4479 | 27 (12 files: 12 here) | 16 of 16 | 0 |
+| SX_G | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_G (BPB, 553872 B) | 1×1 @ 3.5 | 5347 | 23 (14 files: 13 here, missing fp03b4.col) | 15 of 15 | 0 |
+| SX_H | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_H (BPB, 244608 B) | 1×1 @ 3.5 | 2191 | 19 (11 files: 11 here) | 15 of 15 | 0 |
+| SX_I | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_I (BPB, 336176 B) | 1×1 @ 3.5 | 3204 | 23 (14 files: 14 here) | 19 of 19 | 0 |
+| SX_J | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_J (BPB, 336960 B) | 1×1 @ 3.5 | 3116 | 23 (13 files: 13 here) | 17 of 17 | 0 |
+| SX_K | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_K (BPB, 468368 B) | 1×1 @ 3.5 | 4348 | 22 (16 files: 16 here) | 20 of 20 | 0 |
+| SX_L | 1 | 16×16 | 3.5 | 896 | 257 | 16 × 256×256 fmt 0x27, 1 mip, 65560 B † | SX_L (BPB, 322992 B) | 1×1 @ 3.5, TerrainFile=SX_L.trn | 3072 | 24 (16 files: 16 here) | 20 of 20 | 0 |
+| TR_A | 2 | 80×80 | 4.5 | 5760 | 794 | 48 × 256×256 fmt 0x27, 1 mip, 65560 B † | TR_A (BPB, 1616 B) | 5×5 @ 4.5, TerrainFile=TR_A.trn | 0 | 0 (0 files: 0 here) | 0 of 0 | 0 |
 
 49 maps. † 49 terrains are refused by `Terrain::parse` as they are (openmx MD1); the survey read their texture table itself and passed the reader a view without it, the blocks moved up against the tree.
 `.col` in the map archives: 1472, of which 0 refused by `Collision::parse`.
@@ -183,8 +205,8 @@ No discs yet. Reflex has deformable terrain, so likely a heightfield again.
 
 ## Not verified
 
-- No `.bpb` decoded. The record layout above is read off one hexdump, so no Untamed scene key, model or
-  placement is counted.
+- The scene placements are counted as `Scene::parse` reads them; that the running game places the same
+  objects (and what it does with the seven missing `.col`) is not checked (T7).
 - The `.res` view's directory is the reader's own, but why the game pads it (alignment? a reserved
   table?) was not looked up in the ELF.
 - No `.psg` or texture parsed. The texture pages were walked, not decoded.

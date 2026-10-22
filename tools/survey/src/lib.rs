@@ -3,7 +3,7 @@
 //! ```text
 //! <map>.res ──┬── <MAP>.ps2.trn   Terrain::parse   levels, leaves, spacing, side, blocks, texture pages
 //!             ├── <MAP>.scn       Scene::parse     terrain keys, models, collision placements
-//!             │   (<MAP>.scn.bpb  Untamed's binary scene: counted, not read; M10)
+//!             │   (<MAP>.scn.bpb  Untamed's binary scene: tools/bpb to INI, then Scene::parse)
 //!             └── Col\*.col       Collision::parse class and size, or why it is refused
 //! ```
 //!
@@ -365,17 +365,14 @@ pub enum SceneRow {
         breadth_scale: f32,
         models: usize,
         placements: usize,
+        /// The scene was Untamed's binary `<MAP>.scn.bpb`, this many bytes, decoded by `tools/bpb`.
+        bpb: Option<usize>,
         /// Distinct `.col` files the placements name, and how many of them were found in the map's own
         /// files, found loose on the disc, and not found.
         placed_files: usize,
         in_map: usize,
         loose: usize,
         missing: Vec<String>,
-    },
-    /// Untamed's binary scene, which no reader takes yet (M10).
-    Bpb {
-        file: String,
-        bytes: usize,
     },
     Refused {
         file: String,
@@ -478,50 +475,56 @@ pub fn map(
         .map(|(n, b)| col(n, b))
         .collect();
 
-    let scene = match (scn, bpb) {
-        (Some((file, b)), _) => match Scene::parse(b) {
-            Ok(s) => {
-                let mut placed: Vec<String> = s
-                    .collision
-                    .iter()
-                    .map(|p| base(&p.file).to_ascii_lowercase())
-                    .collect();
-                placed.sort();
-                placed.dedup();
-                let (mut in_map, mut loose, mut missing) = (0, 0, Vec::new());
-                for p in &placed {
-                    if cols.iter().any(|c| base(&c.file).eq_ignore_ascii_case(p)) {
-                        in_map += 1;
-                    } else if loose_col(p) {
-                        loose += 1;
-                    } else {
-                        missing.push(p.clone());
-                    }
-                }
-                SceneRow::Ini {
-                    file: file.clone(),
-                    name: s.name,
-                    terrain_file: s.terrain_file,
-                    width: s.terrain.width,
-                    breadth: s.terrain.breadth,
-                    width_scale: s.terrain.width_scale.0,
-                    breadth_scale: s.terrain.breadth_scale.0,
-                    models: s.models.len(),
-                    placements: s.collision.len(),
-                    placed_files: placed.len(),
-                    in_map,
-                    loose,
-                    missing,
+    let mut read = |file: &String, ini: &[u8], bpb: Option<usize>| match Scene::parse(ini) {
+        Ok(s) => {
+            let mut placed: Vec<String> = s
+                .collision
+                .iter()
+                .map(|p| base(&p.file).to_ascii_lowercase())
+                .collect();
+            placed.sort();
+            placed.dedup();
+            let (mut in_map, mut loose, mut missing) = (0, 0, Vec::new());
+            for p in &placed {
+                if cols.iter().any(|c| base(&c.file).eq_ignore_ascii_case(p)) {
+                    in_map += 1;
+                } else if loose_col(p) {
+                    loose += 1;
+                } else {
+                    missing.push(p.clone());
                 }
             }
+            SceneRow::Ini {
+                file: file.clone(),
+                name: s.name,
+                terrain_file: s.terrain_file,
+                width: s.terrain.width,
+                breadth: s.terrain.breadth,
+                width_scale: s.terrain.width_scale.0,
+                breadth_scale: s.terrain.breadth_scale.0,
+                models: s.models.len(),
+                placements: s.collision.len(),
+                bpb,
+                placed_files: placed.len(),
+                in_map,
+                loose,
+                missing,
+            }
+        }
+        Err(why) => SceneRow::Refused {
+            file: file.clone(),
+            why,
+        },
+    };
+    let scene = match (scn, bpb) {
+        (Some((file, b)), _) => read(file, b, None),
+        // Untamed's: the same INI, compiled; `tools/bpb` gives the text back.
+        (None, Some((file, b))) => match bpb::parse(b) {
+            Ok(t) => read(file, &t.to_ini(), Some(b.len())),
             Err(why) => SceneRow::Refused {
                 file: file.clone(),
-                why,
+                why: format!("bpb: {why}"),
             },
-        },
-        (None, Some((file, b))) => SceneRow::Bpb {
-            file: file.clone(),
-            bytes: b.len(),
         },
         (None, None) => SceneRow::None,
     };
@@ -656,6 +659,7 @@ impl MapRow {
                 breadth_scale,
                 models,
                 placements,
+                bpb,
                 placed_files,
                 in_map,
                 loose,
@@ -679,23 +683,16 @@ impl MapRow {
                     placed.push_str(&format!(", missing {}", missing.join(" ")));
                 }
                 placed.push(')');
-                c.extend([
-                    if name.is_empty() {
-                        "(no SceneName)".to_owned()
-                    } else {
-                        name.clone()
-                    },
-                    keys,
-                    models.to_string(),
-                    placed,
-                ]);
+                let mut scene = if name.is_empty() {
+                    "(no SceneName)".to_owned()
+                } else {
+                    name.clone()
+                };
+                if let Some(bytes) = bpb {
+                    scene.push_str(&format!(" (BPB, {bytes} B)"));
+                }
+                c.extend([scene, keys, models.to_string(), placed]);
             }
-            SceneRow::Bpb { bytes, .. } => c.extend([
-                format!("BPB, {bytes} B, not read (M10)"),
-                "–".to_owned(),
-                "–".to_owned(),
-                "–".to_owned(),
-            ]),
             SceneRow::Refused { why, .. } => {
                 c.push(format!("refused: {why}"));
                 c.extend(std::iter::repeat_n("–".to_owned(), 3));
