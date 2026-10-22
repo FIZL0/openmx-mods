@@ -169,8 +169,8 @@ face's few pixels do not make a sample of their own. The picture does not tell s
 |---|---|---|---|---|---|
 | `elev_glamis` | dunes | 0.03 | sand | dirt | sand 99.9%, dirt 0.1% |
 | `elev_littlesahara` | dunes | 0.0 | sand | dirt (sagebrush and juniper flats) | sand 64.8%, dirt 35.2% |
-| `elev_ocotillo` | desert | — | dirt | dirt | dirt 100% |
-| `elev_hatfield` | forest | −0.2 | dirt | grass | grass 96.5%, dirt 3.5% |
+| `elev_ocotillo` | desert | — | dirt | dirt | dirt 100% (M18: sand 56.7%, dirt 43.3%) |
+| `elev_hatfield` | forest | −0.2 | dirt | grass | grass 96.5%, dirt 3.5% (M18: water 0.9%, dirt 2.7%) |
 
 NAIP's bands are uncalibrated counts, so NDVI sits lower than a reflectance one, differs by state and
 year, and falls on shaded slopes. The thresholds are per site and were set by eye with
@@ -185,6 +185,61 @@ side by side:
   road, the stream beds, the town and a little speckle in the darkest crowns are dirt.
 - Ocotillo's NDVI is under 0.1 everywhere (badlands, washes, sparse creosote), so nothing is green. The
   washes are likely sandier than the badlands, but the picture does not separate them, so the site is dirt.
+  (M18 separates them with the DEM: below.)
 
 `elevation build` takes `--ground dunes|desert|forest --green T` for the same, or `--surface ID` for one id
 everywhere. `mod.json`'s `elevation.surfaces` counts the samples per id.
+
+## Surfaces past the NDVI test (M18)
+
+The vegetation test cannot see two things: which of a desert's bare ground is sand, and water. Both
+come from the DEM, with the picture's brightness and near infrared to confirm them
+(`surfaces::washes`, `surfaces::water`, `Ground::classify_with_dem`). Every slope is taken on the DEM
+averaged over 5 × 5 samples (central differences, degrees).
+
+**Ocotillo's sand.** USDA's soil survey (SSURGO, area CA638, queried from Soil Data Access for the
+window) names the ground's units: the fan north of the road is *Carrizo very gravelly sand* and
+*Rositas loamy coarse sand*; the dissected ground south is *Badland* and *Sloping gullied land*. Its
+polygons are mapped at 1:24,000, so the washes inside the badlands, 3 to 30 m wide, are not in them,
+and its *very cobbly sandy loam, 30–65 % slopes* polygon in the north-east corner is mostly the same
+flat fan. So SSURGO is the check, not the source; the tool does not fetch it. The rule:
+
+- **Sand** where the slope is under 8° and either the ground is *open* (under 10 % of the 51 × 51-sample
+  square round it is over 15°: a fan or a broad wash) or, inside the badlands, the sample's picture
+  (red, green and blue averaged over 5 × 5) is more than 1.5 counts paler than that square's (a wash
+  floor: the washes' sand is the palest ground in the picture, the mudstone darker). The answer is the
+  majority of the 5 × 5 square round each sample, as with the NDVI. **Dirt** elsewhere.
+- Slope alone (under 5°, with "below the 31 m mean height" for the badlands) was tried first: it got
+  the fan but only scraps of the badlands' washes, whose floors are narrow and tilted; brightness on its
+  own also marks the sunlit faces of every ridge, so it counts only on flat ground.
+- Against SSURGO's units (the share of each unit the rule calls sand):
+
+  | unit | name | of the map | sand |
+  |---|---|---|---|
+  | CeC | Carrizo very gravelly sand, 0–9 % slopes | 28.2 % | 97.3 % |
+  | RsA | Rositas loamy coarse sand, 0–2 % | 0.4 % | 100 % |
+  | RsC | Rositas loamy coarse sand, 2–9 % | 0.7 % | 99.4 % |
+  | 1304 | Loamy-skeletal Ultic Haploxeralfs, very cobbly sandy loam, 30–65 % | 3.7 % | 86.6 % |
+  | 1103 | Goldrose-Carsitas-Typic Petrocalcids, 2–60 % | 1.5 % | 38.1 % |
+  | SrD | Sloping gullied land | 33.7 % | 55.7 % |
+  | BaG | Badland | 31.8 % | 17.6 % |
+
+  The sand units are sand, Badland is mostly dirt with its washes sand, and gullied land (more wash
+  between lower ridges) is half and half. 1304 disagrees: the rule calls its flat part sand, and the
+  picture shows it as the same fan as CeC beside it. The unit's 30–65 % slope class fits the hill at the
+  window's edge, not the flat part, so this looks like the polygon's coarseness (not checked on the ground).
+- The paved road (S22) across the fan is flat, open and pale: it is sand. It is 10 m wide.
+
+**Water.** 3DEP's lidar DEMs are hydro-flattened: a river's surface is a flat band bank to bank. Water
+is every 4-connected patch of samples under 0.3° of at least 200 samples whose picture has a median near
+infrared under 40 and a median NDVI under 0 (water absorbs near infrared; a flat field or car park does
+not). The patch, not the picture, gives the edge, since trees overhang the banks. Water is id 6, zone 7
+("shallow water or mud"), on every kind of ground. On the four sites:
+
+- Hatfield: one patch, the river in the north-west corner, 37,986 samples (0.9 %); no other
+  patch of 200 flat samples exists on the map. Its grass and dirt shares fall to 96.3 % and 2.7 %.
+- Glamis, Little Sahara and Ocotillo have no flat patch of 200 samples at all, so no water.
+
+Zone 7 is the bike's grip on shallow water; nothing else of water is made (no plane, splash or
+depth), and the drape shows the river as photographed. The thresholds are in `surfaces.rs` beside
+the constants. `elevation cover OUT.png SITE` draws water blue.

@@ -22,6 +22,8 @@ pub const DIRT: u8 = 0;
 pub const GRASS: u8 = 3;
 /// Zone 5, "(light brown) Sandy dirt ... sandy slippery section".
 pub const SAND: u8 = 4;
+/// Zone 7, "shallow water or mud" (M18): rivers and ponds.
+pub const WATER: u8 = 6;
 
 /// What one map's survey found.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -188,6 +190,7 @@ pub enum Cover {
     Sand,
     Dirt,
     Grass,
+    Water,
 }
 
 impl Cover {
@@ -196,6 +199,7 @@ impl Cover {
             Cover::Sand => SAND,
             Cover::Dirt => DIRT,
             Cover::Grass => GRASS,
+            Cover::Water => WATER,
         }
     }
 }
@@ -308,7 +312,9 @@ pub fn ndvi(s: &Seen) -> f32 {
 pub enum Ground {
     /// A dune field: bare ground is sand, and the scrub on the flats between dunes stands on dirt.
     Dunes,
-    /// Desert badlands and washes: bare ground is dirt (or rock, which rides as dirt).
+    /// Desert badlands and washes: bare ground is dirt (or rock, which rides as dirt); the sandy washes
+    /// and open flats are told from the badlands by the DEM and the picture's brightness (M18,
+    /// [`washes`]).
     Desert,
     /// Forested hills: green is grass (zone 4, the off-track zone), bare ground is dirt.
     Forest,
@@ -374,6 +380,197 @@ impl Ground {
                 let n = box_of(&|i| f64::from(cnt[i]));
                 let green = n > 0.0 && box_of(&|i| sum[i]) / n >= f64::from(threshold);
                 out.push(self.cover(green));
+            }
+        }
+        out
+    }
+}
+
+// M18: what the picture's vegetation test cannot tell, from the DEM's shape and the picture's
+// brightness: a desert's sandy washes and open flats from its badlands, and water from the ground.
+// `notes/elevation.md`, *Surfaces past the NDVI test (M18)*, says how each number was chosen.
+
+/// The DEM is averaged over a 5 × 5-sample square before its slope is taken, so a lidar bump or a
+/// creosote bush's few centimetres do not make a slope of their own.
+pub const SLOPE_RADIUS: usize = 2;
+/// A desert sample is flat enough to be a wash floor or an open flat under this slope (degrees).
+pub const WASH_FLAT: f32 = 8.0;
+/// Steep ground (degrees): the badlands' faces. On Ocotillo's SSURGO units half of Badland is over 15°
+/// and nine tenths of Carrizo gravelly sand under 5°.
+pub const STEEP: f32 = 15.0;
+/// How far round a sample the share of steep ground is counted, in samples (a 51 × 51 square), and
+/// under which share the ground is open (an alluvial flat, not badlands).
+pub const OPEN_RADIUS: usize = 25;
+pub const OPEN: f32 = 0.1;
+/// Inside badlands a flat sample is a wash when its picture, averaged over [`RADIUS`], is this much
+/// paler (in 0..255 counts, red, green and blue averaged) than the [`OPEN_RADIUS`] square round it:
+/// the washes' sand is the palest ground in the picture.
+pub const PALER: f32 = 1.5;
+/// Water: 3DEP's lidar DEMs are hydro-flattened, so a river is a flat band bank to bank. A connected
+/// patch of samples under this slope (degrees), at least [`WATER_SAMPLES`] of them, whose picture is
+/// dark in near infrared (median under [`WATER_NIR`]) and not green (median NDVI under 0) is water.
+pub const WATER_FLAT: f32 = 0.3;
+pub const WATER_SAMPLES: usize = 200;
+pub const WATER_NIR: f32 = 40.0;
+
+/// The mean of `v` over the samples with `Some` in a `(2r + 1)²` square round each sample (clipped at
+/// the edges), None where the square has none. Rows of `w`.
+pub fn box_mean(v: &[Option<f64>], w: usize, r: usize) -> Vec<Option<f64>> {
+    let h = v.len() / w;
+    let mut sum = vec![0f64; (w + 1) * (h + 1)];
+    let mut cnt = vec![0u32; (w + 1) * (h + 1)];
+    for z in 0..h {
+        for x in 0..w {
+            let (a, c) = v[x + z * w].map_or((0.0, 0), |a| (a, 1));
+            let at = (x + 1) + (z + 1) * (w + 1);
+            sum[at] = a + sum[at - 1] + sum[at - (w + 1)] - sum[at - (w + 2)];
+            cnt[at] = c + cnt[at - 1] + cnt[at - (w + 1)] - cnt[at - (w + 2)];
+        }
+    }
+    let mut out = Vec::with_capacity(w * h);
+    for z in 0..h {
+        for x in 0..w {
+            let (x0, x1) = (x.saturating_sub(r), (x + r + 1).min(w));
+            let (z0, z1) = (z.saturating_sub(r), (z + r + 1).min(h));
+            let corners = |t: &[f64]| t[x1 + z1 * (w + 1)] - t[x0 + z1 * (w + 1)] - t[x1 + z0 * (w + 1)] + t[x0 + z0 * (w + 1)];
+            let n = cnt[x1 + z1 * (w + 1)] + cnt[x0 + z0 * (w + 1)] - cnt[x0 + z1 * (w + 1)] - cnt[x1 + z0 * (w + 1)];
+            out.push((n > 0).then(|| corners(&sum) / f64::from(n)));
+        }
+    }
+    out
+}
+
+/// Every sample's slope in degrees: the heights (metres, rows of `w`, `pixel` metres apart) averaged
+/// over [`SLOPE_RADIUS`], then central differences (one-sided at the edges).
+pub fn slopes(metres: &[f32], w: usize, pixel: f64) -> Vec<f32> {
+    let h = metres.len() / w;
+    let v: Vec<Option<f64>> = metres.iter().map(|m| Some(f64::from(*m))).collect();
+    let s: Vec<f64> = box_mean(&v, w, SLOPE_RADIUS).into_iter().map(|m| m.unwrap()).collect();
+    let d = |a: usize, b: usize, steps: usize| (s[b] - s[a]) / (steps as f64 * pixel);
+    let mut out = Vec::with_capacity(w * h);
+    for z in 0..h {
+        for x in 0..w {
+            let (xa, xb) = (x.saturating_sub(1), (x + 1).min(w - 1));
+            let (za, zb) = (z.saturating_sub(1), (z + 1).min(h - 1));
+            let gx = if xb > xa { d(xa + z * w, xb + z * w, xb - xa) } else { 0.0 };
+            let gz = if zb > za { d(x + za * w, x + zb * w, zb - za) } else { 0.0 };
+            out.push(gx.hypot(gz).atan().to_degrees() as f32);
+        }
+    }
+    out
+}
+
+/// The desert's sand (M18): a sample is sand where its ground is flat (under [`WASH_FLAT`]) and either
+/// open (under [`OPEN`] of the square round it steep) or, inside badlands, paler than its
+/// surroundings by [`PALER`] (a wash floor). The answer is then the majority of the 5 × 5 square
+/// round each sample, as the vegetation test is averaged, so a lone sample does not make its own.
+pub fn washes(seen: &[Option<Seen>], slope: &[f32], w: usize) -> Vec<bool> {
+    let steep: Vec<Option<f64>> = slope.iter().map(|s| Some(f64::from(u8::from(*s > STEEP)))).collect();
+    let rugged = box_mean(&steep, w, OPEN_RADIUS);
+    let bright: Vec<Option<f64>> = seen
+        .iter()
+        .map(|s| s.map(|s| f64::from(s[0] + s[1] + s[2]) / 3.0))
+        .collect();
+    let near = box_mean(&bright, w, RADIUS);
+    let round = box_mean(&bright, w, OPEN_RADIUS);
+    let sand: Vec<Option<f64>> = (0..seen.len())
+        .map(|k| {
+            let open = rugged[k].unwrap() < f64::from(OPEN);
+            let paler = match (near[k], round[k]) {
+                (Some(a), Some(b)) => a - b > f64::from(PALER),
+                _ => false,
+            };
+            Some(f64::from(u8::from(slope[k] < WASH_FLAT && (open || paler))))
+        })
+        .collect();
+    box_mean(&sand, w, RADIUS).into_iter().map(|m| m.unwrap() >= 0.5).collect()
+}
+
+/// Water (M18): the samples of every 4-connected patch under [`WATER_FLAT`] of at least
+/// [`WATER_SAMPLES`] whose picture's median near infrared is under [`WATER_NIR`] and median NDVI
+/// under 0. The patch is the DEM's flattened surface, so the water's edge is the lidar's bank, not
+/// the picture's (where trees overhang it).
+pub fn water(seen: &[Option<Seen>], slope: &[f32], w: usize) -> Vec<bool> {
+    let n = slope.len();
+    let h = n / w;
+    let flat: Vec<bool> = slope.iter().map(|s| *s < WATER_FLAT).collect();
+    let mut done = vec![false; n];
+    let mut out = vec![false; n];
+    let median = |v: &mut Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() / 2).copied()
+    };
+    for start in 0..n {
+        if !flat[start] || done[start] {
+            continue;
+        }
+        let mut patch = vec![start];
+        done[start] = true;
+        let mut i = 0;
+        while i < patch.len() {
+            let k = patch[i];
+            i += 1;
+            let (x, z) = (k % w, k / w);
+            let mut near = Vec::with_capacity(4);
+            if x > 0 {
+                near.push(k - 1);
+            }
+            if x + 1 < w {
+                near.push(k + 1);
+            }
+            if z > 0 {
+                near.push(k - w);
+            }
+            if z + 1 < h {
+                near.push(k + w);
+            }
+            for j in near {
+                if flat[j] && !done[j] {
+                    done[j] = true;
+                    patch.push(j);
+                }
+            }
+        }
+        if patch.len() < WATER_SAMPLES {
+            continue;
+        }
+        let mut nir: Vec<f32> = patch.iter().filter_map(|&k| seen[k].map(|s| s[3])).collect();
+        let mut veg: Vec<f32> = patch.iter().filter_map(|&k| seen[k].as_ref().map(ndvi)).collect();
+        let dark = median(&mut nir).is_some_and(|v| v < WATER_NIR);
+        let bare = median(&mut veg).is_some_and(|v| v < 0.0);
+        if dark && bare {
+            for k in patch {
+                out[k] = true;
+            }
+        }
+    }
+    out
+}
+
+impl Ground {
+    /// Every sample's cover from the picture and the DEM (M18): [`Ground::classify`]'s, then for a
+    /// desert its sandy washes and open flats ([`washes`]), then water wherever [`water`] finds it.
+    /// `metres` are the window's heights, rows of `w`, `pixel` metres apart.
+    pub fn classify_with_dem(
+        self,
+        seen: &[Option<Seen>],
+        metres: &[f32],
+        w: usize,
+        pixel: f64,
+        threshold: f32,
+    ) -> Vec<Cover> {
+        let mut out = self.classify(seen, w, threshold);
+        let slope = slopes(metres, w, pixel);
+        if self == Ground::Desert {
+            for (c, s) in out.iter_mut().zip(washes(seen, &slope, w)) {
+                if s {
+                    *c = Cover::Sand;
+                }
+            }
+        }
+        for (c, s) in out.iter_mut().zip(water(seen, &slope, w)) {
+            if s {
+                *c = Cover::Water;
             }
         }
         out
