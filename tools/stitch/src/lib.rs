@@ -57,6 +57,47 @@ pub struct Tile {
     pub scale: F,
     /// The last sample on each axis: the field is samples `0..=n`, its edge `n × spacing`.
     pub n: (u32, u32),
+    /// The ground that is there, `[x0, z0, x1, z1]` in samples, half-open in cells: the largest
+    /// rectangle of whole leaves (16 samples) inside `0..n` whose cells all exist ([`whole_cells`]).
+    /// The whole field on most maps; less where the tree has holes (MX vs. ATV's nat04 has no leaves
+    /// past x = 896 of its 1024, C8). The interior is cut inside it, so no missing cell is ever read.
+    pub ground: [u32; 4],
+}
+
+/// The largest rectangle of whole leaves whose cells all exist, `[x0, z0, x1, z1]` in samples.
+///
+/// A leaf is there when the cells at its first and last corner are (the cells of one leaf come from one
+/// block). The rectangle is the largest by area (the first found of equals, rows in z and then x), by
+/// the histogram method over the leaf grid.
+pub fn whole_cells(t: &Terrain, n: (u32, u32)) -> [u32; 4] {
+    const LEAF: u32 = 16;
+    let (w, h) = ((n.0 / LEAF) as usize, (n.1 / LEAF) as usize);
+    let there = |i: usize, j: usize| {
+        let (x, z) = (i as u32 * LEAF, j as u32 * LEAF);
+        t.cell(x, z, 1).is_some() && t.cell(x + LEAF - 1, z + LEAF - 1, 1).is_some()
+    };
+    let mut run = vec![0usize; w];
+    let (mut best, mut area) = ([0u32; 4], 0usize);
+    for j in 0..h {
+        for (i, r) in run.iter_mut().enumerate() {
+            *r = if there(i, j) { *r + 1 } else { 0 };
+        }
+        // Each column's run up to this row, widened left and right while the runs are as tall.
+        for i in 0..w {
+            let tall = run[i];
+            if tall == 0 {
+                continue;
+            }
+            let lo = (0..i).rev().take_while(|&k| run[k] >= tall).last().unwrap_or(i);
+            let hi = (i + 1..w).take_while(|&k| run[k] >= tall).last().unwrap_or(i);
+            let a = tall * (hi + 1 - lo);
+            if a > area {
+                area = a;
+                best = [lo, j + 1 - tall, hi + 1, j + 1].map(|v| v as u32 * LEAF);
+            }
+        }
+    }
+    best
 }
 
 /// Every file under a folder, relative and `/`-separated, in sorted order.
@@ -143,6 +184,11 @@ impl Tile {
             return Err(format!("{id}/{terrain_file}: an empty tree"));
         }
         let per = 16u32.pow(t.levels);
+        let n = (cx * per, cz * per);
+        let ground = whole_cells(&t, n);
+        if ground[2] <= ground[0] || ground[3] <= ground[1] {
+            return Err(format!("{id}/{terrain_file}: no leaf whose cells are all there"));
+        }
         let (scale, spacing) = (t.scale, f64::from(t.scale.0));
         drop(t);
         Ok(Tile {
@@ -156,7 +202,8 @@ impl Tile {
             terrain,
             spacing,
             scale,
-            n: (cx * per, cz * per),
+            n,
+            ground,
         })
     }
 
@@ -176,9 +223,10 @@ impl Tile {
         Some(f64::from((self.scale * q.height[(dx + 2 * dz) as usize]).0))
     }
 
-    /// A sample's height from whichever cell holds it (the field's samples, for the berm profile).
+    /// A sample's height from whichever cell holds it (the ground's samples, for the berm profile).
     fn sample(&self, t: &Terrain, x: u32, z: u32) -> f64 {
-        let (cx, cz) = (x.min(self.n.0 - 1), z.min(self.n.1 - 1));
+        let g = self.ground;
+        let (cx, cz) = (x.clamp(g[0], g[2] - 1), z.clamp(g[1], g[3] - 1));
         self.corner(t, cx, cz, x - cx, z - cz).unwrap_or(0.0)
     }
 
@@ -205,30 +253,38 @@ impl Tile {
     /// wider), then as long as the side's profile (the median height at each distance from the edge)
     /// keeps falling inward faster than [`BERM_FALL`]: that is the berm's inner slope. At most
     /// [`MAX_BERM`] feet past the shootoff band, and at most a quarter of the map.
+    ///
+    /// The sides are the [`Tile::ground`]'s: where cells are missing at an edge, the side is the hole's
+    /// edge, and the shootoff band is only what is left of it past the hole (the game has no shootoff
+    /// there, only no ground). The berm is looked for from the hole's edge all the same.
     pub fn find_keep(&self) -> [u32; 4] {
         let t = self.terrain();
         let s = self.spacing;
+        let g = self.ground;
         let border = f64::from(self.scene.terrain.border_width.0).max(0.0);
         let m0 = (SHOOTOFF.max(border) / s).ceil() as usize;
+        let hole = [g[0], g[1], self.n.0 - g[2], self.n.1 - g[3]];
         let mut band = [0u32; 4];
         for (side, b) in band.iter_mut().enumerate() {
-            // side 0: x = d, 1: z = d, 2: x = n − d, 3: z = n − d
-            let across = if side % 2 == 0 { self.n.0 } else { self.n.1 };
+            // side 0: x = d, 1: z = d, 2: x = n − d, 3: z = n − d (n and 0 the ground's sides)
+            let across = if side % 2 == 0 { g[2] - g[0] } else { g[3] - g[1] };
             let dmax = (m0 + (MAX_BERM / s).ceil() as usize).min(across as usize / 4);
             let profile = self.profile(&t, side, dmax + BERM_WINDOW, m0 as u32);
-            let mut d = m0.min(dmax);
+            let mut d = m0.saturating_sub(hole[side] as usize).min(dmax);
             while d < dmax && profile[d] - profile[d + BERM_WINDOW] > BERM_FALL * BERM_WINDOW as f64 * s {
                 d += 1;
             }
             *b = d as u32;
         }
-        [band[0], band[1], self.n.0 - band[2], self.n.1 - band[3]]
+        [g[0] + band[0], g[1] + band[1], g[2] - band[2], g[3] - band[3]]
     }
 
-    /// One side's edge profile: for each distance `d` in samples from the side (0: x = d, 1: z = d,
-    /// 2: x = n − d, 3: z = n − d), the median height along it, leaving `skip` samples at either end.
+    /// One side's edge profile: for each distance `d` in samples from the side of the [`Tile::ground`]
+    /// (0: x = x0 + d, 1: z = z0 + d, 2: x = x1 − d, 3: z = z1 − d), the median height along it, leaving
+    /// `skip` samples at either end.
     pub fn profile(&self, t: &Terrain, side: usize, last: usize, skip: u32) -> Vec<f64> {
-        let (len, across) = if side % 2 == 0 { (self.n.1, self.n.0) } else { (self.n.0, self.n.1) };
+        let [x0, z0, x1, z1] = self.ground;
+        let (len, across) = if side % 2 == 0 { (z1 - z0, x1 - x0) } else { (x1 - x0, z1 - z0) };
         let lo = skip.min(len / 2);
         let hi = len.saturating_sub(skip).max(lo + 1);
         (0..=last)
@@ -236,10 +292,10 @@ impl Tile {
                 let d = (d as u32).min(across);
                 let mut v: Vec<f64> = (lo..hi)
                     .map(|a| match side {
-                        0 => self.sample(t, d, a),
-                        1 => self.sample(t, a, d),
-                        2 => self.sample(t, across - d, a),
-                        _ => self.sample(t, a, across - d),
+                        0 => self.sample(t, x0 + d, z0 + a),
+                        1 => self.sample(t, x0 + a, z0 + d),
+                        2 => self.sample(t, x1 - d, z0 + a),
+                        _ => self.sample(t, x0 + a, z1 - d),
                     })
                     .collect();
                 v.sort_by(f64::total_cmp);
