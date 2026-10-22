@@ -764,3 +764,94 @@ fn the_loose_members_the_maps_lack_are_pulled() {
     let sm03 = pulled(&mut disc, "SM03");
     assert!(sm03.contains(&r"tex\nat17eco.psm".to_string()), "{sm03:?}");
 }
+
+// ---- MX Unleashed (C4): a track is Tracks\<track>.res and <track>_2.res, only ever a world's tile ----
+
+/// An MX Unleashed disc: the test map as freeride `free01` (both halves), its split-screen copy, a
+/// national `nat02` and a supercross `sx01`, in one `MX.PSR`.
+fn mxu_disc(tag: &str) -> (PathBuf, PathBuf) {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("import-mxvatv-mxu-{tag}"));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("iso")).unwrap();
+    let main = |t: &str| -> Vec<u8> {
+        build_res(&[
+            (&format!(r"tracks\{t}\{t}.scn"), scene()),
+            (&format!(r"tracks\{t}\Test.ps2.trn"), terrain(1, 0)),
+            (r"col\Rock.col", mesh_col(1)),
+            (r"col\Blade.col", class1_col()),
+            (r"skies\sky1.ps2.cub", bytes(8, 900)),
+        ])
+    };
+    // The second half: the shell's shared files, one of them also in the first half, byte for byte.
+    let second = |t: &str| build_res(&[(&format!(r"tracks\{t}\hit.dat"), bytes(20, 70)), (r"skies\sky1.ps2.cub", bytes(8, 900))]);
+    let psr = vec![
+        (r"Tracks\free01.res", main("free01")),
+        (r"Tracks\free01_2.res", second("free01")),
+        (r"Tracks\free01_ss.res", main("free01_ss")),
+        (r"Tracks\free01_ss_2.res", second("free01_ss")),
+        (r"Tracks\sx01.res", main("sx01")),
+        (r"Tracks\sx01_2.res", second("sx01")),
+        (r"Tracks\nat02.res", main("nat02")),
+        (r"Tracks\nat02_2.res", second("nat02")),
+        (r"UI\free01.lsi", bytes(21, 50)),
+    ];
+    let boot = import_mxvatv::mxu::BOOT;
+    let cnf = format!("BOOT2 = cdrom0:\\{boot};1\r\nVER = 1.00\r\n").into_bytes();
+    let image = root.join("iso").join("mxu.iso");
+    std::fs::write(&image, build_iso(&[(boot, bytes(6, 3000)), ("SYSTEM.CNF", cnf), ("MX.PSR", build_psr(&psr))])).unwrap();
+    (root, image)
+}
+
+#[test]
+fn an_mxu_freeride_imports_from_both_halves_and_reads_back_only_as_a_tile() {
+    use import_mxvatv::mxu;
+    let (root, image) = mxu_disc("one");
+    let mut disc = discx::Disc::open(&image).unwrap();
+    assert_eq!(mxu::tracks(&disc), vec!["free01", "sx01", "nat02"]);
+    assert_eq!(mxu::map_folders(&disc), vec!["free01", "nat02"], "freerides and nationals; no sx, no _ss");
+    let map = mxu::load_map(&mut disc, "free01").unwrap();
+    assert_eq!(map.archives.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), [r"Tracks\free01.res", r"Tracks\free01_2.res"]);
+    let m = import(&map, &root.join("stage")).unwrap();
+    assert_eq!(m.id, "mxu_free01");
+    assert_eq!(m.name, "free01");
+    assert!(m.dir.join("tracks/free01/hit.dat").is_file(), "the second half's own file is copied");
+    assert_eq!(std::fs::read(m.dir.join("skies/sky1.ps2.cub")).unwrap(), bytes(8, 900), "the shared file once, as the disc has it");
+    todo_has(&m, &["MX Unleashed has no .atyList"]);
+    assert!(!m.todo.iter().any(|t| t.contains(".atyList's [Free Ride]")), "no MX vs. ATV spawn todo: {:#?}", m.todo);
+    let j = Json::parse(&std::fs::read_to_string(m.dir.join("mod.json")).unwrap()).unwrap();
+    let src = j.get("source").unwrap();
+    assert_eq!(src.get("game").and_then(Json::str), Some("MX Unleashed"));
+    assert_eq!(src.get("boot").and_then(Json::str), Some("SLUS_207.67"));
+    let mut discs = Discs::new(Some(root.join("iso")));
+    let alone = check(&m.dir, &mut discs);
+    assert!(alone.fail.iter().any(|f| f.contains("only a world's tile")), "{:#?}", alone.fail);
+    let tile = modcheck::check_tile(&m.dir, &mut discs);
+    assert!(tile.ok(), "{:#?}", tile.fail);
+}
+
+#[test]
+#[ignore = "needs the MX Unleashed disc (SLUS_207.67) in iso/ or $DISCX_ISO"]
+fn every_mxu_freeride_and_national_imports_and_reads_back_as_a_tile() {
+    use import_mxvatv::mxu;
+    let (dir, image) = real_disc(mxu::BOOT);
+    let mut disc = discx::Disc::open(&image).unwrap();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("import-mxvatv-mxu-disc");
+    let _ = std::fs::remove_dir_all(&out);
+    let mut discs = Discs::new(Some(dir));
+    let tracks = mxu::map_folders(&disc);
+    assert_eq!(tracks.len(), 27, "free06, 07, 09, 10, 11 and nat01-22: {tracks:?}");
+    let mut bad = Vec::new();
+    for t in &tracks {
+        match mxu::load_map(&mut disc, t).and_then(|m| import(&m, &out)) {
+            Err(e) => bad.push(format!("{t}: {e}")),
+            Ok(m) => {
+                let r = modcheck::check_tile(&m.dir, &mut discs);
+                if !r.ok() {
+                    bad.push(format!("{t}: {:?}", r.fail));
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&out);
+    assert!(bad.is_empty(), "{bad:#?}");
+}

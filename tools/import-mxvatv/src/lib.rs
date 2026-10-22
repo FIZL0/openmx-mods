@@ -28,6 +28,7 @@
 //! `TerrainFile`, `CubeFile` and `EcosystemFile` come to by the standard's lookup. Every gap the
 //! readers find is a `todo` entry naming the file and the reason.
 
+pub mod mxu;
 pub mod mxu_keys;
 pub mod untamed;
 
@@ -509,7 +510,8 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     if name.trim().is_empty() {
         name = map.folder.clone();
     }
-    if spawn.is_none() {
+    // MX Unleashed has no .atyList to have missed one from: mxu::load_map says so itself.
+    if spawn.is_none() && map.origin != &mxu::MXU {
         todo.push(format!(
             "{scn_name}: the spawn is the scene's DefaultStartPosition {} facing {}: the .atyList's [Free Ride] gives no StartPosition, \
              and where the game starts that Free Ride was not looked up (T7)",

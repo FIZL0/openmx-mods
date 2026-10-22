@@ -11,7 +11,9 @@
 //!
 //! A world spec (`worlds/<id>.json`): `{"id": "world_x", "name": "...", "tiles": ["mxvatv_nat05", ...]}`
 //! with optional `sky`, `max_slope`, `min_gap`, `chunk`, `fade`. Its tiles are looked up in
-//! `--mods`/tracks/.
+//! `--mods`/tracks/. An `mxu_` tile is never there (MX Unleashed's tracks are only a world's tiles,
+//! §1, so no step packages them): it is imported off the MX Unleashed disc in `$DISCX_ISO` (or `iso/`)
+//! into `<STAGE>.mxu/`, beside the stage, so build.sh does not package it as a track (C4).
 
 use modcheck::json::Json;
 use std::path::{Path, PathBuf};
@@ -179,13 +181,18 @@ fn cmd_specs(args: &[String]) -> ExitCode {
             if let Some(v) = j.get("chunk").and_then(Json::num) {
                 p.chunk = v as u32;
             }
-            let tiles: Vec<PathBuf> = j
-                .get("tiles")
-                .and_then(Json::arr)
-                .unwrap_or_default()
+            let names: Vec<&str> = j.get("tiles").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).collect();
+            let mxu_stage = out.with_extension("mxu");
+            let mxu: Vec<&str> = names.iter().copied().filter(|t| t.starts_with("mxu_") && !mods.join("tracks").join(t).join("mod.json").exists()).collect();
+            if !mxu.is_empty() {
+                if let Err(e) = mxu_tiles(&mxu, &mxu_stage) {
+                    println!("stitch: skip {}: its MX Unleashed tiles: {e}", p.id);
+                    return Ok(None);
+                }
+            }
+            let tiles: Vec<PathBuf> = names
                 .iter()
-                .filter_map(Json::str)
-                .map(|t| mods.join("tracks").join(t))
+                .map(|t| if mxu.contains(t) { mxu_stage.join(t) } else { mods.join("tracks").join(t) })
                 .collect();
             if let Some(missing) = tiles.iter().find(|t| !t.join("mod.json").exists()) {
                 println!("stitch: skip {}: {} is not built", p.id, missing.display());
@@ -203,6 +210,35 @@ fn cmd_specs(args: &[String]) -> ExitCode {
         }
     }
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+/// MX Unleashed's tracks as tiles, off its disc into `stage` (import-mxvatv's MXU path, read back as
+/// tiles), for the spec's `mxu_` tiles that no step built. Each is imported once per stage.
+fn mxu_tiles(ids: &[&str], stage: &Path) -> Result<(), String> {
+    use import_mxvatv::mxu;
+    let iso = std::env::var_os("DISCX_ISO").map_or_else(|| PathBuf::from("iso"), PathBuf::from);
+    let (image, _) = discx::images(&iso)?
+        .into_iter()
+        .find(|(_, b)| b.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(mxu::BOOT)))
+        .ok_or_else(|| format!("no disc with boot ELF {} in {}", mxu::BOOT, iso.display()))?;
+    let mut disc = discx::Disc::open(&image)?;
+    let tracks = mxu::tracks(&disc);
+    let mut discs = modcheck::Discs::new(Some(iso));
+    for id in ids {
+        if stage.join(id).join("mod.json").exists() {
+            continue;
+        }
+        let want = &id["mxu_".len()..];
+        let t = tracks.iter().find(|t| t.eq_ignore_ascii_case(want)).ok_or_else(|| format!("{id}: no Tracks\\{want}.res on the disc"))?;
+        let m = import_mxvatv::import(&mxu::load_map(&mut disc, t)?, stage)?;
+        let r = modcheck::check_tile(&m.dir, &mut discs);
+        if !r.ok() {
+            let _ = std::fs::remove_dir_all(&m.dir);
+            return Err(format!("{id}: the read-back failed: {}", r.fail.join("; ")));
+        }
+        println!("stitch: {id} imported off {} into {}", image.display(), stage.display());
+    }
+    Ok(())
 }
 
 /// Each side's edge profile and the cut find_keep makes, to see a map's berm.
