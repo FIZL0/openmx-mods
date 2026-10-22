@@ -311,3 +311,34 @@ fn the_kit_config_names_the_disc_and_the_gameplay_module() {
     let mxu = accuracy::source::kit_toml(&accuracy::source::MXU, Path::new("/d.iso"), Path::new("/x"));
     assert!(mxu.contains("SLUS-20767") && !mxu.contains("[[overlay]]"));
 }
+
+#[test]
+fn the_openmx_command_line_built_from_a_pose() {
+    let pose = Pose::from_angles([2113.5, 455.25, 3014.0], 90.0, -12.0, 85.0);
+    let folder = Path::new("/mods/tracks/mxvatv nat05");
+    let shot = Path::new("/out/accuracy/nat05/start.openmx.png");
+    let args = look::openmx_args(look::OPENMX_ARGS, folder, shot, &pose);
+    assert_eq!(args.len(), 6, "{args:?}");
+    assert_eq!(args[..2], ["--mod".to_owned(), "/mods/tracks/mxvatv nat05".to_owned()], "a path with a space stays one word");
+    assert_eq!(args[2..4], ["--shot".to_owned(), shot.to_string_lossy().into_owned()]);
+    assert_eq!(args[4], "--shot-pose");
+    assert_eq!(args[5], pose.md10());
+    // The --shot-pose word is the pose again, to a thousandth.
+    assert!(Pose::parse_md10(&args[5]).unwrap().close(&pose, 1e-3));
+    // A template of the caller's own: its own words, the placeholders filled where they are.
+    let mine = look::openmx_args("--track={mod} --overlay none --shot-pose {pose}", folder, shot, &pose);
+    assert_eq!(mine[0], "--track=/mods/tracks/mxvatv nat05");
+    assert_eq!(mine[1..3], ["--overlay".to_owned(), "none".to_owned()]);
+}
+
+#[test]
+fn openmx_is_ready_only_with_every_flag_as_a_word() {
+    // openmx today: --shot and --modifiers, no --shot-pose and no --mod (--modifiers is not it).
+    let today = "  --track NAME\n  --shot PATH\n  --shot-frame N\n  --modifiers LIST\n";
+    let missing = look::openmx_missing(today, look::OPENMX_ARGS);
+    assert_eq!(missing, ["--mod, a track from a mod folder (openmx MD2)", "--shot-pose (openmx MD10)"]);
+    assert!(!look::help_has_flag(today, "--shot-pose"));
+    assert!(look::help_has_flag(today, "--shot"));
+    let ready = format!("{today}  --mod DIR\n  --shot-pose x,y,z,yaw,pitch,fov\n");
+    assert!(look::openmx_missing(&ready, look::OPENMX_ARGS).is_empty());
+}
