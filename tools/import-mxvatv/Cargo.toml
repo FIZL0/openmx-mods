@@ -1,0 +1,16 @@
+[package]
+name = "import-mxvatv"
+description = "MX vs. ATV Unleashed's Env\\<map>\\<map>.res, one track mod per map (standard §2), proved with openmx's readers"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Scene, terrain, collision and .res: openmx's readers, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+# Models, textures, materials, sky, ecosystem and toys: game-render's readers, without its GPU half.
+game-render = { path = "../../openmx/crates/game-render", default-features = false }
+# The disc image, its PSR and the globs.
+discx = { path = "../discx" }
+# The MD1 view, mod.json's reader, and the read-back (standard §5).
+modcheck = { path = "../modcheck" }

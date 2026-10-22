@@ -74,6 +74,32 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   matches a plain string suffix, so `RockA.col` would also find `Col/xRockA.col` if that came first. On
   the disc's own `.res` the order hides it; a mod folder has no member order. `modcheck` matches on a
   `/` boundary and fails a name that finds two files. Fix: the same in the mod loader's lookup.
+- **MX vs. ATV scene keys the port does not read** (M2, `notes/mxvatv.md`, *The importer*). On the 27
+  big maps, `[Model<n>]` and `[Object<n>]` carry `Activity`, `Hide`, `HasCol`, `Invisible`, `IsTrigger` and
+  `Waypoint`. `Env\Nat03\nat03.res:Env\nat03\Nat03.scn` `[Model224]` is `SLT=Type_National`, `Type=StartZone`,
+  `Activity="Free Ride"`, `Hide=True`. These are start zones, waypoint gates, hill-climb markers and
+  air-race rings. game-render's and game-sim's scene readers take every `[Model]` and `[Object]`, so a mod
+  draws and collides all of them in a Free Ride. What the game does with these keys (from SLUS_211.04's
+  scene loader) is still to be found. A mod cannot fix it, since the scene is never edited (§2a).
+- **game-render `eco`: an `EcosystemFile` with no extension** (M2). MC02, SM01, SM02 and SM03 say
+  `EcosystemFile=mc02` (…), and the archive holds `Env\mc02\MC02.esb`. `Grove::load` reads the name as
+  written, so it finds nothing and those maps get no plants. Fix: if the name finds nothing and has no
+  extension, try `<name>.esb` (that the game does this is inferred from the files, not looked up).
+- **game-render `scene::Material::parse`: texture names** (M2). (1) `Env\Nat12\nat12_mat.res`:
+  `Tex\Nat12_genericsandstone.psm` and `Nat12_pillarA.psm` say `TextureMap_1 = Nat12 _genericsandstone`
+  with a space, and the archive has `Tex\Nat12_genericsandstone.pst`. The original's text reader drops
+  spaces (as `scene::slt_name` already does for `SLT=`). (2) `Tex\Nat05_liverystable_detail.psm` (Nat05,
+  MC05) says `Nat05_liverystable_detail.dxm`, and the archive has `Nat05_liverystable_detail.pst`. Fix:
+  squeeze spaces out of the name, and drop a `.dxm` tail (what else the original strips is unknown).
+- **game-render `psg::Model::parse`** (M2). `Env\Nat12\nat12.res:Eco\nat12_busha.psg` (and `bushb`,
+  `bushc`, `waitaminute`, `weedsb`): `unexpected UNPACK of 12 x 2 x 8 bits at 489`.
+  `Env\Nat16\nat16.res:Geo\northernlights.psg`: `the file ends at 23513 but 3933048 bytes were wanted at
+  373`. The other 2,766 `.psg` in the 56 map archives read.
+- **game-render `skin::Clip::parse`: animated objects' clips** (M2). 24 of the 44 `.mot` under
+  `Env\<map>\anim\` in the map archives are refused, for example `Env\MC01\mc01.res:Env\mc01\anim\Nat07_WM_Blade1.mot`:
+  `not a .mot: a name of 1308622848 bytes at 21`. Also refused: Nat04's Ferris wheel, Nat05's signs,
+  noose, gallows door and bell, Nat10's mill wheel, tyre swing and windmill, and the score-tower people
+  of MC07 and MC08. These are the animated objects whose `.col` is class 1 (MD5).
 - **MD7, the `.vig` reader is in the shell crate** (T4): `Clip::vig` / `Adpcm::vig` live in
   `crates/openmx/src/audio.rs`, which brings wgpu, ggrs and iroh with it, so this repo cannot call
   them to prove a music pack (§5 step 4). `modcheck` checks only that each song's file is there.
