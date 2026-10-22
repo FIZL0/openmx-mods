@@ -102,7 +102,7 @@ pub struct Built {
     pub todo: Vec<String>,
 }
 
-fn unit_m(code: Option<u16>, what: &str) -> Result<f64, String> {
+pub fn unit_m(code: Option<u16>, what: &str) -> Result<f64, String> {
     match code {
         // 3DEP's tiles say metre for the horizontal and nothing for the vertical: its product
         // specification is metres above NAVD88.
@@ -218,7 +218,8 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
     let classified = match req.ground {
         Some((ground, green)) if !req.naip.is_empty() => {
             let seen = surfaces::seen(&req.naip, corner, g.dx, samples, g.epsg)?;
-            let covers = ground.classify(&seen, samples.0 as usize, green);
+            let metres: Vec<f32> = raw.iter().map(|v| (f64::from(*v) * v_unit) as f32).collect();
+            let covers = ground.classify_with_dem(&seen, &metres, samples.0 as usize, pixel_m, green);
             grid.surfaces = covers.iter().map(|c| c.id()).collect();
             Some((ground, green))
         }
@@ -374,6 +375,7 @@ fn surface_todo(req: &Request, f: &Facts, classified: Option<(surfaces::Ground, 
                 surfaces::SAND => " (zone 5, sandy dirt)",
                 surfaces::GRASS => " (zone 4, off-track grass)",
                 surfaces::DIRT => " (zone 1, dirt)",
+                surfaces::WATER => " (zone 7, shallow water)",
                 _ => "",
             };
             format!("{id}{what} {:.1}%", 100.0 * *n as f64 / all as f64)
@@ -388,21 +390,34 @@ fn surface_todo(req: &Request, f: &Facts, classified: Option<(surfaces::Ground, 
                     "bare ground is sand and green (NAIP's NDVI averaged over {} m from {green}) is dirt, the scrub flats between dunes",
                     2 * surfaces::RADIUS + 1
                 ),
-                surfaces::Ground::Desert => {
-                    "the site is desert badlands and washes, with nothing green in the picture: every sample is dirt; \
-                     the washes' sand is not told from the badlands' clay and rock (both pale from above)"
-                        .to_owned()
-                }
+                surfaces::Ground::Desert => format!(
+                    "the site is desert badlands and washes with nothing green in the picture, so the DEM tells them apart: \
+                     sand where the ground is under {flat}° and either open (under {open}% of the {sq} m square round it over {steep}°) \
+                     or, inside the badlands, paler in the picture than that square by {paler} of 255 (a wash floor); the rest is dirt. \
+                     The thresholds were set by eye and checked against SSURGO's soil units, which are too coarse to use for the washes; \
+                     a paved road on open ground is sand too",
+                    flat = surfaces::WASH_FLAT,
+                    open = surfaces::OPEN * 100.0,
+                    sq = 2 * surfaces::OPEN_RADIUS + 1,
+                    steep = surfaces::STEEP,
+                    paler = surfaces::PALER,
+                ),
                 surfaces::Ground::Forest => format!(
                     "green (NAIP's NDVI averaged over {} m from {green}) is grass, the rest dirt; the picture sees the canopy, \
-                     not the ground under it, and the river is dirt too (no water zone is used)",
+                     not the ground under it",
                     2 * surfaces::RADIUS + 1
                 ),
             };
             format!(
-                "{}.ps2.trn: surface ids from the aerial picture, {}: {how}. Rock rides as dirt (the bikes' .phy has no rock zone); {base}",
+                "{}.ps2.trn: surface ids from the aerial picture, {}: {how}. {water}Rock rides as dirt (the bikes' .phy has no rock zone); {base}",
                 req.id,
                 shares.join(", "),
+                water = if f.surfaces.iter().any(|(id, _)| *id == surfaces::WATER) {
+                    "Water is the DEM's hydro-flattened surface where the picture is dark and not green: it rides as zone 7's grip \
+                     on the lidar's flat water surface, with no water plane, splash or depth (the drape shows the river as photographed). "
+                } else {
+                    ""
+                },
             )
         }
         None => format!(
@@ -639,7 +654,7 @@ pub fn mod_json(req: &Request, f: &Facts, todo: &[String]) -> String {
     let dem = files(&req.dem);
     let naip = files(&req.naip);
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.2.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": {permission},\n{sky_from}  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"surfaces\": {{{surfaces}}},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.3.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": {permission},\n{sky_from}  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"surfaces\": {{{surfaces}}},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
         id = json_str(&req.id),
         name = json_str(&req.name),
         data = json_str(&req.data),
