@@ -1,0 +1,18 @@
+[package]
+name = "import-music"
+description = "MX vs. ATV Unleashed's and Untamed's songs as music packs (standard §4): the disc's .vig streams byte for byte, and a playlist from the game's own music.pb"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# openmx's `.vig` reader is compiled in from its file (src/openmx_audio.rs): it is a module of the
+# shell's binary, not of a library (notes/openmx-asks.md, MD7). These are what that file imports, and
+# game-render's INI reader also reads the playlists, as openmx's own DiscMusic does.
+game-render = { path = "../../openmx/crates/game-render", default-features = false }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+# The disc by its boot ELF and its PSR members; Untamed's playlist is BPB.
+discx = { path = "../discx" }
+bpb = { path = "../bpb" }
+# mod.json read back (`check`), and in the tests every pack proved against the standard.
+modcheck = { path = "../modcheck" }
