@@ -167,7 +167,7 @@ pub fn lattice_spacing(tiles: &[Tile]) -> f64 {
 /// The gap two edges at these heights need so the blend between them stays under the slope: the
 /// Shepard profile is at most about 1.6 times the mean slope, plus the two edges' room. An edge's room
 /// is `step + fade` (its taper), and as much more as its seam gate is past C1's `2 step + 3 fade` (C9).
-fn gap_for(dh: f64, p: &Params, rooms: f64, widen: f64) -> f64 {
+pub fn gap_for(dh: f64, p: &Params, rooms: f64, widen: f64) -> f64 {
     (1.6 * dh.abs() / p.max_slope + rooms).max(p.min_gap) * widen
 }
 

@@ -15,6 +15,10 @@
 //! - Join ground away from the seams is no steeper than the world's `max_slope`.
 //! - The look: on every seam point the touching tile's weight is 255, and no weight jumps by more than
 //!   [`MAX_BLEND_STEP`] between neighbouring samples.
+//! - An ultra map (C5, `stitch.worlds`): on every lattice sample of each world's edge where new ground
+//!   meets it, the same height and slope across on both sides ([`world_seams`]); the new joins held to
+//!   `max_slope` past each world's gates too; and (given `--mods`) every copied join byte for byte its
+//!   world's.
 
 use crate::Tile;
 use game_sim::track::Terrain;
@@ -43,6 +47,11 @@ pub struct Report {
     pub join_seam_height: f64,
     pub join_seam_slope: f64,
     pub far_slope: f64,
+    /// Ultra maps (C5): lattice points where a world's edge meets the new ground, and the worst height and
+    /// slope steps there (failed past the quantum, as a tile's seam).
+    pub world_seam_points: usize,
+    pub world_seam_height: f64,
+    pub world_seam_slope: f64,
 }
 
 impl Report {
@@ -173,7 +182,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             continue;
         }
         if let Some(m) = mods {
-            let src = [m.join(name), m.join("tracks").join(name)].into_iter().find(|p| p.join("mod.json").exists());
+            // An ultra map's tiles (C5) also come from its worlds' own copies.
+            let in_worlds = st.and_then(|s| s.get("worlds")).and_then(Json::arr).unwrap_or_default().iter().filter_map(|w| w.get("world")?.str()).flat_map(|w| {
+                [m.join(w).join("tiles").join(name), m.join("tracks").join(w).join("tiles").join(name)]
+            });
+            let src = [m.join(name), m.join("tracks").join(name)].into_iter().chain(in_worlds).find(|p| p.join("mod.json").exists());
             match src {
                 None => r.note.push(format!("tiles/{name}: no source mod under {} to compare with", m.display())),
                 Some(src) => compare(&src, &tile.dir, name, &mut r),
@@ -237,6 +250,48 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         r.fail.push("no joins".into());
         return r;
     }
+    let worlds: Vec<UltraWorld> = st
+        .and_then(|s| s.get("worlds"))
+        .and_then(Json::arr)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| {
+            let (rect, gates) = (nums(w.get("rect")), nums(w.get("gates")));
+            (rect.len() == 4 && gates.len() == 4).then(|| UltraWorld {
+                id: w.get("world").and_then(Json::str).unwrap_or_default().to_owned(),
+                prefix: w.get("prefix").and_then(Json::str).unwrap_or_default().to_owned(),
+                rect: [rect[0], rect[1], rect[2], rect[3]],
+                gates: [gates[0], gates[1], gates[2], gates[3]],
+            })
+        })
+        .collect();
+    if !worlds.is_empty() {
+        if let Some(m) = mods {
+            for w in &worlds {
+                let src = [m.join(&w.id), m.join("tracks").join(&w.id)].into_iter().find(|p| p.join("mod.json").exists());
+                let Some(src) = src else {
+                    r.note.push(format!("{}: no source world under {} to compare its joins with", w.id, m.display()));
+                    continue;
+                };
+                let (mut same, mut n) = (0, 0);
+                for j in joins.iter().filter(|j| j.name.starts_with(&w.prefix)) {
+                    let old = &j.name[w.prefix.len()..];
+                    n += 1;
+                    let ok = ["ps2.trn", "blend"].iter().all(|ext| {
+                        let a = std::fs::read(src.join("joins").join(old).join(format!("{old}.{ext}"))).ok();
+                        a.is_some() && a == std::fs::read(dir.join("joins").join(&j.name).join(format!("{}.{ext}", j.name))).ok()
+                    });
+                    if ok {
+                        same += 1;
+                    } else {
+                        r.fail.push(format!("joins/{}: not byte for byte {}'s {old}", j.name, w.id));
+                    }
+                }
+                r.note.push(format!("{}: {same} of its {n} joins byte for byte the world's own", w.id));
+            }
+        }
+    }
+
     let jt: Vec<Terrain> = joins.iter().map(Join::terrain).collect();
     let tt: Vec<Terrain> = tiles.iter().map(|t| t.0.terrain()).collect();
 
@@ -362,7 +417,9 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         ));
     }
     join_seams(&tiles, &joins, &jt, &mut r);
-
+    if !worlds.is_empty() {
+        world_seams(&worlds, &joins, &jt, lattice.unwrap_or(joins[0].spacing), &mut r);
+    }
     // Joins against each other, slopes, blend steps.
     let mut shared: HashMap<(i64, i64), (usize, f64)> = HashMap::new();
     // Each tile's seam gates (C9): mod.json's stitch.gates where the build widened them, C1's
@@ -382,7 +439,19 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             _ => [base; 4],
         })
         .collect();
-    let clear = |x: f64, z: f64| -> f64 {
+    // An ultra map's new joins (no world's prefix) are held past each world's gates too.
+    let clear = |x: f64, z: f64, new: bool| -> f64 {
+        let past_worlds = if new {
+            worlds
+                .iter()
+                .map(|w| {
+                    let src = crate::Source { tile: 0, rect: w.rect, at: [0.0; 2], spacing: 1.0, keep: [0; 4], ring: crate::Ring::new(Default::default()), gates: w.gates };
+                    src.distance(x, z) - src.gate_at(x, z)
+                })
+                .fold(f64::INFINITY, f64::min)
+        } else {
+            f64::INFINITY
+        };
         rects
             .iter()
             .zip(&gates)
@@ -397,10 +466,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
                 };
                 ux.hypot(uz) - gate
             })
-            .fold(f64::INFINITY, f64::min)
+            .fold(past_worlds, f64::min)
     };
     for (ji, j) in joins.iter().enumerate() {
         let t = &jt[ji];
+        let new = !worlds.is_empty() && !worlds.iter().any(|w| j.name.starts_with(&w.prefix));
         let [w, d] = j.samples;
         let mut h = vec![0.0; (w * d) as usize];
         for z in 0..d {
@@ -431,7 +501,7 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
                     let cx = j.at[0] + (f64::from(x) + 0.5) * j.spacing;
                     let cz = j.at[1] + (f64::from(z) + 0.5) * j.spacing;
                     let corners = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)];
-                    if corners.iter().all(|&(a, b)| clear(j.at[0] + f64::from(a) * j.spacing, j.at[1] + f64::from(b) * j.spacing) > 0.0) {
+                    if corners.iter().all(|&(a, b)| clear(j.at[0] + f64::from(a) * j.spacing, j.at[1] + f64::from(b) * j.spacing, new) > 0.0) {
                         let g = crate::build::cell_slope(corners.map(|(a, b)| h[(a + b * w) as usize]), j.spacing);
                         if g > r.far_slope {
                             r.far_slope = g;
@@ -556,6 +626,82 @@ fn join_seams(tiles: &[(Tile, [f64; 2], [u32; 4])], joins: &[Join], jt: &[Terrai
             r.join_seam_points, r.join_seam_height, r.join_seam_slope
         ));
     }
+}
+
+/// A world of an ultra map (C5), from `stitch.worlds`.
+struct UltraWorld {
+    id: String,
+    prefix: String,
+    rect: [f64; 4],
+    gates: [f64; 4],
+}
+
+/// Where an ultra map's new ground meets a world's edge: at every lattice sample of the edge, the world's
+/// side (its own join just inside) and the new side (the first join just outside) must be the same height,
+/// and the cell either side must have the same slope across, to the joins' height quantum (a tile's seam's
+/// tolerance). A point of the edge with nothing outside it is the ultra map's own outer edge.
+fn world_seams(worlds: &[UltraWorld], joins: &[Join], jt: &[Terrain], step: f64, r: &mut Report) {
+    const E: f64 = 1e-3;
+    let first = |p: [f64; 2]| joins.iter().position(|j| j.covers(p[0], p[1]));
+    for w in worlds {
+        for edge in 0..4 {
+            let (normal_axis, n) = match edge {
+                0 => (0, -1.0),
+                1 => (1, -1.0),
+                2 => (0, 1.0),
+                _ => (1, 1.0),
+            };
+            let along = 1 - normal_axis;
+            let line = if n < 0.0 { w.rect[normal_axis] } else { w.rect[normal_axis + 2] };
+            let count = ((w.rect[along + 2] - w.rect[along]) / step).round() as u32;
+            for k in 0..=count {
+                let mut p = [0.0; 2];
+                p[normal_axis] = line;
+                p[along] = w.rect[along] + f64::from(k) * step;
+                let at = |d: f64| {
+                    let mut q = p;
+                    q[normal_axis] += n * d;
+                    q
+                };
+                let Some(o) = first(at(E)) else { continue };
+                let Some(i) = first(at(-E)) else {
+                    r.fail.push(format!("{} edge {edge} at ({:.1}, {:.1}): no join inside it", w.id, p[0], p[1]));
+                    continue;
+                };
+                let (ji, jo) = (&joins[i], &joins[o]);
+                if !ji.name.starts_with(&w.prefix) || jo.name.starts_with(&w.prefix) {
+                    r.fail.push(format!("{} edge {edge} at ({:.1}, {:.1}): {} inside and {} outside", w.id, p[0], p[1], ji.name, jo.name));
+                    continue;
+                }
+                let (pin, pout, qin, qout) = (at(-E), at(E), at(-step), at(step));
+                let (Some(hi), Some(hi2), Some(ho), Some(ho2)) = (
+                    ji.height_by(&jt[i], p[0], p[1], pin),
+                    ji.height_by(&jt[i], qin[0], qin[1], pin),
+                    jo.height_by(&jt[o], p[0], p[1], pout),
+                    jo.height_by(&jt[o], qout[0], qout[1], pout),
+                ) else {
+                    r.fail.push(format!("{} edge {edge} at ({:.1}, {:.1}): no cell in {} or {}", w.id, p[0], p[1], ji.name, jo.name));
+                    continue;
+                };
+                let (si, so) = ((hi - hi2) / step, (ho2 - ho) / step);
+                let (dh, ds) = ((ho - hi).abs(), (so - si).abs());
+                let q = ji.quantum.max(jo.quantum);
+                r.world_seam_points += 1;
+                r.world_seam_height = r.world_seam_height.max(dh);
+                r.world_seam_slope = r.world_seam_slope.max(ds);
+                if dh > q + 1e-4 * hi.abs().max(1.0) || ds > 2.0 * q / step + 1e-4 {
+                    r.fail.push(format!(
+                        "{} edge {edge} at ({:.1}, {:.1}): {} {hi:.4} ft slope {si:.5}, {} {ho:.4} ft slope {so:.5}",
+                        w.id, p[0], p[1], ji.name, jo.name
+                    ));
+                }
+            }
+        }
+    }
+    r.note.push(format!(
+        "{} points where new ground meets a world's edge: worst height step {:.5} ft, slope step {:.6}",
+        r.world_seam_points, r.world_seam_height, r.world_seam_slope
+    ));
 }
 
 fn compare(src: &Path, copy: &Path, name: &str, r: &mut Report) {

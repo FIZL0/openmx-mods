@@ -22,6 +22,7 @@
 pub mod build;
 pub mod check;
 pub mod jsonw;
+pub mod ultra;
 
 use game_sim::track::{Scene, Terrain};
 use modcheck::json::Json;
@@ -384,17 +385,7 @@ impl Tile {
             (z0..=z1).map(|z| at(x1, z)).collect(),
             (x0..=x1).map(|x| at(x, z1)).collect(),
         ];
-        let prefix = edges.clone().map(|e| {
-            let mut acc = [0.0; 3];
-            let mut out = vec![acc];
-            for w in e.windows(2) {
-                let (a, b) = ([w[0].h, w[0].gx, w[0].gz], [w[1].h, w[1].gx, w[1].gz]);
-                acc = [0, 1, 2].map(|k| acc[k] + (a[k] + b[k]) / 2.0);
-                out.push(acc);
-            }
-            out
-        });
-        Ring { edges, prefix }
+        Ring::new(edges)
     }
 }
 
@@ -417,6 +408,21 @@ pub struct Ring {
 }
 
 impl Ring {
+    /// A ring from its four edges' samples (a tile's, [`Tile::ring`], or a whole world's outer edge, C5).
+    pub fn new(edges: [Vec<Edge>; 4]) -> Ring {
+        let prefix = edges.clone().map(|e| {
+            let mut acc = [0.0; 3];
+            let mut out = vec![acc];
+            for w in e.windows(2) {
+                let (a, b) = ([w[0].h, w[0].gx, w[0].gz], [w[1].h, w[1].gx, w[1].gz]);
+                acc = [0, 1, 2].map(|k| acc[k] + (a[k] + b[k]) / 2.0);
+                out.push(acc);
+            }
+            out
+        });
+        Ring { edges, prefix }
+    }
+
     /// An edge at a fractional sample along it, the height and slopes blended linearly (which is what the
     /// cell's own blend gives on its edge), the surface the nearest sample's.
     fn along(&self, edge: usize, a: f64) -> Edge {

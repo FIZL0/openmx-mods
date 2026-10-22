@@ -31,7 +31,6 @@ goes in mod.json's `todo` and notes/openmx-asks.md.
 One giant map per game out of its non-racing maps (no stadium with crowd seats: no SX, FS or other arena
 maps), their edge berms removed and the maps joined smoothly; then one ultra map out of every game's giant
 map and MX Unleashed's. Inside each source map the ground stays the original's; only the joins change.
-- [ ] **C5** the ultra map: every game's giant map (C2, C3, C4, and each later game's as it lands: ATV Offroad Fury M3, Reflex/Alive M11, …) joined by C1 into one world, MX Unleashed's included. Plan the layout so each game's world stays whole and the joins between games are as smooth as those inside one. Re-run whenever a new game's giant map lands (after C2, C3, C4) → notes/ultra-map.md | t: tools/stitch --check on the world | j: ultra-map
 
 ### Stretch
 
