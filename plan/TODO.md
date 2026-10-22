@@ -48,6 +48,7 @@ goes in mod.json's `todo` and notes/openmx-asks.md.
 One giant map per game out of its non-racing maps (no stadium with crowd seats: no SX, FS or other arena
 maps), their edge berms removed and the maps joined smoothly; then one ultra map out of every game's giant
 map and MX Unleashed's. Inside each source map the ground stays the original's; only the joins change.
+- [ ] **C1** tools/stitch, the map joiner: lay several imported maps out as one world without resampling any of them. Each map stays a terrain of its own, as the disc has it (spacing 3.5, 4.5 or 9 ft, its own height scale), placed at an offset in a world of tiles (openmx MD8 loads such a world). Per map, find its edge berm band (from the terrain and the scene's border/shootoff values; MXU's edge code is in openmx's oracle: terrain +0x530..), cut it, and fill each join with new ground that meets both sides with matching height and slope (a smooth blend solved over the band, rideable: no step, no slope past what the bike climbs), with collision and the surface ids of the nearer map. Choose the layout so neighbours' base heights are close (they range 50–555 ft); props in a cut band are dropped and listed. The output is one world mod per the standard (T1's world section) (after T2, T1) → tools/stitch/ | t: tools/stitch tests — two generated maps with berms join with continuous height and slope at every seam point, and each interior is byte-identical to its source | j: stitch
 
 ### Stretch
 
