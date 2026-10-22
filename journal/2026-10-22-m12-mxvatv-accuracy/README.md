@@ -38,6 +38,11 @@ map*; what only openmx can fix is at the end of `notes/openmx-asks.md`.
     the ground (FS02, FS06, Nat10, Nat14, SM01–03). Untamed's keeps the old text.
   - `tests/disc.rs`: a test for the three pulls; the no-start test now checks the under-the-ground todo.
 - **The mods were re-imported** (`out/mods/tracks/`, 56) and every check run on them.
+- **The gate**: openmx's live checkout changed `Grove::load` under `tools/renderprobe`; main's fix
+  (2d92cf6, T9) was applied hunk for hunk, not merged. C4 on main edited the same spawn `if` in
+  `import_into`, so M12's rule sits in its own block after the base text, and the asks went in above
+  T7's MD10 entry instead of at the file's end: `git merge-tree` with main is clean, and the merged tree
+  builds and passes `import-mxvatv` and `accuracy`'s tests (checked in a throwaway worktree).
 
 ## How it was proved
 
