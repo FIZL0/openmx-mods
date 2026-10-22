@@ -8,7 +8,7 @@
   put at the pose over PINE) and openmx's (`--shot-pose`, openmx MD10), side by side in
   `out/accuracy/<map>/`.
 
-Proved on one map by T7: MX vs. ATV Unleashed's **Lago** (`Nat05`, `mxvatv_nat05`); M12 ran it on all 56 (*Every map*, below). The heights are equal at
+Proved on one map by T7: MX vs. ATV Unleashed's **Lago** (`Nat05`, `mxvatv_nat05`); M12 ran it on all 56 (*Every map*, below), M13 on the 40 Untamed maps (*Untamed (M13)*). The heights are equal at
 every point. The original's half of the pairs is taken from 8 poses. openmx's half is waiting on openmx
 MD2 (a track from a mod folder) and MD10 (`--shot-pose`). Neither is in openmx yet.
 
@@ -229,6 +229,52 @@ direction to 1–2 ulp of `Target - Position` made unit here); every file the ga
 the re-imported mod. The Free Ride starts at the scene's `DefaultStartPosition` (MC01, FS05: the
 `.atyList`'s), on the ground where that is under it.
 
+## Untamed (M13)
+
+M13 ran the harness over the 40 imported MX vs. ATV Untamed maps (SLUS_217.01), one Free Ride each, in
+kit copy 9. The per-map table is in `notes/mxvatv-later.md`, *Against the game (M13)*; this is how it was
+run and what differs from Unleashed's setup.
+
+**The source row** (`source::UNTAMED`). `accuracy setup --game untamed` writes `extracted/untamed/kit.toml`
+with `GAME_REL.BIN` as overlay `game` at `0x48ea80` (its header's `+8`; `UI_REL.BIN` loads there too, in
+the menus). Ghidra has both under `extracted/untamed/ghidra` (`kit ghidra analyse`, about 2 minutes). The
+terrain object was found as on Lago: the `.trn` root node's 16 bytes in RAM, the word pointing at it with
+the file's scale beside it. Every field sits at Unleashed's offset; the loads of `+0x788` and `+0x9e0` led
+to the two queries (`0x4b0e30`, `0x4b0910`) and the cell reader (`0x4a8ea0`: `0.007874016`, the step over
+127, unless the word at `0x5440e8` turns on the packed table at `0x3bd6f0`). The ten-cell cache is at
+`0x544120`.
+
+**The scene's readers** (`sceneram::UNTAMED`): the key strings (`MinimumFogDistance`, `DefaultStartZone`,
+`TerrainBreadthScale`, …) in the boot ELF lead to their readers, and their vtables were read off the RAM
+image. What differs from Unleashed is in `sceneram.rs`; `sceneram::readers(boot)` picks the table, and
+`scene` compares the start's direction made unit, as the reader holds it. On SX_C an unread `[SceneInfo]`
+block (all zeros) came first in the image; the scene's is the first with a unit direction.
+
+**The camera.** The viewport has Unleashed's layout (the object 0x20 before the offsets, vtable
+`0x3d6b50` at its `+4`); the ride camera's fov is 75 (`look::ride_fov`), so the generated poses use 75.
+No vtable slot holds the ride camera still: the follow camera's update path (`0x3ef174` → `0x4b6670` →
+`0x1126c0` → `0x3ab0a0`) also builds the view matrices, so stopping it freezes the picture whatever the
+viewport holds. The hold patches code instead: the first word of the viewport's setter (`0x111700`) and
+of its look-at (`0x1117d0`) becomes `jr ra`, one word each (`Camera::also`). A first version that also
+put a `nop` in the look-at's second word let the game run it half-written (PCSX2's log: `TLB Miss,
+pc=0x1117d0`), and PCSX2's recompiler failed a few maps later ("Impossible block clearing failure",
+the copy hung); one word a function ran the last nine maps clean, apart from 126 of those log lines and
+no hang. A code write is still the riskier hold: restart the copy if `capture` stops finding new states.
+
+**Getting to each map.** A fresh profile has a few tracks open; the game's cheat `YOUGOTIT` (Options >
+Cheat Codes, from `UI\CheatCodes.txt.bpb`) opens everything. State 5 of copy 9 (serial SLUS-21701) is
+Custom Event > Free Ride's track list after it, cursor on the first track. The list is `UI\Tracks.dat`'s
+order, and all 40 imported maps are in it. In that state the window's first track is the word at
+`0x125de14` and the cursor's row the word at `0x125ddd4` (found by diffing captures a press apart); their
+sum is the map's place, from 0. Down until it is the map's, then Cross, Cross, about 35 s, then `capture`
+until `pose` finds the ride camera, then `heights --points 2000`, `scene`, `files`, `poses`, `shoot --live
+live`, `shoot`, `pair`. About 2.5 minutes a map.
+
+**Also changed for it.** `capture` takes the newest state file of the slot (copy 9 had one per game's
+serial and took the other game's); `files` knows the scene as `<map>.scn.bpb` and counts `Aud\Rider`
+as the game's; `look::terrain_box` multiplies as the EE does (Nat_OR); `tests/every_map.rs` runs on
+`untamed_*` with `extracted/untamed/ram/<map>.bin` too (40 maps in about 85 s in a debug build).
+
 ## For M12 and M13
 
 - Every map: `capture` in its Free Ride, then `heights`. Then `poses` (add landmarks with `--add`),
@@ -253,6 +299,4 @@ nothing. Ready for when they land:
   comparing where the horizon and a landmark fall at the frame's edges, take the eight pairs, and write
   what differs here. The original's shots carry the HUD; give openmx `--overlay original` or `none`
   according to what the pairs are for.
-- Untamed (M13): no `source` row yet. It needs a kit config with its own module (look for a `*_REL.BIN`
-  on its disc), its object layout, query, cell reader and camera found the way above, and a check of
-  which normal path its reader takes.
+- Untamed (M13): done, *Untamed (M13)* above; its ride camera's fov is 75, not 85.

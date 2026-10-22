@@ -419,7 +419,13 @@ fn a_map_imports_as_the_disc_has_it_and_reads_back() {
     assert_eq!(l.get("sky").and_then(Json::str), Some("Skies/sky1.ps2.cub"));
 
     // The todo: each gap, by file and reason.
-    todo_has(&m, &["Env/test/Test.ps2.trn", "openmx MD1", "2 texture pages"]);
+    // openmx's Terrain::parse reads the texture pages since its S98 (MD1, 2026-10-22); before that the
+    // import read the file through modcheck's view and said so (M13: the live checkout moved).
+    if game_sim::track::Terrain::parse(&terrain(1, 2)).is_err() {
+        todo_has(&m, &["Env/test/Test.ps2.trn", "openmx MD1", "2 texture pages"]);
+    } else {
+        assert!(!m.todo.iter().any(|t| t.contains("openmx MD1")), "{:#?}", m.todo);
+    }
     todo_has(&m, &["Col/Blade.col", "class 1", "openmx MD5"]);
     todo_has(&m, &["Loose.col", "none of the map's archives", r"loose on the PSR as Col\Loose.col"]);
     todo_has(&m, &["Test.scn: Activity= in 1 [Model<n>] sections", "\"Free Ride\" ×1", "no MX Unleashed scene has this key"]);

@@ -19,7 +19,7 @@ use std::path::Path;
 /// Names that are the game's own, loaded on every map: the rider, the machines, the UI, text, fonts,
 /// the machines' sounds, and the machines' particles (`Part\mx*.dat` and the emitters of wrecks, feet,
 /// exhaust and tyres; a map's own particles are its `Part\<map>particles.prt`).
-pub const NOT_THE_MAP: [&str; 18] = [
+pub const NOT_THE_MAP: [&str; 19] = [
     "loc\\",
     "veh\\",
     "rider\\",
@@ -29,6 +29,8 @@ pub const NOT_THE_MAP: [&str; 18] = [
     "aud\\event",
     "aud\\carengine",
     "aud\\machine",
+    // Untamed's rider sounds (`Aud\Rider.aud.bpb`, in MX08AUD.PSR), asked for on FS_C (M13).
+    "aud\\rider",
     "part\\mxparticles.dat",
     "part\\mxaiparticles.dat",
     "part\\mxparticlezones.dat",
@@ -121,7 +123,9 @@ pub fn pool(ram: &[u8], map: &str) -> Vec<String> {
         run.into_iter().filter(|n| n.contains('\\') && n.rsplit('\\').next().is_some_and(|f| f.contains('.'))).collect()
     };
     let lower = |n: &String| n.to_ascii_lowercase();
-    if let Some(run) = runs.iter().filter(|r| r.iter().any(|n| lower(n) == scene)).max_by_key(|r| r.len()) {
+    // Untamed's scene is `<map>.scn.bpb` (M13).
+    let is_scene = |n: &String| lower(n) == scene || lower(n) == format!("{scene}.bpb");
+    if let Some(run) = runs.iter().filter(|r| r.iter().any(is_scene)).max_by_key(|r| r.len()) {
         return keep(run.clone());
     }
     let score = |r: &Vec<String>| r.iter().filter(|n| own.iter().any(|o| lower(n).starts_with(o.as_str()))).count();
@@ -130,11 +134,12 @@ pub fn pool(ram: &[u8], map: &str) -> Vec<String> {
     runs.into_iter().max_by_key(score).filter(|r| score(r) > 0).map(|r| keep(r.into_iter().skip(1).collect())).unwrap_or_default()
 }
 
-/// Whether the pool still holds the map's scene, `env\<map>\<map>.scn` (in any case): when it does
-/// not, its head was overwritten and the names before the first left are not known.
+/// Whether the pool still holds the map's scene, `env\<map>\<map>.scn` (Untamed's `.scn.bpb`, in
+/// any case): when it does not, its head was overwritten and the names before the first left are not
+/// known.
 pub fn whole(names: &[String], map: &str) -> bool {
     let want = format!("env\\{0}\\{0}.scn", map.to_ascii_lowercase());
-    names.iter().any(|n| n.eq_ignore_ascii_case(&want))
+    names.iter().any(|n| n.eq_ignore_ascii_case(&want) || n.eq_ignore_ascii_case(&format!("{want}.bpb")))
 }
 
 /// Every file in the mod: (whole paths, file names), lower case, `\`-separated.
