@@ -163,7 +163,7 @@ Helicopter) from the `[Free Ride]` section; **leaves, side (ft)** from the surve
 | sx05 | Austin | 56 | Supercross, Free Ride | FreeRide.aty | no | air | 16×16, 896 |
 
 So by `.atyList` there are 56 freeride maps. What a freeride mod for OpenMX wants, an open outdoor world
-like MX Unleashed's `free06`, is the 33 big ones: Nat01–17, SM01–03, MC01–05, MC09–10 (80×80 leaves,
+like MX Unleashed's `free06`, is the 27 big ones: Nat01–17, SM01–03, MC01–05, MC09–10 (80×80 leaves,
 5760 ft; Nat04 56×80). The FS, SX and MC06–08 maps are 896–1280 ft arenas.
 
 ### The first mods
@@ -580,6 +580,86 @@ apart (MC06: one), so ten poses (nine).
 | sx17 | Charleston | 8000 ✓ | 28/28 | 747/747 | 11 | 18 shadow materials | normals 77 % 1–3 ulp (the step); Ground's box |
 | sx18 | Boulder | 8000 ✓ | 28/28 | 727/727 | 11 | 18 shadow materials | normals 75 % 1–3 ulp (the step); Ground's box |
 
+## The giant map (C2)
+
+`world_mxvatv` (`tools/stitch/worlds/world_mxvatv.json`, built by build.sh's stitch step from the
+`mxvatv_` tracks the import step made) joins the 27 open maps of M8's table into one world: Nat01–17,
+SM01–03, MC01–05, MC09–10. (M8's paragraph above once said 33. The maps it lists are 27.) Left out: the
+arenas, SX01–18, FS01–08 and MC06–08 (Monster Stadium, Trophy Stadium, 19th Hole), each 896–1280 ft
+with its stands round it. The nationals and supermoto maps do have trackside crowd (`.aud` crowd
+sounds, crowd toys, SM's `bleacher_big_512`), but they are 5,760 ft outdoor maps with the crowd beside
+the track, not stadiums, and the brief keeps "the open national-style maps if they qualify by M8": they
+do. The tiles are listed in `UI\Tracks.dat`'s order, so the world's sky (the first tile's by default,
+named in the spec) is mc02 Desert Oasis's, the first open map the menu lists and one of the six unlocked
+at the start.
+
+Built 2026-10-22 at stitch's defaults (`max_slope` 0.5, no spec todo), release, 32 threads:
+
+- **Build** 15 s from 27 imported tracks: the seam gates in 2.6 s, then the layout widened three times
+  (0.870 next to nat09, 0.685 next to nat12, 0.561 next to nat09) and passed at widen 1.953: 37,732 ×
+  31,900 ft, 554 join pieces at 4.5 ft, no collars (every tile is 4.5 ft), join slope 0.470 away from
+  the seams and 3.95 near them. Tile radii 1,095–13,104 ft.
+- **`stitch check`** with the disc, 76 s: **ok**. 258,412 seam points, worst height step 0.00406 ft,
+  worst slope step 0.00177; every tile's files byte for byte its imported map's, and modcheck's disc
+  comparison on each.
+- **Seam gates past C1's 153 ft** (each in the world's todo, C9): mc09 297–333 ft, nat17 189–315, nat13
+  306 and 248, nat11 166–306, nat01 207–270, mc10 288 and 207, and 14 more maps at 158–234 on one to
+  three edges. mc02, mc03, mc05, nat05, nat06, sm01 and sm02 have none.
+- **Dropped placements** (36, in the world's `drop`): nat08's 28, fourteen `Model`/`Object` pairs 1,152 ft
+  apart (one per root cell) along its x0, z0 and z1 edges, 123–164 ft in, inside its 184–220 ft cut
+  there: redwood trees (`Nat08_redwood_B` ×9, `_E` ×5, each a model and its collision); nat14's four
+  (`Model74/75`, `Object44/45`) at (0, 0), its origin; nat04's four over its
+  missing cells (C8).
+
+Each map's place: `at` is where the tile's sample (0, 0) sits in the world, in feet; *edge* is the mean
+height of its cut edge (stitch's log), which is what the layout matches neighbours by.
+
+| row \ column | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| 1 | mc02 | nat01 | sm03 | sm01 | sm02 | nat17 |
+| 2 | nat09 | mc09 | nat07 | mc01 | nat04 | nat13 |
+| 3 | nat02 | nat08 | nat10 | nat14 | nat05 | nat12 |
+| 4 | nat15 | nat16 | mc05 | nat06 | mc10 | mc03 |
+| 5 | nat03 | mc04 | nat11 | | | |
+
+| map | name | at (ft) | keep (samples) | edge (ft) |
+|---|---|---|---|---|
+| mc02 | Desert Oasis | 216, 144 | 34, 45, 1246, 1242 | 138.8 |
+| mc01 | Killington | 19224, 7560 | 70, 37, 1212, 1229 | 362.9 |
+| mc03 | Red Country | 31824, 19944 | 46, 34, 1246, 1238 | 402.0 |
+| mc04 | Glamis South | 7056, 25992 | 34, 37, 1245, 1246 | 417.9 |
+| mc05 | Woodstock | 13176, 19872 | 34, 34, 1239, 1246 | 408.9 |
+| mc09 | Quechee Gulch | 7128, 7560 | 34, 35, 1209, 1246 | 371.8 |
+| mc10 | Land and Air | 25344, 19872 | 52, 48, 1227, 1232 | 404.5 |
+| nat05 | Lago | 25344, 13824 | 34, 34, 1243, 1245 | 401.7 |
+| nat06 | Juniper Park | 19296, 19872 | 34, 44, 1239, 1246 | 408.4 |
+| nat03 | Glamis | 216, 25992 | 34, 36, 1246, 1246 | 417.9 |
+| nat10 | Maple Hill | 13176, 13752 | 34, 55, 1246, 1236 | 396.5 |
+| nat02 | Tipperary | 216, 13824 | 34, 34, 1246, 1246 | 392.8 |
+| nat01 | Goblin Gulch | 7056, 216 | 34, 35, 1236, 1246 | 290.2 |
+| nat04 | Oceanside | 26136, 7560 | 34, 34, 896, 1246 | 360.2 |
+| nat14 | Santiago | 19224, 13824 | 56, 34, 1244, 1235 | 400.3 |
+| nat09 | Deadman Wash | 216, 7560 | 34, 35, 1237, 1246 | 392.0 |
+| nat16 | Northern Lights | 7056, 19872 | 34, 34, 1246, 1246 | 409.4 |
+| nat13 | Sienna Ridge | 31824, 7560 | 34, 34, 1246, 1234 | 336.6 |
+| nat07 | Valhalla | 13104, 7560 | 62, 63, 1243, 1231 | 369.7 |
+| nat11 | Sutter Raceway | 13176, 25992 | 34, 34, 1246, 1246 | 436.3 |
+| nat08 | Redwood Valley | 7056, 13824 | 49, 41, 1232, 1239 | 394.2 |
+| nat17 | Keweni Falls | 31824, 216 | 54, 34, 1227, 1246 | 325.0 |
+| nat12 | Temple of Apophis | 31752, 13824 | 55, 34, 1244, 1238 | 402.0 |
+| nat15 | Smuggler's Notch | 216, 19872 | 34, 34, 1246, 1246 | 410.1 |
+| sm01 | Mesa | 19224, 216 | 34, 34, 1246, 1246 | 311.4 |
+| sm02 | Highlands | 25344, 216 | 34, 34, 1246, 1246 | 317.7 |
+| sm03 | The Glades | 13176, 216 | 34, 34, 1246, 1246 | 311.1 |
+
+The layout is stitch's, from these 27 tiles in this order. A different order or a change to stitch's
+layout moves them; `stitch check` and `tests/world_mxvatv.rs` hold the seams, not the places. The world
+picture (`stitch map`) shows the grid as above, mc02's 139 ft base darker than its neighbours, and the
+joins fading between tiles with no step.
+
+**Not ridden.** openmx has no MD2 (mods folder) or MD8 (worlds), so no seam of this world has been ridden
+in the port, and each map's Free Ride start is its tile's own (the world's `spawn` names mc02).
+
 ## Survey tables
 
 `cargo run --release -p survey -- mxvatv`, 2026-10-22. † = read through the view above.
@@ -730,3 +810,5 @@ apart (MC06: one), so ten poses (nine).
 - M12 (*Against the game*): the look was checked through what the game holds (scene, files) and the
   original's shots; openmx's half of the pairs waits on MD2 and MD10 (T9), so no picture was compared.
   Ecosystem density, `[DistanceFade]` and the lights' shadow keys were not read from RAM.
+- C2's world (*The giant map*): no seam was ridden in openmx (no MD2/MD8), and the world was not seen
+  in PCSX2 (it is not a map the game has).
