@@ -45,31 +45,96 @@ pub enum Have {
     Path,
     Base,
     No,
+    /// Not in the mod, and no loose member of the disc's PSR either: the game asked and fell back
+    /// (MC10 asks for `env\mc10\mxparticlezones.dat`, then takes `part\`'s).
+    Absent,
 }
 
-/// The pool's names, in order, or none when the image has no pool for this map.
+/// The [`Have::No`]s that no loose PSR member answers (`psr`: every member's name, [`discx::normalise`]d)
+/// become [`Have::Absent`].
+pub fn absent(rows: &mut [(String, Have)], psr: &BTreeSet<String>) {
+    for r in rows.iter_mut() {
+        if r.1 == Have::No && !psr.contains(&discx::normalise(&r.0)) {
+            r.1 = Have::Absent;
+        }
+    }
+}
+
+/// The disc a mod came from, found by its boot ELF in `$DISCX_ISO` (else `iso/`), as its PSR's member
+/// names; `None` when it is not there.
+pub fn psr_names(boot: &str) -> Option<BTreeSet<String>> {
+    let dir = std::env::var("DISCX_ISO").unwrap_or_else(|_| "iso".into());
+    psr_names_in(Path::new(&dir), boot)
+}
+
+/// [`psr_names`] from the images in `dir`.
+pub fn psr_names_in(dir: &Path, boot: &str) -> Option<BTreeSet<String>> {
+    let (iso, _) = discx::images(dir).ok()?.into_iter().find(|(_, b)| b.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(boot)))?;
+    let disc = discx::Disc::open(&iso).ok()?;
+    Some(disc.entries().iter().map(|e| discx::normalise(&e.name)).collect())
+}
+
+/// The pool's names, in order, or none when the image has no pool.
+///
+/// The pool is names one after another with two NULs between them (the PSR's directory has one, the
+/// archive tables bytes between). The game keeps other lists like it (the machines' animations). And it
+/// reuses the buffer: on most maps the text of a later file overwrites the pool's head, and the names
+/// from the scene's on are lost up to where the overwriting stopped. Of every such run of names in the
+/// image, the pool is the one holding `env\<map>\<map>.scn` (in any case), else the one with the most
+/// of the map's own kinds of name (`geo\`, `col\`, `eco\`, `tex\`, `skies\`, `env\<map>\`);
+/// [`whole`] says whether the scene's name is in it.
 pub fn pool(ram: &[u8], map: &str) -> Vec<String> {
-    let want = format!("env\\{0}\\{0}.scn", map.to_ascii_lowercase());
-    let lower: Vec<u8> = ram.iter().map(u8::to_ascii_lowercase).collect();
-    let Some(at) = lower.windows(want.len()).position(|w| w == want.as_bytes()) else {
-        return Vec::new();
+    let map = map.to_ascii_lowercase();
+    let scene = format!("env\\{map}\\{map}.scn");
+    let own = [format!("env\\{map}\\"), "geo\\".into(), "col\\".into(), "eco\\".into(), "tex\\".into(), "skies\\".into()];
+    let name_byte = |c: u8| (33..127).contains(&c);
+    let mut runs: Vec<Vec<String>> = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < ram.len() {
+        if !name_byte(ram[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < ram.len() && (name_byte(ram[i]) || ram[i] == b' ') {
+            i += 1;
+        }
+        let token = String::from_utf8_lossy(&ram[start..i]).into_owned();
+        let two = i + 2 < ram.len() && ram[i] == 0 && ram[i + 1] == 0 && ram[i + 2] != 0;
+        if token.contains('\\') || !cur.is_empty() {
+            cur.push(token);
+        }
+        if two {
+            i += 2;
+        } else {
+            if cur.len() >= 2 {
+                runs.push(std::mem::take(&mut cur));
+            }
+            cur.clear();
+        }
+    }
+    if cur.len() >= 2 {
+        runs.push(cur);
+    }
+    let keep = |run: Vec<String>| -> Vec<String> {
+        run.into_iter().filter(|n| n.contains('\\') && n.rsplit('\\').next().is_some_and(|f| f.contains('.'))).collect()
     };
-    let text = |c: u8| c == 0 || (32..127).contains(&c);
-    let gap = |i: usize| i >= 8 && ram[i - 8..i].iter().all(|&c| c == 0);
-    let mut a = at;
-    while a > 0 && text(ram[a - 1]) && !gap(a) {
-        a -= 1;
+    let lower = |n: &String| n.to_ascii_lowercase();
+    if let Some(run) = runs.iter().filter(|r| r.iter().any(|n| lower(n) == scene)).max_by_key(|r| r.len()) {
+        return keep(run.clone());
     }
-    let mut b = at;
-    while b < ram.len() && text(ram[b]) && !(b + 8 <= ram.len() && ram[b..b + 8].iter().all(|&c| c == 0)) {
-        b += 1;
-    }
-    ram[a..b]
-        .split(|&c| c == 0)
-        .filter(|w| w.len() >= 3)
-        .map(|w| String::from_utf8_lossy(w).into_owned())
-        .filter(|n| n.contains('\\') && n.rsplit('\\').next().is_some_and(|f| f.contains('.')))
-        .collect()
+    let score = |r: &Vec<String>| r.iter().filter(|n| own.iter().any(|o| lower(n).starts_with(o.as_str()))).count();
+    // Its first name is where the overwriting stopped, and may be the tail of a name joined to the
+    // text before it: it is dropped.
+    runs.into_iter().max_by_key(score).filter(|r| score(r) > 0).map(|r| keep(r.into_iter().skip(1).collect())).unwrap_or_default()
+}
+
+/// Whether the pool still holds the map's scene, `env\<map>\<map>.scn` (in any case): when it does
+/// not, its head was overwritten and the names before the first left are not known.
+pub fn whole(names: &[String], map: &str) -> bool {
+    let want = format!("env\\{0}\\{0}.scn", map.to_ascii_lowercase());
+    names.iter().any(|n| n.eq_ignore_ascii_case(&want))
 }
 
 /// Every file in the mod: (whole paths, file names), lower case, `\`-separated.
@@ -125,9 +190,13 @@ mod tests {
     #[test]
     fn reads_the_pool_around_the_scene_and_sorts_it() {
         let mut ram = vec![0u8; 64];
-        ram.extend_from_slice(b"WantsX = FALSE\0loc\\a.loc\0env\\nat05\\nat05.scn\0\0geo\\barn.psg\0Col\\Barn.col\0veh\\bike.psg\0Env\\nat05\\nat05.res\0tex\\x.psm\0");
+        // The PSR's directory: one NUL between names. Not the pool.
+        ram.extend_from_slice(b"Env\\Nat05\\Nat05.scn\0Env\\Nat05\\a.psg\0Env\\Nat05\\b.psg\0Env\\Nat05\\c.psg\0Env\\Nat05\\d.psg\0Geo\\e.psg\0Geo\\f.psg\0Geo\\g.psg\0Geo\\h.psg\0");
+        ram.extend(vec![0u8; 64]);
+        ram.extend_from_slice(b"WantsX = FALSE\0\0loc\\a.loc\0\0env\\nat05\\nat05.scn\0\0geo\\barn.psg\0\0Col\\Barn.col\0\0veh\\bike.psg\0\0Env\\nat05\\nat05.res\0\0tex\\x.psm\0");
         ram.extend(vec![0u8; 64]);
         let names = pool(&ram, "Nat05");
+        assert!(whole(&names, "Nat05"));
         assert_eq!(names, ["loc\\a.loc", "env\\nat05\\nat05.scn", "geo\\barn.psg", "Col\\Barn.col", "veh\\bike.psg", "Env\\nat05\\nat05.res", "tex\\x.psm"]);
         let paths: BTreeSet<String> = ["env\\nat05\\nat05.scn", "col\\barn.col"].map(String::from).into();
         let files: BTreeSet<String> = ["nat05.scn", "barn.col", "barn.psg"].map(String::from).into();

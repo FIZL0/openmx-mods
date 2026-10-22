@@ -267,7 +267,37 @@ pub fn pull_loose(disc: &mut Disc, archives: &[(String, ResFile)]) -> Result<Vec
     let dir = scn.rfind('/').map_or("", |i| &scn[..i]);
     pull_physics(&mut o, dir, &stem)?;
     pull_shadows(&mut o)?;
+    pull_particles(&mut o, dir)?;
     Ok(o.pulled)
+}
+
+/// The machines' particle sheets, by the machine (GAME_REL.BIN `0x004a6810`'s switch on its type), and
+/// the two zone tables (`atvparticlezones.dat` for an ATV, `mxparticlezones.dat` for the rest).
+pub const PARTICLE_SHEETS: [&str; 13] = [
+    "mxparticles.dat",
+    "mxaiparticles.dat",
+    "atvparticles.dat",
+    "atvaiparticles.dat",
+    "biplaneparticles.dat",
+    "helicopterparticles.dat",
+    "buggyparticles.dat",
+    "monsterparticles.dat",
+    "bajaparticles.dat",
+    "golfparticles.dat",
+    "SRparticles.dat",
+    "mxparticlezones.dat",
+    "atvparticlezones.dat",
+];
+
+/// The map's own particle sheets (M12, seen in the game's name pool on MC10). `0x004a6810` opens the
+/// machine's sheet and zone table in the map's folder (`%s%s`, the folder and the name) and takes
+/// `Part\`'s only when the map has none. Every name the switch can give is pulled where the map's
+/// folder has it loose, whichever machine rides.
+fn pull_particles(o: &mut Opener, dir: &str) -> Result<(), String> {
+    for name in PARTICLE_SHEETS {
+        o.open(&format!("{dir}/{name}"), &format!("the machine's particles, {name} in the map's folder (0x004a6810)"))?;
+    }
+    Ok(())
 }
 
 /// The physics objects the map's toys name (M12, seen in the game's name pool in a ride on Lago).
