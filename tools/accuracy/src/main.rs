@@ -511,24 +511,44 @@ fn cmd_files(a: &mut Args) -> Result<bool, String> {
     let ram = heights::load_ram(Path::new(&image))?;
     let names = loaded::pool(&ram, &m.map);
     if names.is_empty() {
-        return Err(format!("no name pool with env\\{0}\\{0}.scn in the image: is it a ride on {0}?", m.map));
+        return Err("no name pool in the image".into());
     }
+    let whole = loaded::whole(&names, &m.map);
     let (paths, files) = loaded::mod_files(&m.folder);
-    let rows = loaded::audit(&names, &paths, &files);
+    let mut rows = loaded::audit(&names, &paths, &files);
+    let disc = loaded::psr_names(&m.boot);
+    if let Some(psr) = &disc {
+        loaded::absent(&mut rows, psr);
+    }
     let count = |h: Have| rows.iter().filter(|r| r.1 == h).count();
     let mut s = format!(
-        "{}: the game opened {} names, {} of them the map's: {} at their path in the mod, {} by file name only, {} not in the mod\n",
+        "{}: the game opened {} names, {} of them the map's: {} at their path in the mod, {} by file name only, {} not in the mod{}\n",
         m.id,
         names.len(),
         rows.len(),
         count(Have::Path),
         count(Have::Base),
-        count(Have::No)
-    );
-    for (n, h) in &rows {
-        if *h != Have::Path {
-            s.push_str(&format!("  {:<6} {n}\n", if *h == Have::No { "NOT" } else { "name" }));
+        count(Have::No),
+        match disc {
+            Some(_) => format!(", {} on no part of the disc (the game fell back)", count(Have::Absent)),
+            None => " (the disc was not found to tell which are on it)".into(),
         }
+    );
+    if !whole {
+        s.push_str(&format!(
+            "  the pool's head was overwritten (it no longer holds env\\{0}\\{0}.scn): the names from the scene's to {1} are lost\n",
+            m.map.to_ascii_lowercase(),
+            names.first().map_or("", String::as_str)
+        ));
+    }
+    for (n, h) in &rows {
+        let tag = match h {
+            Have::Path => continue,
+            Have::Base => "name",
+            Have::No => "NOT",
+            Have::Absent => "absent",
+        };
+        s.push_str(&format!("  {tag:<6} {n}\n"));
     }
     print!("{s}");
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;

@@ -186,7 +186,15 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
     push("SceneInfo DefaultStartDirection".into(), dir, vec![0.0, 0.0, 1.0], read(ram, v - 0x14, 3));
 
     let fog = sec("fog");
-    let v = one(FOG_VT, "[Fog]")?;
+    // A zone's fog is an object of the same class whose distances are not set: the scene's is the first
+    // with a distance pair (0 <= min <= max, max >= 1).
+    let v = with_vtable(ram, FOG_VT)
+        .into_iter()
+        .find(|&v| {
+            let (lo, hi) = (f32_at(ram, v - 8).unwrap_or(f32::NAN), f32_at(ram, v - 4).unwrap_or(f32::NAN));
+            (lo == 0.0 || lo.is_normal()) && lo >= 0.0 && hi.is_normal() && hi >= 1.0 && hi >= lo
+        })
+        .ok_or_else(|| format!("no [Fog] reader (vtable {FOG_VT:#x}) with distances in the image"))?;
     let rgb = fog.get("colorrgb").map(|t| {
         let mut c = floats(t);
         c.resize(3, 255.0);
