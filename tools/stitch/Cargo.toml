@@ -1,0 +1,15 @@
+[package]
+name = "stitch"
+description = "Joins track mods into one world mod (standard §3): each map whole, new ground between them"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Scene and terrain: openmx's readers, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+# The join terrains are written with T2's writer; pages are read through its MD1 view.
+trnwrite = { path = "../trnwrite" }
+# mod.json reading, and the world's §5 checks that are not the seams'.
+modcheck = { path = "../modcheck" }

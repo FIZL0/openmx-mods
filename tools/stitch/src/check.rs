@@ -1,0 +1,473 @@
+//! `stitch check`: a world mod read back with openmx's readers, the parts of §5 step 3 that are C1's.
+//!
+//! - modcheck's own world check (§1, every tile as a track, every join terrain read, `.blend` sums,
+//!   `drop`, `sky`, `spawn`).
+//! - Each tile: `at` on a whole leaf, `keep` inside its terrain, no two interiors overlapping, and (given
+//!   the mods the world was built from) every file of the tile byte for byte its source mod's.
+//! - Every seam point, read from the tile's kept cell and the join's cell outside it with
+//!   `Terrain::cell`: the same height and the same slope across the seam, to the join's height quantum.
+//!   A seam point is a join lattice point on an interior's edge, which is every tile sample on it when
+//!   the spacings agree. Tile samples between lattice points (spacings that differ) are measured and
+//!   reported, not failed.
+//! - Neighbouring join pieces agree on their shared samples.
+//! - Join ground away from the seams is no steeper than the world's `max_slope`.
+//! - The look: on every seam point the touching tile's weight is 255, and no weight jumps by more than
+//!   [`MAX_BLEND_STEP`] between neighbouring samples.
+
+use crate::Tile;
+use game_sim::track::Terrain;
+use modcheck::json::Json;
+use ps2_float::F;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// A blend weight may change by at most this between two neighbouring samples ("never a hard edge").
+pub const MAX_BLEND_STEP: u8 = 64;
+
+#[derive(Debug, Default)]
+pub struct Report {
+    pub fail: Vec<String>,
+    pub note: Vec<String>,
+    /// Seam points checked strictly, and the worst height and slope steps there.
+    pub seam_points: usize,
+    pub worst_height: f64,
+    pub worst_slope: f64,
+    /// Tile samples between lattice points: count and worst height step.
+    pub between_points: usize,
+    pub between_height: f64,
+    pub far_slope: f64,
+}
+
+impl Report {
+    pub fn ok(&self) -> bool {
+        self.fail.is_empty()
+    }
+}
+
+struct Join {
+    name: String,
+    at: [f64; 2],
+    samples: [u32; 2],
+    between: Vec<String>,
+    bytes: Vec<u8>,
+    blend: Vec<u8>,
+    spacing: f64,
+    scale: F,
+    quantum: f64,
+}
+
+impl Join {
+    fn terrain(&self) -> Terrain<'_> {
+        Terrain::parse(&self.bytes).expect("parsed when loaded")
+    }
+
+    fn rect(&self) -> [f64; 4] {
+        [
+            self.at[0],
+            self.at[1],
+            self.at[0] + f64::from(self.samples[0] - 1) * self.spacing,
+            self.at[1] + f64::from(self.samples[1] - 1) * self.spacing,
+        ]
+    }
+
+    fn covers(&self, x: f64, z: f64) -> bool {
+        let r = self.rect();
+        const E: f64 = 1e-6;
+        x >= r[0] - E && x <= r[2] + E && z >= r[1] - E && z <= r[3] + E
+    }
+
+    /// The ground of one cell at a point (local sample units), blended as game-sim's `Ground::at`.
+    fn in_cell(&self, t: &Terrain, cx: u32, cz: u32, fx: f64, fz: f64) -> Option<f64> {
+        let q = t.cell(cx, cz, 1)?;
+        let (tx, tz) = (F((fx - f64::from(cx)) as f32), F((fz - f64::from(cz)) as f32));
+        let w = [(F::ONE - tx) * (F::ONE - tz), tx * (F::ONE - tz), (F::ONE - tx) * tz, tx * tz];
+        let mut y = F::ZERO;
+        for i in 0..4 {
+            y = y + w[i] * q.height[i];
+        }
+        Some(f64::from((self.scale * y).0))
+    }
+
+    fn sample(&self, t: &Terrain, x: u32, z: u32) -> Option<f64> {
+        let (cx, cz) = (x.min(self.samples[0] - 2), z.min(self.samples[1] - 2));
+        self.in_cell(t, cx, cz, f64::from(x), f64::from(z))
+    }
+}
+
+fn nums(j: Option<&Json>) -> Vec<f64> {
+    j.and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::num).collect()
+}
+
+/// Check the world in `dir`. `mods`, if given, is where its tiles came from (a folder holding
+/// `<tile>/` or `tracks/<tile>/`), for the byte comparison. `iso` is for modcheck's disc comparison.
+pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
+    let mut r = Report::default();
+    let mut discs = modcheck::Discs::new(iso);
+    let mc = modcheck::check(dir, &mut discs);
+    r.fail.extend(mc.fail.into_iter().map(|f| format!("modcheck: {f}")));
+    r.note.extend(mc.note.into_iter().map(|n| format!("modcheck: {n}")));
+
+    let meta = match std::fs::read_to_string(dir.join("mod.json")).map_err(|e| e.to_string()).and_then(|t| Json::parse(&t)) {
+        Ok(j) => j,
+        Err(e) => {
+            r.fail.push(format!("mod.json: {e}"));
+            return r;
+        }
+    };
+    let st = meta.get("stitch");
+    let max_slope = st.and_then(|s| s.get("max_slope")).and_then(Json::num).unwrap_or(0.5);
+    let fade = st.and_then(|s| s.get("fade")).and_then(Json::num).unwrap_or(48.0);
+
+    // The tiles.
+    let mut tiles: Vec<(Tile, [f64; 2], [u32; 4])> = Vec::new();
+    for t in meta.get("tiles").and_then(Json::arr).unwrap_or_default() {
+        let name = t.get("tile").and_then(Json::str).unwrap_or_default();
+        let at = nums(t.get("at"));
+        let keep = nums(t.get("keep"));
+        if at.len() != 2 || keep.len() != 4 {
+            r.fail.push(format!("tiles[{name}]: at or keep malformed"));
+            continue;
+        }
+        let tile = match Tile::load(&dir.join("tiles").join(name)) {
+            Ok(t) => t,
+            Err(e) => {
+                r.fail.push(format!("tiles/{name}: {e}"));
+                continue;
+            }
+        };
+        let keep = [keep[0] as u32, keep[1] as u32, keep[2] as u32, keep[3] as u32];
+        let leaf = 16.0 * tile.spacing;
+        for a in at.iter() {
+            if (a / leaf - (a / leaf).round()).abs() > 1e-9 {
+                r.fail.push(format!("tiles[{name}]: at {a} is not a whole leaf ({leaf} ft)"));
+            }
+        }
+        if keep[0] >= keep[2] || keep[1] >= keep[3] || keep[2] > tile.n.0 || keep[3] > tile.n.1 {
+            r.fail.push(format!("tiles[{name}]: keep {keep:?} is not inside its {}×{} samples", tile.n.0, tile.n.1));
+            continue;
+        }
+        if let Some(m) = mods {
+            let src = [m.join(name), m.join("tracks").join(name)].into_iter().find(|p| p.join("mod.json").exists());
+            match src {
+                None => r.note.push(format!("tiles/{name}: no source mod under {} to compare with", m.display())),
+                Some(src) => compare(&src, &tile.dir, name, &mut r),
+            }
+        }
+        tiles.push((tile, [at[0], at[1]], keep));
+    }
+    if mods.is_none() {
+        r.note.push("no --mods: the tiles were not compared with the mods they came from".into());
+    }
+    let rects: Vec<[f64; 4]> = tiles
+        .iter()
+        .map(|(t, at, k)| {
+            let s = t.spacing;
+            [at[0] + f64::from(k[0]) * s, at[1] + f64::from(k[1]) * s, at[0] + f64::from(k[2]) * s, at[1] + f64::from(k[3]) * s]
+        })
+        .collect();
+    for i in 0..rects.len() {
+        for j in i + 1..rects.len() {
+            let (a, b) = (rects[i], rects[j]);
+            if a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3] {
+                r.fail.push(format!("tiles {} and {}: their interiors overlap", tiles[i].0.id, tiles[j].0.id));
+            }
+        }
+    }
+
+    // The joins.
+    let mut joins: Vec<Join> = Vec::new();
+    for jn in meta.get("joins").and_then(Json::arr).unwrap_or_default() {
+        let name = jn.get("join").and_then(Json::str).unwrap_or_default().to_owned();
+        let at = nums(jn.get("at"));
+        let samples = nums(jn.get("samples"));
+        let between: Vec<String> = jn.get("between").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
+        let jd = dir.join("joins").join(&name);
+        let (Ok(bytes), Ok(blend)) = (std::fs::read(jd.join(format!("{name}.ps2.trn"))), std::fs::read(jd.join(format!("{name}.blend")))) else {
+            r.fail.push(format!("joins/{name}: files missing"));
+            continue;
+        };
+        if at.len() != 2 || samples.len() != 2 {
+            r.fail.push(format!("joins[{name}]: at or samples malformed"));
+            continue;
+        }
+        let t = match Terrain::parse(&bytes) {
+            Ok(t) => t,
+            Err(e) => {
+                r.fail.push(format!("joins/{name}: Terrain::parse: {e}"));
+                continue;
+            }
+        };
+        let hs = t.root().map_or(F::ZERO, |n| n.height_scale);
+        let (spacing, scale) = (f64::from(t.scale.0), t.scale);
+        drop(t);
+        let samples = [samples[0] as u32, samples[1] as u32];
+        if blend.len() != (samples[0] * samples[1]) as usize * between.len() {
+            r.fail.push(format!("joins/{name}.blend: {} bytes for {}×{} samples of {} tiles", blend.len(), samples[0], samples[1], between.len()));
+            continue;
+        }
+        joins.push(Join { name, at: [at[0], at[1]], samples, between, bytes, blend, spacing, scale, quantum: f64::from((scale * hs).0) });
+    }
+    if joins.is_empty() {
+        r.fail.push("no joins".into());
+        return r;
+    }
+    let jt: Vec<Terrain> = joins.iter().map(Join::terrain).collect();
+    let tt: Vec<Terrain> = tiles.iter().map(|t| t.0.terrain()).collect();
+
+    // Seams.
+    for (ti, (tile, at, k)) in tiles.iter().enumerate() {
+        let t = &tt[ti];
+        let s = tile.spacing;
+        for edge in 0..4 {
+            // Outward normal and the edge's run, in tile samples.
+            let (fixed, along_axis, n) = match edge {
+                0 => (k[0], 1, -1.0),
+                1 => (k[1], 0, -1.0),
+                2 => (k[2], 1, 1.0),
+                _ => (k[3], 0, 1.0),
+            };
+            let normal_axis = 1 - along_axis;
+            let (a0, a1) = (f64::from(k[along_axis]), f64::from(k[along_axis + 2]));
+            // Points along the edge, in tile samples: every tile sample, and every join lattice point.
+            let mut pts: Vec<(f64, bool)> = (k[along_axis]..=k[along_axis + 2]).map(|a| (f64::from(a), false)).collect();
+            let step = joins[0].spacing;
+            let w0 = at[along_axis] + a0 * s;
+            let w1 = at[along_axis] + a1 * s;
+            let origin = joins[0].at[along_axis];
+            let mut l = ((w0 - origin) / step - 1e-9).ceil();
+            while origin + l * step <= w1 + 1e-6 {
+                pts.push(((origin + l * step - at[along_axis]) / s, true));
+                l += 1.0;
+            }
+            for (a, lattice_pt) in pts {
+                let mut world = [0.0; 2];
+                world[normal_axis] = at[normal_axis] + f64::from(fixed) * s;
+                world[along_axis] = at[along_axis] + a * s;
+                let on_lattice = lattice_pt
+                    || ((world[along_axis] - origin) / step - ((world[along_axis] - origin) / step).round()).abs() < 1e-6;
+                // The tile side: the kept cell on this edge.
+                let cn = if n < 0.0 { fixed } else { fixed - 1 };
+                let ca = (a.floor() as u32).clamp(k[along_axis], k[along_axis + 2] - 1);
+                let (cx, cz) = if normal_axis == 0 { (cn, ca) } else { (ca, cn) };
+                let Some(q) = t.cell(cx, cz, 1) else {
+                    r.fail.push(format!("{}: no cell {cx},{cz}", tile.id));
+                    continue;
+                };
+                let ta = F((a - f64::from(ca)) as f32);
+                // Corners: index = dx + 2 dz. Along the edge at the near and far side of the cell.
+                let corner = |dn: usize, da: usize| -> f64 {
+                    let i = if normal_axis == 0 { dn + 2 * da } else { da + 2 * dn };
+                    f64::from(q.height[i].0)
+                };
+                let lerp = |dn: usize| f64::from((tile.scale * (F(corner(dn, 0) as f32) * (F::ONE - ta) + F(corner(dn, 1) as f32) * ta)).0);
+                let (inner, outer) = if n < 0.0 { (lerp(1), lerp(0)) } else { (lerp(0), lerp(1)) };
+                let th = outer;
+                let tslope = (outer - inner) / s;
+                // The join side: the first join covering a point just outside.
+                let mut probe = world;
+                probe[normal_axis] += n * 1e-3;
+                let Some(ji) = joins.iter().position(|j| j.covers(probe[0], probe[1])) else {
+                    r.fail.push(format!("{} edge {edge} at {:.2},{:.2}: no join outside it", tile.id, world[0], world[1]));
+                    continue;
+                };
+                let j = &joins[ji];
+                let f = [(world[0] - j.at[0]) / j.spacing, (world[1] - j.at[1]) / j.spacing];
+                let mut c = [0u32; 2];
+                for ax in 0..2 {
+                    let v = if ax == normal_axis {
+                        if n > 0.0 { (f[ax] + 1e-6).floor() } else { (f[ax] - 1e-6).ceil() - 1.0 }
+                    } else {
+                        f[ax].floor()
+                    };
+                    c[ax] = (v.max(0.0) as u32).min(j.samples[ax] - 2);
+                }
+                let mut f2 = f;
+                f2[normal_axis] += n;
+                let (Some(jh), Some(jh2)) = (j.in_cell(&jt[ji], c[0], c[1], f[0], f[1]), j.in_cell(&jt[ji], c[0], c[1], f2[0], f2[1])) else {
+                    r.fail.push(format!("joins/{}: no cell {:?}", j.name, c));
+                    continue;
+                };
+                let jslope = (jh2 - jh) / j.spacing;
+                let dh = (jh - th).abs();
+                let ds = (jslope - tslope).abs();
+                if on_lattice {
+                    r.seam_points += 1;
+                    r.worst_height = r.worst_height.max(dh);
+                    r.worst_slope = r.worst_slope.max(ds);
+                    let (tol_h, tol_s) = (j.quantum + 1e-4 * th.abs().max(1.0), 2.0 * j.quantum / j.spacing + 1e-4);
+                    if dh > tol_h || ds > tol_s {
+                        r.fail.push(format!(
+                            "{} edge {edge} at ({:.3}, {:.3}): tile {th:.4} ft slope {tslope:.5}, join {} {jh:.4} ft slope {jslope:.5}",
+                            tile.id, world[0], world[1], j.name
+                        ));
+                    }
+                    // The look: the touching tile owns the seam.
+                    let (sx, sz) = (f[0].round() as u32, f[1].round() as u32);
+                    match j.between.iter().position(|b| *b == tile.id) {
+                        Some(bi) => {
+                            let at = (sx + sz * j.samples[0]) as usize * j.between.len() + bi;
+                            if j.blend.get(at) != Some(&255) {
+                                r.fail.push(format!("joins/{}.blend: {} is {:?}, not 255, on its seam at {sx},{sz}", j.name, tile.id, j.blend.get(at)));
+                            }
+                        }
+                        None => r.fail.push(format!("joins/{}: on {}'s seam but not between it", j.name, tile.id)),
+                    }
+                } else {
+                    r.between_points += 1;
+                    r.between_height = r.between_height.max(dh);
+                }
+            }
+        }
+    }
+    if r.between_points > 0 {
+        r.note.push(format!(
+            "{} tile samples on seams fall between join lattice points (spacings differ): worst height step {:.4} ft",
+            r.between_points, r.between_height
+        ));
+    }
+
+    // Joins against each other, slopes, blend steps.
+    let mut shared: HashMap<(i64, i64), (usize, f64)> = HashMap::new();
+    let far = 2.0 * joins[0].spacing + 3.0 * fade;
+    let dist = |x: f64, z: f64| -> f64 {
+        rects
+            .iter()
+            .map(|a| ((a[0] - x).max(x - a[2]).max(0.0)).hypot((a[1] - z).max(z - a[3]).max(0.0)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    for (ji, j) in joins.iter().enumerate() {
+        let t = &jt[ji];
+        let [w, d] = j.samples;
+        let mut h = vec![0.0; (w * d) as usize];
+        for z in 0..d {
+            for x in 0..w {
+                h[(x + z * w) as usize] = j.sample(t, x, z).unwrap_or(f64::NAN);
+            }
+        }
+        for z in 0..d {
+            for x in 0..w {
+                if x == 0 || z == 0 || x == w - 1 || z == d - 1 {
+                    let key = (((j.at[0] / j.spacing).round() as i64) + i64::from(x), ((j.at[1] / j.spacing).round() as i64) + i64::from(z));
+                    let v = h[(x + z * w) as usize];
+                    match shared.get(&key) {
+                        Some(&(other, ov)) if (ov - v).abs() > j.quantum.max(joins[other].quantum) + 1e-4 => {
+                            r.fail.push(format!("joins {} and {} differ at lattice {key:?}: {ov:.4} and {v:.4}", joins[other].name, j.name));
+                        }
+                        Some(_) => {}
+                        None => {
+                            shared.insert(key, (ji, v));
+                        }
+                    }
+                }
+                if x + 1 < w && z + 1 < d {
+                    let cx = j.at[0] + (f64::from(x) + 0.5) * j.spacing;
+                    let cz = j.at[1] + (f64::from(z) + 0.5) * j.spacing;
+                    let corners = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)];
+                    if corners.iter().all(|&(a, b)| dist(j.at[0] + f64::from(a) * j.spacing, j.at[1] + f64::from(b) * j.spacing) > far) {
+                        let g = crate::build::cell_slope(corners.map(|(a, b)| h[(a + b * w) as usize]), j.spacing);
+                        if g > r.far_slope {
+                            r.far_slope = g;
+                        }
+                        if g > max_slope + 1e-6 {
+                            r.fail.push(format!("joins/{}: slope {g:.3} at ({cx:.0}, {cz:.0}), past {max_slope}", j.name));
+                        }
+                    }
+                }
+                let nb = j.between.len();
+                let i = (x + z * w) as usize;
+                for (dx, dz) in [(1, 0), (0, 1)] {
+                    if x + dx < w && z + dz < d {
+                        let o = ((x + dx) + (z + dz) * w) as usize;
+                        for b in 0..nb {
+                            let step = j.blend[i * nb + b].abs_diff(j.blend[o * nb + b]);
+                            if step > MAX_BLEND_STEP {
+                                r.fail.push(format!("joins/{}.blend: {} steps by {step} at {x},{z}", j.name, j.between[b]));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // A failure list of thousands helps nobody: keep the first of each kind.
+    if r.fail.len() > 50 {
+        let n = r.fail.len();
+        r.fail.truncate(50);
+        r.fail.push(format!("... {} more", n - 50));
+    }
+    r
+}
+
+fn compare(src: &Path, copy: &Path, name: &str, r: &mut Report) {
+    let (Ok(a), Ok(b)) = (crate::files(src), crate::files(copy)) else {
+        r.fail.push(format!("tiles/{name}: cannot list it or its source"));
+        return;
+    };
+    if a != b {
+        r.fail.push(format!("tiles/{name}: its files are not its source's ({} against {})", b.len(), a.len()));
+        return;
+    }
+    for f in &a {
+        if std::fs::read(src.join(f)).ok() != std::fs::read(copy.join(f)).ok() {
+            r.fail.push(format!("tiles/{name}/{f}: differs from {}", src.join(f).display()));
+        }
+    }
+    r.note.push(format!("tiles/{name}: {} files byte for byte its source's", a.len()));
+}
+
+/// The world's ground every `step` feet as it would be ridden (a tile inside its `keep`, else the first
+/// join covering the point), for a picture: `(columns, rows, heights)`, NaN off the world.
+pub fn heightmap(dir: &Path, step: f64) -> Result<(usize, usize, Vec<f64>), String> {
+    let meta = Json::parse(&std::fs::read_to_string(dir.join("mod.json")).map_err(|e| e.to_string())?)?;
+    let mut tiles = Vec::new();
+    for t in meta.get("tiles").and_then(Json::arr).unwrap_or_default() {
+        let name = t.get("tile").and_then(Json::str).unwrap_or_default();
+        let (at, k) = (nums(t.get("at")), nums(t.get("keep")));
+        tiles.push((Tile::load(&dir.join("tiles").join(name))?, [at[0], at[1]], [k[0] as u32, k[1] as u32, k[2] as u32, k[3] as u32]));
+    }
+    let mut joins = Vec::new();
+    for jn in meta.get("joins").and_then(Json::arr).unwrap_or_default() {
+        let name = jn.get("join").and_then(Json::str).unwrap_or_default().to_owned();
+        let (at, samples) = (nums(jn.get("at")), nums(jn.get("samples")));
+        let bytes = std::fs::read(dir.join("joins").join(&name).join(format!("{name}.ps2.trn"))).map_err(|e| e.to_string())?;
+        let t = Terrain::parse(&bytes)?;
+        let (spacing, scale) = (f64::from(t.scale.0), t.scale);
+        drop(t);
+        joins.push(Join { name, at: [at[0], at[1]], samples: [samples[0] as u32, samples[1] as u32], between: Vec::new(), bytes, blend: Vec::new(), spacing, scale, quantum: 0.0 });
+    }
+    let tt: Vec<Terrain> = tiles.iter().map(|t| t.0.terrain()).collect();
+    let jt: Vec<Terrain> = joins.iter().map(Join::terrain).collect();
+    let (mut wx, mut wz) = (0.0f64, 0.0f64);
+    for j in &joins {
+        let r = j.rect();
+        wx = wx.max(r[2]);
+        wz = wz.max(r[3]);
+    }
+    let (cols, rows) = ((wx / step) as usize + 1, (wz / step) as usize + 1);
+    let mut out = vec![f64::NAN; cols * rows];
+    for r in 0..rows {
+        for c in 0..cols {
+            let (x, z) = (c as f64 * step, r as f64 * step);
+            let tile = tiles.iter().enumerate().find_map(|(i, (t, at, k))| {
+                let (fx, fz) = ((x - at[0]) / t.spacing, (z - at[1]) / t.spacing);
+                (fx >= f64::from(k[0]) && fx < f64::from(k[2]) && fz >= f64::from(k[1]) && fz < f64::from(k[3]))
+                    .then(|| t.ground_in(&tt[i], *k, fx, fz).map(|g| g.0))
+                    .flatten()
+            });
+            out[c + r * cols] = match tile {
+                Some(h) => h,
+                None => joins
+                    .iter()
+                    .enumerate()
+                    .find(|(_, j)| j.covers(x, z))
+                    .and_then(|(i, j)| {
+                        let (fx, fz) = ((x - j.at[0]) / j.spacing, (z - j.at[1]) / j.spacing);
+                        let (cx, cz) = ((fx.floor() as u32).min(j.samples[0] - 2), (fz.floor() as u32).min(j.samples[1] - 2));
+                        j.in_cell(&jt[i], cx, cz, fx, fz)
+                    })
+                    .unwrap_or(f64::NAN),
+            };
+        }
+    }
+    Ok((cols, rows, out))
+}
