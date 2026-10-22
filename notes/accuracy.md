@@ -156,8 +156,10 @@ it is only in RAM. `extracted/mxvatv/kit.toml` declares it as overlay `game`, an
 
 A pose is `eye, forward, up, fov`. openmx's `--shot-pose x,y,z,yaw,pitch,fov` takes yaw =
 `atan2(forward.x, forward.z)` in degrees (0 along +z, 90 along +x), pitch = `asin(forward.y)` (up
-positive), no roll, and the viewport's fov. Whether 85 spans the width or the height is not
-established. `+0x178` holds 349.74, close to 320/tan(42.5°) = 349.2, which would make it the width. The
+positive), no roll, and the viewport's fov. The fov spans the width (T9): openmx's MD10 takes it as the
+horizontal angle, as its camera presets do (85 at 4:3 is 69 vertically), and the Lago pairs frame alike
+(below). A vertical 85 would make the original's view 33 % wider than openmx's at 4:3, which it is not.
+`+0x178` holds 349.74, close to 320/tan(42.5°) = 349.2, which agrees. The
 standard set (`accuracy poses`) is: the scene's start from behind, the centre looking four ways, an
 overview at 150 ft (higher, the fog hides everything: 400 ft up showed only fog), and the highest ground
 of a 32×32 scan looking across to the centre. `--live NAME` keeps the game's own view instead.
@@ -281,22 +283,41 @@ as the game's; `look::terrain_box` multiplies as the EE does (Nat_OR); `tests/ev
   `shoot`, and `pair` once openmx has MD2 and MD10. Check `pair`'s `--openmx-args` template (`--mod
   {mod} --shot {shot} --shot-pose {pose}`) against what MD2 and MD10 name their flags.
 
-## openmx's half (T9, waiting)
+## openmx's half (T9)
 
-On 2026-10-22 openmx's main (`b63486a`) has neither MD2 nor MD10: both are open in its `plan/TODO.md`,
-no branch or worktree carries them, and its `--help` has `--shot` and `--shot-frame` but no
-`--shot-pose` and no flag for a mod folder. `accuracy pair` on Lago says so in `index.md` and takes
-nothing. Ready for when they land:
+openmx's MD2 rides a mod by `--mods DIR --track <id>` (DIR holds `tracks/<id>/`), and MD10 takes
+`--shot-pose`. `accuracy pair` runs `look::OPENMX_ARGS`: `--mods {mods} --track {id} --headless
+--no-sound --frames 2 --size 640x480 --overlay none --graphics original --shot {shot} --shot-pose {pose}`,
+from `--openmx-dir` (default `openmx`, where its `kit.toml` names the disc). `--frames 2` ends the run
+after the shot (without it a headless ride runs on). `--graphics original` gives the disc's fog
+(141..768 ft) and far clip, where openmx's own `full` sees past 8,000 ft. `--overlay none` drops the HUD,
+which the original's shots carry (radar bottom left, speedometer bottom right): read the pairs past it.
+A shot takes 1.5 s, all eight 12 s.
 
-- The template is `look::OPENMX_ARGS`, the command line `look::openmx_args` (tested: a path with a
-  space stays one word, the `--shot-pose` word reads back as the pose). MD10's flag and its
-  `x,y,z,yaw,pitch,fov` are fixed by openmx's plan. MD2's flag is not named there: `--mod` is a
-  stand-in. When MD2 lands, change `OPENMX_ARGS` to its flag (if it is a track id rather than a
-  folder, `--track {id}` needs a `{id}` placeholder, from mod.json).
-- `pair` checks the binary's `--help` for every flag in the template as a whole word. The old check
-  looked for the string `--mod`, which `--modifiers` (in openmx's argument parser) would have passed.
-- Still to do then: settle the fov's axis (Poses, above) by shooting one pose in openmx with 85 and
-  comparing where the horizon and a landmark fall at the frame's edges, take the eight pairs, and write
-  what differs here. The original's shots carry the HUD; give openmx `--overlay original` or `none`
-  according to what the pairs are for.
-- Untamed (M13): done, *Untamed (M13)* above; its ride camera's fov is 75, not 85.
+### Lago, the eight pairs
+
+`out/accuracy/nat05/` (not in git), the original's shots of T7 (`spawn, start, centre-n/e/s/w, overview,
+ridge`) against openmx built from openmx `3b11fd6`. What differs, by eye:
+
+- **Framing: the same.** Every building, the water tower (centre-w), the fence gate (centre-n), the
+  cactus (spawn) and the skyline sit at the same place and size in both. In centre-w the tower spans about
+  x 172 to 232 of 468 in the original and 170 to 232 in openmx. So the eye, yaw, pitch and the fov's axis
+  agree, and so do the props' placements and the terrain's shape (the hills' outlines match).
+- **The ground's look: not drawn.** openmx draws the terrain as one flat tan, shaded only by its normals.
+  The original's is a dark, textured dirt: ridden lines and trails (overview, centre-s, centre-w), darker
+  grassy mounds (centre-n), and shadows. This is openmx MD4 (the ground from the terrain's own texture
+  pages and the scene's `DetailMapTilingMultiplier`), still open. It is the largest difference in every
+  pair.
+- **Grey slabs that the original does not draw.** Tall untextured upright boxes stand in centre-n (two),
+  centre-s, ridge and start (one each). They are the waypoint-race props: the scene's `[Model<n>]` with
+  `Activity="Lago Waypoint Race"`, `Hide=`, `Invisible=` and `IsTrigger=`, which the port draws
+  regardless (the mod's `todo`, and `notes/openmx-asks.md`, *MX vs. ATV scene keys the port does not
+  read*). Which key hides them in the original was not looked up.
+- **Plants: the same places.** Where both show a plant it stands in the same spot at the same size (the
+  cactus and bushes in spawn, the shrubs in centre-e and ridge, the grass in start). The plants' colour is
+  close. Counts and the far plants' fade were not compared.
+- **Sky and fog: close.** The same cloud layer at the same place in every pair. The fog's colour and
+  distance look alike in overview and ridge.
+- **The rider.** openmx's rider stands at the scene's start, in front of the start pose. The original's
+  was wherever it had been ridden to when T7 took the shots (in the middle distance of spawn). This is
+  not the map's difference.

@@ -426,7 +426,13 @@ fn a_map_imports_as_the_disc_has_it_and_reads_back() {
     } else {
         assert!(!m.todo.iter().any(|t| t.contains("openmx MD1")), "{:#?}", m.todo);
     }
-    todo_has(&m, &["Col/Blade.col", "class 1", "openmx MD5"]);
+    // openmx refuses class 1 until its MD5; after it, the shape is a hierarchy with a word left over.
+    let why = game_sim::track::Collision::parse(&class1_col()).expect_err("Blade.col is refused");
+    if why.contains("class 1") {
+        todo_has(&m, &["Col/Blade.col", "class 1", "openmx MD5"]);
+    } else {
+        todo_has(&m, &["Col/Blade.col", "Collision::parse", &why, "the port skips it"]);
+    }
     todo_has(&m, &["Loose.col", "none of the map's archives", r"loose on the PSR as Col\Loose.col"]);
     todo_has(&m, &["Test.scn: Activity= in 1 [Model<n>] sections", "\"Free Ride\" ×1", "no MX Unleashed scene has this key"]);
     todo_has(&m, &["Test.scn: Hide= in 1 [Model<n>]", "draws every one of these props"]);

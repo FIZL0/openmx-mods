@@ -244,14 +244,11 @@ fn a_generated_res_gives_the_expected_row() {
     } else {
         assert_eq!(t.viewed, None);
     }
+    // Refused as openmx's reader refuses it: "collision class 1 is not understood" before its MD5, a
+    // short hierarchy after.
+    let why = game_sim::track::Collision::parse(&build_col(1)).expect_err("Swing.col is a broken shape");
     let refused: Vec<_> = row.refused().collect();
-    assert_eq!(
-        refused,
-        [(
-            r"Env\test\anim\Swing.col",
-            "collision class 1 is not understood"
-        )]
-    );
+    assert_eq!(refused, [(r"Env\test\anim\Swing.col", why.as_str())]);
     assert_eq!(
         md_row(&row.cells()).matches(" | ").count(),
         survey::COLUMNS.len() - 1

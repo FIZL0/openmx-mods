@@ -127,19 +127,38 @@ pub fn index(dir: &Path, map: &str, game: &str, waiting: Option<&str>) -> Result
     Ok(s)
 }
 
-/// `pair`'s default `--openmx-args`: `{mod}` the mod's folder, `{shot}` the PNG to write, `{pose}` the
-/// pose as [`Pose::md10`] writes it. The flags are the ones openmx's plan names (MD10's `--shot-pose`,
-/// the existing `--shot`); MD2 has not named its flag for a track from a mod folder yet, so `--mod` is a
-/// stand-in until it lands (T9).
-pub const OPENMX_ARGS: &str = "--mod {mod} --shot {shot} --shot-pose {pose}";
+/// `pair`'s default `--openmx-args`: `{mods}` the mods folder (the one holding `tracks/<id>/`), `{id}`
+/// the mod's id (its folder's name, which openmx MD2 requires mod.json's id to be), `{shot}` the PNG to
+/// write, `{pose}` the pose as [`Pose::md10`] writes it. openmx's own flags (T9): MD2's `--mods DIR
+/// --track ID`, MD10's `--shot-pose`. Headless, two frames (the shot is the first), 4:3 like the
+/// original's shots, no HUD (the original's carries one: read the pairs past it), and the original's
+/// fog and far clip (`--graphics original`), not openmx's longer view.
+pub const OPENMX_ARGS: &str = "--mods {mods} --track {id} --headless --no-sound --frames 2 --size 640x480 --overlay none --graphics original --shot {shot} --shot-pose {pose}";
 
-/// openmx's command line for one pose: the template split on whitespace first, then each word's
-/// placeholders filled, so a path with spaces stays one argument.
+/// openmx's command line for one pose of the mod in `folder` (`<mods>/tracks/<id>`): the template split
+/// on whitespace first, then each word's placeholders filled, so a path with spaces stays one argument.
+/// `{mod}` is the folder itself, for a template of the caller's own.
 pub fn openmx_args(template: &str, folder: &Path, shot: &Path, pose: &Pose) -> Vec<String> {
+    let id = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mods = folder.parent().and_then(Path::parent).unwrap_or(Path::new(""));
     template
         .split_whitespace()
-        .map(|w| w.replace("{mod}", &folder.to_string_lossy()).replace("{shot}", &shot.to_string_lossy()).replace("{pose}", &pose.md10()))
+        .map(|w| {
+            w.replace("{mods}", &mods.to_string_lossy())
+                .replace("{mod}", &folder.to_string_lossy())
+                .replace("{id}", &id)
+                .replace("{shot}", &shot.to_string_lossy())
+                .replace("{pose}", &pose.md10())
+        })
         .collect()
+}
+
+/// Whether openmx can find the mod in `folder` by the `--mods` it is given: it looks in `<mods>/tracks/`.
+pub fn in_a_mods_folder(folder: &Path) -> Result<(), String> {
+    match folder.parent().and_then(Path::file_name) {
+        Some(n) if n == "tracks" => Ok(()),
+        _ => Err(format!("{}: openmx takes a mod from <mods>/tracks/<id>/, and this is not in a tracks folder", folder.display())),
+    }
 }
 
 /// Whether `help` names `flag` as a word of its own: `--mod` is not in `--modifiers`.
@@ -152,7 +171,7 @@ pub fn help_has_flag(help: &str, flag: &str) -> bool {
     })
 }
 
-/// What an openmx `--help` lacks of the flags `template` uses (`--shot-pose`, MD10; `--mod`, MD2), or
+/// What an openmx `--help` lacks of the flags `template` uses (`--shot-pose`, MD10; `--mods`, MD2), or
 /// nothing.
 pub fn openmx_missing(help: &str, template: &str) -> Vec<String> {
     template
@@ -162,7 +181,7 @@ pub fn openmx_missing(help: &str, template: &str) -> Vec<String> {
         .filter(|f| !help_has_flag(help, f))
         .map(|f| match f {
             "--shot-pose" => "--shot-pose (openmx MD10)".to_owned(),
-            "--mod" => "--mod, a track from a mod folder (openmx MD2)".to_owned(),
+            "--mods" => "--mods, tracks from a mods folder (openmx MD2)".to_owned(),
             f => f.to_owned(),
         })
         .collect()
