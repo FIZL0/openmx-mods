@@ -153,6 +153,14 @@ pub fn check(dir: &Path, discs: &mut Discs) -> Report {
     r
 }
 
+/// Check one track mod folder as a world's tile would be (§3): an `mxu_` id is allowed (§1), so an
+/// MX Unleashed import can be read back before it is a world's.
+pub fn check_tile(dir: &Path, discs: &mut Discs) -> Report {
+    let mut r = Report { dir: dir.to_path_buf(), ..Report::default() };
+    check_into(dir, discs, true, &mut r);
+    r
+}
+
 fn check_into(dir: &Path, discs: &mut Discs, as_tile: bool, r: &mut Report) {
     let Some(meta) = mod_json(dir, as_tile, r) else { return };
     r.id = Some(meta.id.clone());

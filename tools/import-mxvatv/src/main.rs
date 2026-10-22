@@ -2,8 +2,8 @@
 //! for usage.
 
 use discx::Disc;
-use import_mxvatv::{BOOT, Map, import, load_map, map_folders, untamed};
-use modcheck::{Discs, check};
+use import_mxvatv::{BOOT, Map, import, load_map, map_folders, mxu, untamed};
+use modcheck::{Discs, check, check_tile};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -15,7 +15,9 @@ MX vs. ATV Unleashed (SLUS_211.04): writes STAGE/mxvatv_<map>/ for every map on 
 (Env\\<MAP>\\<map>.res, with its _mat and _mst archives). MX vs. ATV Untamed (SLUS_217.01): writes
 STAGE/untamed_<map>/ for every map (res\\env\\<MAP>\\<MAP>.res, _mat, _mst) that Env\\Master.atyList
 gives a Free Ride or a national, its binary scene decoded beside it. --map takes any map archive's
-folder instead. Each mod holds the archives' members at their own paths, the loose PSR members the
+folder instead. MX Unleashed (SLUS_207.67, C4): writes STAGE/mxu_<track>/ for every freeride and
+national (Tracks\\<track>.res and <track>_2.res; not sx*, not the _ss split-screen copies), which are
+only ever a world's tiles (§1: modcheck reads them back as one); --map takes any other track. Each mod holds the archives' members at their own paths, the loose PSR members the
 game opens for the map, and a mod.json. Each mod is then read back with modcheck against the same
 disc (the image's folder is searched for it by boot ELF); --no-check skips that. A map that fails is
 removed from STAGE and named; the exit is 1 if any did. Any other disc is skipped with a line.";
@@ -57,12 +59,14 @@ fn main() -> ExitCode {
         .and_then(|(_, b)| b)
         .unwrap_or_default();
     let is_untamed = boot.eq_ignore_ascii_case(untamed::BOOT);
-    if !boot.eq_ignore_ascii_case(BOOT) && !is_untamed {
+    let is_mxu = boot.eq_ignore_ascii_case(mxu::BOOT);
+    if !boot.eq_ignore_ascii_case(BOOT) && !is_untamed && !is_mxu {
         println!(
-            "import-mxvatv: {} is {}, not {BOOT} or {}; nothing imported",
+            "import-mxvatv: {} is {}, not {BOOT}, {} or {}; nothing imported",
             disc_path.display(),
             if boot.is_empty() { "no disc this repo knows" } else { &boot },
-            untamed::BOOT
+            untamed::BOOT,
+            mxu::BOOT
         );
         return ExitCode::SUCCESS;
     }
@@ -89,6 +93,7 @@ fn main() -> ExitCode {
         None
     };
     let mut folders = match &master {
+        None if is_mxu => mxu::map_folders(&disc),
         None => map_folders(&disc),
         Some(_) => untamed::map_folders(&disc),
     };
@@ -100,6 +105,9 @@ fn main() -> ExitCode {
                 Err(why) => println!("skip {f}: {why}"),
             }
         }
+    }
+    if let (true, Some(only)) = (is_mxu, &only) {
+        folders = mxu::tracks(&disc).into_iter().filter(|t| only.contains(&t.to_ascii_lowercase())).collect();
     }
     if let Some(only) = &only {
         for m in only {
@@ -114,6 +122,7 @@ fn main() -> ExitCode {
     let (mut ok, mut failed) = (0, 0);
     for folder in &folders {
         let loaded: Result<Map, String> = match &master {
+            None if is_mxu => mxu::load_map(&mut disc, folder),
             None => load_map(&mut disc, folder),
             Some(m) => untamed::load_map(&mut disc, folder, m),
         };
@@ -125,7 +134,7 @@ fn main() -> ExitCode {
             }
             Ok(m) => {
                 if prove {
-                    let r = check(&m.dir, &mut discs);
+                    let r = if is_mxu { check_tile(&m.dir, &mut discs) } else { check(&m.dir, &mut discs) };
                     if !r.ok() {
                         println!("FAIL {} ({folder}): the read-back failed; removed", m.id);
                         for f in &r.fail {

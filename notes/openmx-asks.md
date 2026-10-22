@@ -210,3 +210,19 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   the mod folder as a suffix-lookup source and the stem of the mod's one `.scn` (MD2). The mods have no
   `<stem>_shadow_NN.pst`, so the port lights the ground itself everywhere. Whether the original game
   draws a one-pass psm with a 1 MB texture was not checked.
+- **New: `COL=` names with a space, on MX Unleashed's own disc** (C4, `notes/mxu.md`). `track::Scene::parse`
+  keeps a `COL=` value as written, and `world::Props::load` reads exactly that, so `Tracks\nat20.res`'s
+  `COL=Nat20_FinishArch01 A.col` (and 28 more on nat20, and free09's `COL=Large Egg.col`) finds nothing.
+  The port skips those shapes on the disc's own tracks today. The archive has `col\nat20_finisharch01a.col`
+  and `col\largeegg.col`, the names with the space dropped, which is how the original's text reader reads
+  values (`scene::slt_name` already does it for `SLT=`). Fix: squeeze whitespace out of `COL=` as
+  `slt_name` does. Of the 95 `COL=` names the 27 MXU freerides and nationals place and their archives lack,
+  this finds 30. The other 65 are in no archive under any spelling (nat07 17, nat08 16, nat03 11, …).
+  Whether the original finds them some other way was not looked up.
+- **P71 could load `world_mxu_free` instead of splicing** (C4, `notes/mxu.md` *P71 against this world*).
+  stitch's world of MXU's five freerides puts each map exactly where edge-to-edge puts it (origins 6912 ft
+  apart). The only generated ground is where the two 150 ft shootoff bands were, and it is flat at the
+  189.9 ft plain every freeride's edge has. Each tile is the disc's map. With MD8 (worlds) and MD2 (mods
+  folder), P71 would be loading this mod. What differs from P71's text: one global sky instead of each
+  map's own (the standard's world has one sky; MD9 has a Per map setting), and each tile keeps its own
+  scene instead of merged objects and emitters.
