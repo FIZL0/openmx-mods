@@ -77,6 +77,10 @@ pub struct Camera {
     pub update: u32,
     /// A function that only returns (`jr ra; move v0, a0`).
     pub stub: u32,
+    /// More words to hold, in the order they are written: (address, what the game has there, what it
+    /// holds instead); put back in the reverse order. Untamed (M13) stops its viewport's setter and
+    /// look-at in the code itself.
+    pub also: &'static [(u32, u32, u32)],
 }
 
 /// How the cell reader hands back a corner's normal.
@@ -114,7 +118,7 @@ pub const MXVATV: Source = Source {
     viewport: Some(Viewport { eye: 0x140, forward: 0x150, up: 0x160, fov: 0x170, aspect: 0x17c, eye_copy: 0x1c0 }),
     // The follow camera's vtable is 0x3cc6f0 (its preset loader, boot 0x1c5e00, sits at +0x12c); the
     // update is game 0x48b490, at +0x40.
-    camera: Some(Camera { update_slot: 0x003cc730, update: 0x0048b490, stub: 0x001288a0 }),
+    camera: Some(Camera { update_slot: 0x003cc730, update: 0x0048b490, stub: 0x001288a0, also: &[] }),
     normals: Normals::Over127 { packed: 0x00541518 },
 };
 
@@ -141,7 +145,38 @@ pub const MXU: Source = Source {
     normals: Normals::Raw,
 };
 
-pub const ALL: [Source; 2] = [MXVATV, MXU];
+/// MX vs. ATV Untamed (SLUS_217.01 1.01, M13). The queries are in its `GAME_REL.BIN`, loaded at
+/// `0x48ea80` (header and all, where `UI_REL.BIN` sits in the menus). They, the cell reader (`0x4a8ea0`)
+/// and the terrain object are MX vs. ATV Unleashed's, field for field; only the addresses moved. The ten-cell
+/// cache is at `0x544120` (count `0x53d2e0`), the packed normal table at `0x3bd6f0`.
+pub const UNTAMED: Source = Source {
+    name: "untamed",
+    game: "MX vs. ATV Untamed",
+    boot: "SLUS_217.01",
+    query: 0x004b0e30,
+    ride_query: Some(0x004b0910),
+    object: MXVATV.object,
+    // The viewport object starts 0x20 before these offsets (its vtable `0x3d6b50` at +4).
+    viewport: MXVATV.viewport,
+    // The viewport's setter (boot `0x111700`, `(vp, &eye, &forward, &up, -, &fov)`, Unleashed's
+    // `0x111c30`) and its look-at (`0x1117d0`, which makes forward from a target each frame) are the
+    // only writers of the ride's eye and forward: each first word becomes `jr ra` while held, one word
+    // each, so the game never runs a half-written function. The delay slots left are harmless: the
+    // setter's `move $10, $8`, the look-at's `addiu $3, $4, 0x160` (`$v1` only; its `addiu sp` is the
+    // word replaced). A first try that also made the look-at's second word a `nop` let the game run it
+    // between the two writes (PCSX2's log: a TLB miss at `0x1117d0`), and PCSX2's recompiler failed
+    // a few maps later. No slot of a vtable does it: the follow camera's `0x3ef174` (`0x4b6670`) also
+    // builds the view matrices, and the viewport's own slots are not on the ride camera's path.
+    camera: Some(Camera {
+        update_slot: 0x00111700,
+        update: 0x10a00004,
+        stub: 0x03e00008,
+        also: &[(0x001117d0, 0x27bdffd0, 0x03e00008)],
+    }),
+    normals: Normals::Over127 { packed: 0x005440e8 },
+};
+
+pub const ALL: [Source; 3] = [MXVATV, MXU, UNTAMED];
 
 /// A source by its CLI name or its boot ELF.
 pub fn find(name: &str) -> Option<Source> {
@@ -158,6 +193,8 @@ pub fn kit_toml(src: &Source, iso: &std::path::Path, dir: &std::path::Path) -> S
         // The gameplay code, an "MWo3" module whose header (+8) says where it goes: into the boot
         // ELF's BSS at 0x45c580, header and all. The terrain queries and the ride camera are in it.
         "mxvatv" => "[[overlay]]\nname = \"game\"\nfile = \"GAME_REL.BIN\"\nload = \"0x45c580\"\n\n",
+        // Untamed's, the same kind of module, at 0x48ea80 (M13).
+        "untamed" => "[[overlay]]\nname = \"game\"\nfile = \"GAME_REL.BIN\"\nload = \"0x48ea80\"\n\n",
         _ => "",
     };
     format!(

@@ -10,7 +10,7 @@ use std::process::{Command, ExitCode};
 
 const USAGE: &str = "accuracy: a track mod against its source game running in PCSX2 (T7, notes/accuracy.md)
 
-  accuracy setup --game mxvatv [--iso DIR]
+  accuracy setup --game mxvatv|untamed [--iso DIR]
       Writes extracted/<game>/kit.toml, the kit's config for the source game, with the disc found in
       DIR (default $DISCX_ISO, else iso/) by its boot ELF.
 
@@ -53,7 +53,8 @@ const USAGE: &str = "accuracy: a track mod against its source game running in PC
       \"--mod {mod} --shot {shot} --shot-pose {pose}\"), then DIR/POSE.pair.png side by side and
       DIR/index.md. Without MD2/MD10 in openmx the original's shots are indexed alone.
 
-The source game comes from mod.json's source.boot (SLUS_211.04: MX vs. ATV Unleashed). KIT defaults to
+The source game comes from mod.json's source.boot (SLUS_211.04: MX vs. ATV Unleashed; SLUS_217.01: MX vs.
+ATV Untamed). KIT defaults to
 ../ps2-decomp-kit/kit; $KIT_CONFIG to extracted/<game>/kit.toml.";
 
 struct Args(Vec<String>);
@@ -228,8 +229,14 @@ fn capture(k: &Path, slot: &str, out: &Path) -> Result<String, String> {
         .ok_or("`kit pcsx2 status` names no config folder: is the copy running?")?;
     let states = config.join("savestates");
     let suffix = format!(".{slot:0>2}.p2s");
+    // The newest of the slot's files: a copy that has run two games has one per game's serial (M13).
     let file = || {
-        std::fs::read_dir(&states).ok()?.flatten().map(|e| e.path()).find(|p| p.to_string_lossy().ends_with(&suffix))
+        std::fs::read_dir(&states)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().ends_with(&suffix))
+            .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
     };
     let stamp = |p: &Option<PathBuf>| p.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| (m.modified().ok(), m.len()));
     let before = stamp(&file());
@@ -304,7 +311,18 @@ fn pine_write(k: &Path, src: &source::Source, at: u32, value: String, kind: &str
 fn hold_camera(k: &Path, src: &source::Source, hold: bool) -> Result<(), String> {
     let cam = src.camera.ok_or_else(|| format!("{}: no way to hold the camera is known", src.game))?;
     let to = if hold { cam.stub } else { cam.update };
-    pine_write(k, src, cam.update_slot, format!("{to:#x}"), "u32")
+    if hold {
+        for &(at, _, held) in cam.also {
+            pine_write(k, src, at, format!("{held:#x}"), "u32")?;
+        }
+    }
+    pine_write(k, src, cam.update_slot, format!("{to:#x}"), "u32")?;
+    if !hold {
+        for &(at, game, _) in cam.also.iter().rev() {
+            pine_write(k, src, at, format!("{game:#x}"), "u32")?;
+        }
+    }
+    Ok(())
 }
 
 /// Write a pose into the viewport: forward and up, then the eye, then the fov.
@@ -324,11 +342,14 @@ fn cmd_poses(a: &mut Args) -> Result<bool, String> {
     let extra = a.all("--add");
     let n: usize = a.take("--landmarks").map_or(Ok(3), |s| s.parse().map_err(|e| format!("--landmarks: {e}")))?;
     a.done()?;
-    for (name, p) in look::standard_poses(&m) {
+    let fov = look::ride_fov(&m.boot);
+    for (name, mut p) in look::standard_poses(&m) {
+        p.fov = fov;
         look::write_pose(&out, &name, &p)?;
     }
     let marks = accuracy::landmarks::of_mod(&m, n)?;
-    for (name, p) in accuracy::landmarks::poses(&m, &marks) {
+    for (name, mut p) in accuracy::landmarks::poses(&m, &marks) {
+        p.fov = fov;
         look::write_pose(&out, &name, &p)?;
     }
     for e in extra {
@@ -519,9 +540,8 @@ fn cmd_scene(a: &mut Args) -> Result<bool, String> {
     let out = out_dir(a, &m);
     a.done()?;
     let src = source_of(&m)?;
-    if src.boot != source::MXVATV.boot {
-        return Err(format!("{}: the scene's readers are known on MX vs. ATV Unleashed only", src.game));
-    }
+    let readers = accuracy::sceneram::readers(src.boot)
+        .ok_or_else(|| format!("{}: the scene's readers are known on MX vs. ATV Unleashed and Untamed only", src.game))?;
     let ram = heights::load_ram(Path::new(&image))?;
     // The image must be of this map: its terrain object holds the mod's tree.
     terrain_in(&ram, &m, &src)?;
@@ -529,7 +549,7 @@ fn cmd_scene(a: &mut Args) -> Result<bool, String> {
     let json = modcheck::json::Json::parse(&json)?;
     let scn = json.get("lookups").and_then(|l| l.get("scene")).and_then(|s| s.str()).ok_or("mod.json names no scene")?;
     let text = std::fs::read(m.folder.join(scn)).map_err(|e| format!("{scn}: {e}"))?;
-    let fields = accuracy::sceneram::compare(&ram, &String::from_utf8_lossy(&text))?;
+    let fields = accuracy::sceneram::compare_with(&ram, &String::from_utf8_lossy(&text), &readers)?;
     let report = accuracy::sceneram::text(&m.id, &fields);
     print!("{report}");
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -571,7 +591,7 @@ fn cmd_files(a: &mut Args) -> Result<bool, String> {
     );
     if !whole {
         s.push_str(&format!(
-            "  the pool's head was overwritten (it no longer holds env\\{0}\\{0}.scn): the names from the scene's to {1} are lost\n",
+            "  the pool's head was overwritten (it no longer holds env\\{0}\\{0}.scn, or .scn.bpb): the names from the scene's to {1} are lost\n",
             m.map.to_ascii_lowercase(),
             names.first().map_or("", String::as_str)
         ));
