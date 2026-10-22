@@ -37,6 +37,7 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 A map is done when it matches the game it came from, not when it loads. Terrain, collision, placements and
 scene values are copied as the disc has them, never resampled or approximated; what the port cannot show yet
 goes in mod.json's `todo` and notes/openmx-asks.md.
+- [ ] **M12** MX vs. ATV Unleashed accuracy pass: every imported map (M2) through T7 — heights exact at ≥1,000 points, and screenshot pairs from at least five poses each (spawn, the map's landmarks, a ridge looking across). Fix every difference in the importer (a prop missing, a texture wrong, fog, sky, lights, ecosystem density); what only the port can fix goes to notes/openmx-asks.md and the map's mod.json todo. A table per map in notes/mxvatv.md: matches / differs / why (after M2, T7) → tools/import-mxvatv/ · notes/mxvatv.md · notes/openmx-asks.md | t: tools/accuracy over every imported map | j: mxvatv-accuracy
 
 ### Music
 
