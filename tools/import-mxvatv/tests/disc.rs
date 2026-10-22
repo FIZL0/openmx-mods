@@ -546,7 +546,8 @@ fn the_binary_imports_a_disc_and_skips_another_game() {
     let o = Command::new(bin).arg("--disc").arg(&d.image).arg("--out").arg(&out).args(["--map", "nat99"]).output().unwrap();
     assert!(!o.status.success());
 
-    let u = disc_with("untamed", "SLUS_217.01", track(), mat(), ATYLIST);
+    // Another game's disc (Untamed's is imported now, M4: tests/untamed.rs).
+    let u = disc_with("other", "SLUS_999.99", track(), mat(), ATYLIST);
     let uout = u.root.join("stage");
     let o = Command::new(bin).arg("--disc").arg(&u.image).arg("--out").arg(&uout).output().unwrap();
     assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).contains("nothing imported"));

@@ -16,8 +16,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### MX vs. ATV Untamed
 
-- [ ] **M4** Untamed importer: M2's importer with M10's decoder in front, for Untamed's freeride and national maps; Untamed's `.col` (1,604) through openmx's reader first (after M2, M10) → tools/import-mxvatv/ | t: `--ignored` every chosen Untamed map imports and reads back | j: import-untamed
-
 ### Real elevation
 
 - [ ] **M1** USGS 3DEP / SRTM → a height grid → T2's writer. Glamis dunes first (~1 m lidar), then Ocotillo Wells, Little Sahara (UT), Hatfield-McCoy; ground texture from the matching NAIP image. Public domain, so these mods may ship whole in `out/` releases (not in git). Fit to the limits T3 found (after T2, T1) → tools/elevation/ | t: tools/elevation tests on a generated GeoTIFF | j: elevation

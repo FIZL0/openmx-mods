@@ -573,6 +573,12 @@ fn copies(dir: &Path, files: &[String], meta: &Meta, discs: &mut Discs, r: &mut 
                     match disc.res(&e) {
                         Err(err) => r.fail.push(format!("{}: {err}", e.name)),
                         Ok(res) => {
+                            if res.padding > 0 {
+                                r.note.push(format!(
+                                    "{}: Res::parse refuses it for the {} zero bytes padding its directory; read through a view without them",
+                                    e.name, res.padding
+                                ));
+                            }
                             for inner in res.entries().to_vec() {
                                 match res.read(&inner) {
                                     Ok(want) => compare(inner.path(), &want, &format!("{}:{}", e.name, inner.name), r),

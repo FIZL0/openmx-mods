@@ -1,4 +1,5 @@
-//! MX vs. ATV Unleashed's maps as track mods (standard/OPENMX-TRACK-STANDARD.md §2).
+//! MX vs. ATV Unleashed's maps as track mods (standard/OPENMX-TRACK-STANDARD.md §2). Untamed's go
+//! through the same import, with its binary INI decoded in front ([`untamed`]).
 //!
 //! ```text
 //! MXVSATV.PSR ── Env\Nat03\nat03.res ─────┐
@@ -28,6 +29,7 @@
 //! readers find is a `todo` entry naming the file and the reason.
 
 pub mod mxu_keys;
+pub mod untamed;
 
 use discx::{Disc, ResFile, normalise};
 use game_render::{eco, ini, psg, pst, scene as rscene, skin, sky, toy, world};
@@ -42,8 +44,24 @@ pub const AUTHOR: &str = "openmx-mods tools/import-mxvatv 0.1";
 /// The mods' own version (§1): bump it when what the importer writes changes.
 pub const VERSION: &str = "1.0.0";
 
+/// The game a map comes from: what `mod.json`'s `source` and `id` say (§1), and where its map
+/// archives sit on the PSR.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub game: &'static str,
+    pub boot: &'static str,
+    /// The id prefix (§1's table).
+    pub prefix: &'static str,
+    /// The PSR folder that holds `<MAP>\<MAP>.res`: `Env` on MX vs. ATV Unleashed, `res\env` on Untamed.
+    pub archives: &'static str,
+}
+
+pub const MXVATV: Origin = Origin { game: GAME, boot: BOOT, prefix: "mxvatv_", archives: "Env" };
+
 /// One map as the disc has it.
 pub struct Map {
+    /// The game it is from.
+    pub origin: &'static Origin,
     /// The map's folder as the PSR spells it: `Nat03`.
     pub folder: String,
     /// Its archives, the track archive first, then `_mat` and `_mst`: (PSR member, archive).
@@ -60,6 +78,9 @@ pub struct Map {
     /// [`pull_loose`]); copied into the mod beside the archives' members and listed in
     /// `source.members`.
     pub pulled: Vec<Pulled>,
+    /// The Free Ride as read for the map elsewhere than `atylist` (Untamed's `Env\Master.atyList.bpb`,
+    /// [`untamed::free_ride`]); `atylist` is then `None`.
+    pub ride: Option<FreeRide>,
 }
 
 /// A loose PSR member the game opens for a map: the member as the PSR spells it, its bytes, and the
@@ -85,12 +106,20 @@ pub fn map_folders(disc: &Disc) -> Vec<String> {
 
 /// Read one map's archives and `.atyList` off the disc.
 pub fn load_map(disc: &mut Disc, folder: &str) -> Result<Map, String> {
+    let mut map = load(disc, folder, &MXVATV)?;
+    map.pulled = pull_loose(disc, &map.archives)?;
+    Ok(map)
+}
+
+/// A map's archives (`<archives>\<MAP>\<MAP>.res`, `_mat`, `_mst`), the PSR members under
+/// `Env\<MAP>\` and its `.atyList` there, if any. Nothing is pulled yet.
+pub fn load(disc: &mut Disc, folder: &str, origin: &'static Origin) -> Result<Map, String> {
     let under: Vec<_> = disc.matching(&format!(r"Env\{folder}\**")).into_iter().cloned().collect();
     let mut archives = Vec::new();
     for suffix in ["", "_mat", "_mst"] {
-        let want = format!(r"Env\{folder}\{folder}{suffix}.res");
-        if let Some(e) = under.iter().find(|e| normalise(&e.name) == normalise(&want)) {
-            archives.push((e.name.clone(), disc.res(e)?));
+        let want = format!(r"{}\{folder}\{folder}{suffix}.res", origin.archives);
+        if let Some(e) = disc.find(&want).cloned() {
+            archives.push((e.name.clone(), disc.res(&e)?));
         } else if suffix.is_empty() {
             return Err(format!("{want}: not on the disc"));
         }
@@ -115,8 +144,7 @@ pub fn load_map(disc: &mut Disc, folder: &str) -> Result<Map, String> {
             elsewhere.entry(base(&e.name).to_ascii_lowercase()).or_default().push(e.name.clone());
         }
     }
-    let pulled = pull_loose(disc, &archives)?;
-    Ok(Map { folder: folder.to_string(), archives, atylist, loose, elsewhere, pulled })
+    Ok(Map { origin, folder: folder.to_string(), archives, atylist, loose, elsewhere, pulled: Vec::new(), ride: None })
 }
 
 impl Map {
@@ -135,7 +163,7 @@ impl Map {
 }
 
 /// The texture names a `.psm` gives that are no file (SLUS_211.04 `0x00167720`).
-const NOT_FILES: [&str; 4] = ["RenderTarget", "RenderTarget2", "FrameBuffer", "DisplayBuffer"];
+pub(crate) const NOT_FILES: [&str; 4] = ["RenderTarget", "RenderTarget2", "FrameBuffer", "DisplayBuffer"];
 
 /// The loose PSR members the game opens for a map (M15; notes/mxvatv.md, *Loose PSR members*).
 ///
@@ -240,7 +268,7 @@ pub fn pull_loose(disc: &mut Disc, archives: &[(String, ResFile)]) -> Result<Vec
 
 /// A name with its extension swapped, as the game does it: from the last dot, or added when there
 /// is none.
-fn with_ext(name: &str, ext: &str) -> String {
+pub(crate) fn with_ext(name: &str, ext: &str) -> String {
     match name.rfind('.') {
         Some(d) => format!("{}{ext}", &name[..d]),
         None => format!("{name}{ext}"),
@@ -248,25 +276,41 @@ fn with_ext(name: &str, ext: &str) -> String {
 }
 
 /// Opens a path the way the game's resource manager does: the map's archives, then the PSR.
-struct Opener<'a> {
+pub(crate) struct Opener<'a> {
     disc: &'a mut Disc,
     archives: &'a [(String, ResFile)],
     /// Every archive member by its normalised path: (archive, entry).
-    held: BTreeMap<String, (usize, usize)>,
+    pub(crate) held: BTreeMap<String, (usize, usize)>,
     /// Every PSR member that is not a `.res`, by its normalised path.
     psr: BTreeMap<String, usize>,
-    pulled: Vec<Pulled>,
+    pub(crate) pulled: Vec<Pulled>,
 }
 
-impl Opener<'_> {
-    fn held_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
+impl<'a> Opener<'a> {
+    pub(crate) fn new(disc: &'a mut Disc, archives: &'a [(String, ResFile)]) -> Opener<'a> {
+        let mut held: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+        for (a, (_, r)) in archives.iter().enumerate() {
+            for (i, e) in r.entries().iter().enumerate() {
+                held.entry(normalise(&e.name)).or_insert((a, i));
+            }
+        }
+        let mut psr: BTreeMap<String, usize> = BTreeMap::new();
+        for (i, e) in disc.entries().iter().enumerate() {
+            if !e.name.to_ascii_lowercase().ends_with(".res") {
+                psr.entry(normalise(&e.name)).or_insert(i);
+            }
+        }
+        Opener { disc, archives, held, psr, pulled: Vec::new() }
+    }
+
+    pub(crate) fn held_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
         let (a, i) = self.held[key];
         let (member, r) = &self.archives[a];
         let e = &r.entries()[i];
         r.read(e).map_err(|err| format!("{member}:{}: {err}", e.name))
     }
 
-    fn open(&mut self, path: &str, why: &str) -> Result<Option<Vec<u8>>, String> {
+    pub(crate) fn open(&mut self, path: &str, why: &str) -> Result<Option<Vec<u8>>, String> {
         let key = normalise(path);
         if self.held.contains_key(&key) {
             return self.held_bytes(&key).map(Some);
@@ -308,7 +352,12 @@ pub struct Imported {
 
 /// The mod's id: `mxvatv_` and the map's folder, lowercased (§1).
 pub fn id_for(folder: &str) -> Result<String, String> {
-    let id = format!("mxvatv_{}", folder.to_ascii_lowercase());
+    id_with(MXVATV.prefix, folder)
+}
+
+/// The mod's id: the game's prefix and the map's folder, lowercased (§1).
+pub fn id_with(prefix: &str, folder: &str) -> Result<String, String> {
+    let id = format!("{prefix}{}", folder.to_ascii_lowercase());
     if id.len() > 40 || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
         return Err(format!("{folder}: {id:?} is not an id of 1-40 of [a-z0-9_]"));
     }
@@ -318,7 +367,7 @@ pub fn id_for(folder: &str) -> Result<String, String> {
 /// Import one map into `out/<id>/`, replacing what is there. The folder is written whole or not at
 /// all: an error removes it.
 pub fn import(map: &Map, out: &Path) -> Result<Imported, String> {
-    let id = id_for(&map.folder)?;
+    let id = id_with(map.origin.prefix, &map.folder)?;
     let dir = out.join(&id);
     let r = import_into(map, &id, &dir);
     if r.is_err() {
@@ -328,7 +377,18 @@ pub fn import(map: &Map, out: &Path) -> Result<Imported, String> {
 }
 
 fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
-    let files = unpack(map)?;
+    let mut files = unpack(map)?;
+    let mut todo = Todo::default();
+    todo.extend(decode_scenes(&mut files)?);
+    for (member, r) in &map.archives {
+        if r.padding > 0 {
+            todo.push(format!(
+                "{member}: Res::parse refuses it as the disc has it: {} zero bytes pad its directory, which the header's length counts; \
+                 its members were read through a view without them (discx ResFile::unpadded), so the port needs openmx's reader to accept the padding to open it",
+                r.padding
+            ));
+        }
+    }
     if dir.exists() {
         std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -338,7 +398,6 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
         std::fs::write(&p, &f.bytes).map_err(|e| format!("{}: {e}", p.display()))?;
     }
 
-    let mut todo = Todo::default();
     let look = Look { files: &files };
 
     // The scene: the folder's only `.scn` (§2).
@@ -434,10 +493,14 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     // The Free Ride: its name and start from the `.atyList` (M8, §2b).
     let mut name = String::new();
     let mut spawn = None;
-    match &map.atylist {
+    let ride = match (&map.ride, &map.atylist) {
+        (Some(fr), _) => Some(fr.clone()),
+        (None, Some((member, bytes))) => Some(free_ride(member, bytes)?),
+        (None, None) => None,
+    };
+    match ride {
         None => todo.push(format!(r"Env\{}: no .atyList, so no Free Ride name or start; the name is the folder's", map.folder)),
-        Some((member, bytes)) => {
-            let fr = free_ride(member, bytes)?;
+        Some(fr) => {
             name = fr.name;
             spawn = fr.spawn;
             todo.extend(fr.todo);
@@ -486,7 +549,7 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     let mut members: Vec<String> = map.archives.iter().map(|(m, _)| m.clone()).collect();
     members.extend(map.pulled.iter().map(|p| p.member.clone()));
     let loose: Vec<(&str, &str)> = map.pulled.iter().map(|p| (p.member.as_str(), p.why.as_str())).collect();
-    let json = mod_json(id, &name, &map.folder, &members, spawn.as_ref(), &lookups, &loose, &todo.0);
+    let json = mod_json(map.origin, id, &name, &map.folder, &members, spawn.as_ref(), &lookups, &loose, &todo.0);
     std::fs::write(dir.join("mod.json"), json).map_err(|e| format!("{}: {e}", dir.display()))?;
     let pulled = map.pulled.iter().map(|p| p.member.clone()).collect();
     Ok(Imported { id: id.to_string(), dir: dir.to_path_buf(), name, files: files.len(), todo: todo.0, spawn, pulled })
@@ -536,6 +599,35 @@ fn unpack(map: &Map) -> Result<Vec<File>, String> {
         files.push(File { path, bytes: p.bytes.clone(), from: p.member.clone() });
     }
     Ok(files)
+}
+
+/// A binary scene (`<MAP>.scn.bpb`, MX vs. ATV Untamed's) decoded by `tools/bpb` to the INI text the
+/// port reads, written beside it as `<MAP>.scn` (§2a); the `.bpb` stays as the disc has it. Each
+/// decode is a todo entry naming both files.
+fn decode_scenes(files: &mut Vec<File>) -> Result<Vec<String>, String> {
+    let mut todo = Vec::new();
+    let mut add = Vec::new();
+    for f in files.iter() {
+        let Some(path) = f.path.strip_suffix(".bpb").filter(|p| p.to_ascii_lowercase().ends_with(".scn")) else {
+            continue;
+        };
+        let b = bpb::parse(&f.bytes).map_err(|e| format!("{}: bpb: {e}", f.from))?;
+        let bad = b.bad_hashes();
+        if !bad.is_empty() {
+            return Err(format!("{}: {} names whose hash does not recompute: {}", f.from, bad.len(), bad.join(", ")));
+        }
+        if files.iter().any(|g| g.path.eq_ignore_ascii_case(path)) {
+            return Err(format!("{path}: the archives hold it and {} too; the import does not choose one", f.path));
+        }
+        todo.push(format!(
+            "{path}: not a disc member: {} (the disc's binary scene, kept) decoded to INI text by tools/bpb (§2a), \
+             every name's hash recomputed; the port reads only text scenes",
+            f.path
+        ));
+        add.push(File { path: path.to_string(), bytes: b.to_ini(), from: format!("{} decoded by tools/bpb", f.from) });
+    }
+    files.extend(add);
+    Ok(todo)
 }
 
 /// The todo list, without repeats, in the order found.
@@ -590,12 +682,18 @@ impl<'a> Look<'a> {
     }
 }
 
-fn base(path: &str) -> &str {
+pub(crate) fn base(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 fn ext_of(path: &str) -> String {
     let b = base(path);
+    // A BPB (Untamed's binary INI) is its kind and `.bpb`: `.psm.bpb`.
+    if let Some(stem) = b.strip_suffix(".bpb").or_else(|| b.strip_suffix(".BPB"))
+        && let Some(d) = stem.rfind('.')
+    {
+        return b[d..].to_ascii_lowercase();
+    }
     match b.rfind('.') {
         Some(d) => b[d..].to_ascii_lowercase(),
         None => "(no extension)".into(),
@@ -795,9 +893,21 @@ fn render(map: &Map, look: &Look, scn: &str, text: &str, scene: &Scene, terrain:
         *models.entry(p.model.clone()).or_default() += 1;
     }
 
-    // The toys, as `toy::Traffic::load` takes them.
+    // The toys, as `toy::Traffic::load` takes them; Untamed's are BPB, decoded here to be read.
     let stem = &scn[..scn.len() - 4];
-    if let Some(f) = look.one(&format!("{stem}.toy")).ok().flatten() {
+    let toys = match look.one(&format!("{stem}.toy")).ok().flatten() {
+        Some(f) => Some((f.path.clone(), f.bytes.clone())),
+        None => look.one(&format!("{stem}.toy.bpb")).ok().flatten().and_then(|f| {
+            let b = bpb::parse(&f.bytes).ok()?;
+            todo.push(format!(
+                "{}: the toys are BPB, and the port looks for {stem}.toy text, so it runs none; read here through tools/bpb's decode",
+                f.path
+            ));
+            Some((f.path.clone(), b.to_ini()))
+        }),
+    };
+    if let Some((path, bytes)) = toys {
+        let f = File { path, bytes, from: String::new() };
         lookups.push(("toys", f.path.clone()));
         for car in toy::cars(&ini::text(&f.bytes)) {
             *models.entry(car.stem().to_string()).or_default() += 0;
@@ -818,7 +928,9 @@ fn render(map: &Map, look: &Look, scn: &str, text: &str, scene: &Scene, terrain:
 
     // Each model, and each of its materials down to a texture, as `world::Assets` resolves them.
     let mut assets = world::Assets::default();
-    let reader = |name: &str| look.read(name);
+    // A `.psm` the folder has only as Untamed's BPB is read through its decode, so that its textures
+    // are still looked for; the BPB kinds' todo entry says the port reads none of them.
+    let reader = |name: &str| look.read(name).or_else(|| look.read(&format!("{name}.bpb")).and_then(|b| bpb::parse(&b).ok()).map(|b| b.to_ini()));
     let mut no_psm: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut no_tex: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut missing: Vec<String> = Vec::new();
@@ -876,11 +988,11 @@ fn material(
         return;
     }
     let by = base(by).to_string();
-    if look.read(&format!("{mat}.psm")).is_none() {
+    if reader(&format!("{mat}.psm")).is_none() {
         no_psm.entry(format!("{mat}.psm, {}", map.where_else(&format!("{mat}.psm")))).or_default().insert(by);
         return;
     }
-    let psm = look.read(&format!("{mat}.psm")).expect("just read");
+    let psm = reader(&format!("{mat}.psm")).expect("just read");
     let m = rscene::Material::parse(&ini::text(&psm));
     if m.texture.is_none() && m.animation.is_none() {
         return; // a material with no texture to find: drawn as its .psm says
@@ -911,9 +1023,19 @@ fn material(
 fn kinds(files: &[File], scn: &str, todo: &mut Todo) {
     let stem = scn[..scn.len() - 4].to_ascii_lowercase();
     let mut unread: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut binary: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     for f in files {
         let ext = ext_of(&f.path);
         let refused = match ext.as_str() {
+            // Untamed's binary INI: decoded by tools/bpb, which no reader of openmx's is.
+            k if k.ends_with(".bpb") => {
+                binary.entry(ext.clone()).or_default().push(&f.path);
+                match bpb::parse(&f.bytes) {
+                    Err(e) => Some(("tools/bpb", e)),
+                    Ok(b) if !b.bad_hashes().is_empty() => Some(("tools/bpb", format!("names whose hash does not recompute: {}", b.bad_hashes().join(", ")))),
+                    Ok(_) => None,
+                }
+            }
             ".psg" => psg::Model::parse(&f.bytes).err().map(|e| ("psg::Model::parse", e)),
             ".pst" => pst::Texture::parse(&f.bytes).err().map(|e| ("pst::Texture::parse", e)),
             ".atm" => pst::Texture::parse_animation(&f.bytes).err().map(|e| ("pst::Texture::parse_animation", e)),
@@ -942,6 +1064,16 @@ fn kinds(files: &[File], scn: &str, todo: &mut Todo) {
             todo.push(format!("{}: {reader}: {e}; kept as the disc has it", f.path));
         }
     }
+    for (ext, list) in binary {
+        let shown: Vec<&str> = list.iter().take(3).copied().collect();
+        let more = if list.len() > 3 { format!(", and {} more", list.len() - 3) } else { String::new() };
+        todo.push(format!(
+            "*{ext} ({} files: {}{more}): MX vs. ATV Untamed's binary INI (BPB), which no reader in game-sim or game-render takes, so the port \
+             reads none of them (openmx ask: a BPB reader); each decodes with tools/bpb, every hash recomputing; kept as the disc has it",
+            list.len(),
+            shown.join(", ")
+        ));
+    }
     for (ext, list) in unread {
         let shown: Vec<&str> = list.iter().take(3).copied().collect();
         let more = if list.len() > 3 { format!(", and {} more", list.len() - 3) } else { String::new() };
@@ -964,6 +1096,7 @@ fn vec3(sections: &[ini::Section], section: &str, key: &str) -> String {
 }
 
 /// What a map's `.atyList` says about its Free Ride.
+#[derive(Clone, Debug)]
 pub struct FreeRide {
     pub name: String,
     /// (position, direction, from) as JSON arrays and the key they came from.
@@ -974,9 +1107,15 @@ pub struct FreeRide {
 /// Read the `.atyList`'s `[General]` `DisplayName` and the `[Free Ride]` activity (the section an
 /// `Activity` line names whose `Type` is `free ride`, M8).
 pub fn free_ride(member: &str, bytes: &[u8]) -> Result<FreeRide, String> {
+    free_ride_of(member, bytes, "General")
+}
+
+/// [`free_ride`] with the list's `[General]` under another name: Untamed's one `Master.atyList` has a
+/// `[<MAP> General]` for every map.
+pub fn free_ride_of(member: &str, bytes: &[u8], general: &str) -> Result<FreeRide, String> {
     let sections = ini::parse(&ini::text(bytes));
     let unquote = |v: &str| v.trim().trim_matches('"').trim().to_string();
-    let general = sections.iter().find(|s| s.name.eq_ignore_ascii_case("General"));
+    let general = sections.iter().find(|s| s.name.eq_ignore_ascii_case(general));
     let name = general.and_then(|s| s.get("DisplayName")).map(unquote).unwrap_or_default();
     let mut todo = Vec::new();
     let activities: Vec<String> = general
@@ -1059,6 +1198,7 @@ fn q(s: &str) -> String {
 
 #[allow(clippy::too_many_arguments)]
 fn mod_json(
+    origin: &Origin,
     id: &str,
     name: &str,
     folder: &str,
@@ -1078,7 +1218,7 @@ fn mod_json(
     let mut o = String::from("{\n");
     o += "  \"standard\": 1,\n  \"kind\": \"track\",\n";
     o += &format!("  \"id\": {},\n  \"name\": {},\n", q(id), q(name));
-    o += &format!("  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"members\": {}\n  }},\n", q(GAME), q(BOOT), list(members, "    "));
+    o += &format!("  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"members\": {}\n  }},\n", q(origin.game), q(origin.boot), list(members, "    "));
     o += &format!("  \"version\": {},\n  \"author\": {},\n  \"permission\": \"own-disc\",\n", q(VERSION), q(AUTHOR));
     if let Some((p, d, from)) = spawn {
         o += &format!("  \"spawn\": {{\"position\": {p}, \"direction\": {d}, \"from\": {}}},\n", q(from));
