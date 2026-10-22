@@ -23,12 +23,22 @@ const USAGE: &str = "accuracy: a track mod against its source game running in PC
   accuracy capture --out IMAGE [--kit KIT] [--slot 8]
       Saves the running game (kit copy $KIT_PCSX2) into a scratch slot and extracts its EE RAM.
 
+  accuracy scene --mod DIR --ram IMAGE [--out DIR]
+      The scene's [SceneInfo], [Fog] and [Environment] as the game holds them in IMAGE, against the
+      mod's .scn, field by field (sceneram.rs). Writes DIR/scene.txt. Exit 1 if a field differs by more
+      than an ulp.
+
+  accuracy files --mod DIR --ram IMAGE [--out DIR]
+      The resource names the game opened for the map (its name pool in IMAGE) against the mod's files
+      (loaded.rs). Writes DIR/files.txt. Exit 1 if the game opened a file of the map the mod lacks.
+
   accuracy pose --ram IMAGE [--mod DIR]
       The viewports in IMAGE, and the camera pose of the one over the mod's terrain.
 
-  accuracy poses --mod DIR [--out DIR] [--add NAME=x,y,z,yaw,pitch,fov]...
+  accuracy poses --mod DIR [--out DIR] [--landmarks N] [--add NAME=x,y,z,yaw,pitch,fov]...
       Writes the map's standard poses into DIR/poses.txt (the scene's start, the centre looking four
-      ways, an overview, the highest ground looking across), and any --add ones.
+      ways, an overview, the highest ground looking across), one looking at each of the map's N
+      biggest landmarks (default 3, landmarks.rs), and any --add ones.
 
   accuracy shoot --mod DIR [--viewport ADDR] [--name POSE]... [--out DIR] [--kit KIT] [--settle MS]
   accuracy shoot --mod DIR [--viewport ADDR] --live NAME [--pad CMD]...
@@ -80,6 +90,8 @@ fn main() -> ExitCode {
         "heights" => cmd_heights(&mut a),
         "capture" => cmd_capture(&mut a),
         "pose" => cmd_pose(&mut a),
+        "scene" => cmd_scene(&mut a),
+        "files" => cmd_files(&mut a),
         "setup" => cmd_setup(&mut a),
         "poses" => cmd_poses(&mut a),
         "shoot" => cmd_shoot(&mut a),
@@ -310,8 +322,13 @@ fn cmd_poses(a: &mut Args) -> Result<bool, String> {
     let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
     let out = out_dir(a, &m);
     let extra = a.all("--add");
+    let n: usize = a.take("--landmarks").map_or(Ok(3), |s| s.parse().map_err(|e| format!("--landmarks: {e}")))?;
     a.done()?;
     for (name, p) in look::standard_poses(&m) {
+        look::write_pose(&out, &name, &p)?;
+    }
+    let marks = accuracy::landmarks::of_mod(&m, n)?;
+    for (name, p) in accuracy::landmarks::poses(&m, &marks) {
         look::write_pose(&out, &name, &p)?;
     }
     for e in extra {
@@ -459,4 +476,62 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
     std::fs::write(out.join("index.md"), &index).map_err(|e| format!("{}: {e}", out.display()))?;
     print!("{index}");
     Ok(ok)
+}
+
+fn cmd_scene(a: &mut Args) -> Result<bool, String> {
+    let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
+    let image = a.need("--ram")?;
+    let out = out_dir(a, &m);
+    a.done()?;
+    let src = source_of(&m)?;
+    if src.boot != source::MXVATV.boot {
+        return Err(format!("{}: the scene's readers are known on MX vs. ATV Unleashed only", src.game));
+    }
+    let ram = heights::load_ram(Path::new(&image))?;
+    // The image must be of this map: its terrain object holds the mod's tree.
+    terrain_in(&ram, &m, &src)?;
+    let json = std::fs::read_to_string(m.folder.join("mod.json")).map_err(|e| e.to_string())?;
+    let json = modcheck::json::Json::parse(&json)?;
+    let scn = json.get("lookups").and_then(|l| l.get("scene")).and_then(|s| s.str()).ok_or("mod.json names no scene")?;
+    let text = std::fs::read(m.folder.join(scn)).map_err(|e| format!("{scn}: {e}"))?;
+    let fields = accuracy::sceneram::compare(&ram, &String::from_utf8_lossy(&text))?;
+    let report = accuracy::sceneram::text(&m.id, &fields);
+    print!("{report}");
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(out.join("scene.txt"), &report).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(fields.iter().all(|f| f.ulps() <= 1))
+}
+
+fn cmd_files(a: &mut Args) -> Result<bool, String> {
+    use accuracy::loaded::{self, Have};
+    let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
+    let image = a.need("--ram")?;
+    let out = out_dir(a, &m);
+    a.done()?;
+    let ram = heights::load_ram(Path::new(&image))?;
+    let names = loaded::pool(&ram, &m.map);
+    if names.is_empty() {
+        return Err(format!("no name pool with env\\{0}\\{0}.scn in the image: is it a ride on {0}?", m.map));
+    }
+    let (paths, files) = loaded::mod_files(&m.folder);
+    let rows = loaded::audit(&names, &paths, &files);
+    let count = |h: Have| rows.iter().filter(|r| r.1 == h).count();
+    let mut s = format!(
+        "{}: the game opened {} names, {} of them the map's: {} at their path in the mod, {} by file name only, {} not in the mod\n",
+        m.id,
+        names.len(),
+        rows.len(),
+        count(Have::Path),
+        count(Have::Base),
+        count(Have::No)
+    );
+    for (n, h) in &rows {
+        if *h != Have::Path {
+            s.push_str(&format!("  {:<6} {n}\n", if *h == Have::No { "NOT" } else { "name" }));
+        }
+    }
+    print!("{s}");
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(out.join("files.txt"), &s).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(count(Have::No) == 0)
 }

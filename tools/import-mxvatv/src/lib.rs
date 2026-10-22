@@ -263,7 +263,61 @@ pub fn pull_loose(disc: &mut Disc, archives: &[(String, ResFile)]) -> Result<Vec
             }
         }
     }
+
+    let dir = scn.rfind('/').map_or("", |i| &scn[..i]);
+    pull_physics(&mut o, dir, &stem)?;
+    pull_shadows(&mut o)?;
     Ok(o.pulled)
+}
+
+/// The physics objects the map's toys name (M12, seen in the game's name pool in a ride on Lago).
+/// SLUS_211.04 `0x002171b0` reads `[PhysicsCollections]` of `<map>.toy`: the first
+/// `NumberOfPhysicsCollections` sections `[PhysicsCollection<n>]`, each a `Name`, opened as
+/// `<map folder>\<Name>.pco` (`%s%s.pco`). A `Name` with a `*` is a group matched against the scene's
+/// models, which no map uses. GAME_REL.BIN `0x004922a0` then opens each `.pco`'s parts'
+/// collision, `Col\<Name>m.col` and `Col\<Name>f.col` (its name with `m.col` and `f.col` put on).
+fn pull_physics(o: &mut Opener, dir: &str, stem: &str) -> Result<(), String> {
+    let toy = format!("{dir}/{stem}.toy");
+    if !o.held.contains_key(&toy) {
+        return Ok(());
+    }
+    let secs = ini::parse(&ini::text(&o.held_bytes(&toy)?));
+    let get = |secs: &[ini::Section], sec: &str, key: &str| {
+        secs.iter().find(|s| s.name.eq_ignore_ascii_case(sec)).and_then(|s| s.get(key)).map(|v| v.trim().trim_matches('"').to_string())
+    };
+    let n: usize = get(&secs, "PhysicsCollections", "NumberOfPhysicsCollections").and_then(|v| v.parse().ok()).unwrap_or(0);
+    for i in 1..=n {
+        let Some(name) = get(&secs, &format!("PhysicsCollection{i}"), "Name").filter(|v| !v.is_empty() && !v.contains('*')) else {
+            continue;
+        };
+        let why = format!("physics collection {name} of {toy}");
+        let Some(pco) = o.open(&format!("{dir}/{name}.pco"), &why)? else { continue };
+        let parts = ini::parse(&ini::text(&pco));
+        let k: usize = get(&parts, "PhysicsParts", "NumberOfPhysicsParts").and_then(|v| v.parse().ok()).unwrap_or(0);
+        for p in 1..=k {
+            if let Some(part) = get(&parts, &format!("PhysicsPart{p}"), "Name").filter(|v| !v.is_empty()) {
+                for end in ["m.col", "f.col"] {
+                    o.open(&format!("Col\\{part}{end}"), &format!("part {part} of {name}.pco"))?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// How many shadow sets the game makes (M12: `0x0031bc90` is handed 6 on every map ridden).
+pub const SHADOW_SETS: usize = 6;
+
+/// The shadow materials: `0x0031bc90` opens `shadowCaster<n>`, `shadowReceiver<n>` and
+/// `terrainShadowReceiver<n>` for each of the [`SHADOW_SETS`] (`Tex\`, as `MST\TerrainShadow.mst`
+/// spells them), on every map.
+fn pull_shadows(o: &mut Opener) -> Result<(), String> {
+    for n in 1..=SHADOW_SETS {
+        for m in ["shadowCaster", "terrainShadowReceiver", "shadowReceiver"] {
+            o.open(&format!("Tex\\{m}{n}.psm"), &format!("shadow set {n} ({m}%d, 0x0031bc90)"))?;
+        }
+    }
+    Ok(())
 }
 
 /// A name with its extension swapped, as the game does it: from the last dot, or added when there
