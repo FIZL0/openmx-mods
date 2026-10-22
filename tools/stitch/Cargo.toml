@@ -13,3 +13,6 @@ ps2-float = { path = "../../openmx/crates/ps2-float" }
 trnwrite = { path = "../trnwrite" }
 # mod.json reading, and the world's §5 checks that are not the seams'.
 modcheck = { path = "../modcheck" }
+# MX Unleashed's tiles (C4): imported off the disc by build.sh's step, since no other step makes them.
+import-mxvatv = { path = "../import-mxvatv" }
+discx = { path = "../discx" }
