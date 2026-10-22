@@ -8,9 +8,13 @@ use std::process::ExitCode;
 
 const USAGE: &str = r#"elevation: a lidar DEM (USGS 3DEP GeoTIFF) and an aerial image (NAIP) to a track mod
 
-  elevation --out STAGE [--from DIR]  build every site (`elevation sites`) whose files are in DIR
+  elevation --out STAGE [--from DIR] [--iso DIR] [--sky none]
+                                      build every site (`elevation sites`) whose files are in DIR
                                       (default extracted/elevation: dem/ and naip/) into STAGE/<id>/
-                                      (build.sh's data step), each checked with modcheck
+                                      (build.sh's data step), each checked with modcheck. Each takes its
+                                      site's sky, fog and lights from MX vs. ATV Unleashed if that disc
+                                      is in --iso (default $DISCX_ISO, else iso/); --sky none, or no
+                                      disc, builds them without (public-domain)
   elevation sites                     the sites, their windows and files
   elevation fetch [--from DIR]        download the sites' files that are missing (curl; about 3.6 GB)
   elevation info FILE.tif...          where each GeoTIFF lies, its grid and units
@@ -20,13 +24,14 @@ const USAGE: &str = r#"elevation: a lidar DEM (USGS 3DEP GeoTIFF) and an aerial 
                                       a shaded picture of the mosaic, one pixel every N (default 10), north up
   elevation build OUTDIR --id elev_x --name NAME --dem FILE.tif [--dem ...] --centre E,N
                   [--cells W[,D]] [--naip FILE.tif]... [--texture PX] [--surface ID]
-                  --data TEXT --date YYYY-MM-DD
+                  --data TEXT --date YYYY-MM-DD [--sky MAP,NAME [--iso DIR]]
                                       write the mod folder OUTDIR (out/mods/tracks/<id>), then check it
                                       with modcheck (the standard's §5)
 
 --centre is in the DEM's projected coordinates (UTM easting, northing). --cells defaults to 8 (2049 samples,
 2 km at 1 m), --texture to 1024, --surface to 0. A map is 256 × cells + 1 DEM pixels a side, one sample a
-pixel; nothing is resampled. notes/elevation.md lists the sites, their tiles and where to fetch them.
+pixel; nothing is resampled. --sky takes CubeFile, [Fog] and [Light<n>] and the sky's .cub from MX vs.
+ATV Unleashed's Env\MAP (Nat03,Glamis). notes/elevation.md lists the sites, their tiles and where to fetch them.
 "#;
 
 fn main() -> ExitCode {
@@ -149,7 +154,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     .first()
                     .ok_or(format!("build wants OUTDIR\n\n{USAGE}"))?,
             );
-            let req = Request {
+            let mut req = Request {
                 id: a.need("id")?,
                 name: a.need("name")?,
                 dem: a.all("dem").into_iter().map(PathBuf::from).collect(),
@@ -164,7 +169,19 @@ fn run(args: &[String]) -> Result<(), String> {
                     .map_or(Ok(0), |s| s.parse().map_err(|_| "--surface".to_owned()))?,
                 data: a.need("data")?,
                 date: a.need("date")?,
+                sky: None,
             };
+            if let Some(m) = a.one("sky") {
+                let (map, name) = m.split_once(',').unwrap_or((&m, &m));
+                let iso = iso_dir(&a);
+                let path = elevation::sky::find_disc(&iso).ok_or(format!(
+                    "--sky: no {} disc in {}",
+                    elevation::sky::BOOT,
+                    iso.display()
+                ))?;
+                let mut disc = discx::Disc::open(&path)?;
+                req.sky = Some(elevation::sky::Donor::take(&mut disc, map, name)?);
+            }
             if req.dem.is_empty() {
                 return Err(format!("--dem is needed\n\n{USAGE}"));
             }
@@ -220,14 +237,41 @@ fn report(out: &std::path::Path, b: &Built) -> Result<(), String> {
     }
 }
 
+/// Where the disc images are: `--iso`, else `$DISCX_ISO`, else `iso/` (build.sh's own default).
+fn iso_dir(a: &Args) -> PathBuf {
+    a.one("iso")
+        .or_else(|| std::env::var("DISCX_ISO").ok())
+        .unwrap_or("iso".into())
+        .into()
+}
+
 /// build.sh's data step: every site whose files are here, into `STAGE/<id>/`. A site without its files
-/// is skipped with a line naming them; a site that fails to build fails the step.
+/// is skipped with a line naming them; a site that fails to build fails the step. With MX vs. ATV
+/// Unleashed's disc each site takes its donor map's sky (M17); without it, or with `--sky none`, none.
 fn stage(a: &Args) -> Result<(), String> {
     let stage = PathBuf::from(a.need("out")?);
     let from = PathBuf::from(a.one("from").unwrap_or("extracted/elevation".into()));
+    let mut disc = match a.one("sky").as_deref() {
+        Some("none") => None,
+        Some(other) => return Err(format!("--sky {other:?}: the data step takes only none")),
+        None => {
+            let iso = iso_dir(a);
+            match elevation::sky::find_disc(&iso) {
+                Some(p) => Some(discx::Disc::open(&p)?),
+                None => {
+                    println!(
+                        "elevation: no {} disc in {}: the sites are built without a sky, fog or lights",
+                        elevation::sky::BOOT,
+                        iso.display()
+                    );
+                    None
+                }
+            }
+        }
+    };
     let mut failed = Vec::new();
     for s in SITES {
-        let req = match s.request(&from) {
+        let mut req = match s.request(&from) {
             Ok(r) => r,
             Err(missing) => {
                 println!(
@@ -238,6 +282,16 @@ fn stage(a: &Args) -> Result<(), String> {
                 continue;
             }
         };
+        if let Some(disc) = disc.as_mut() {
+            match elevation::sky::Donor::take(disc, s.sky.0, s.sky.1) {
+                Ok(d) => req.sky = Some(d),
+                Err(e) => {
+                    println!("elevation: FAIL {}: its sky from {}: {e}", s.id, s.sky.0);
+                    failed.push(s.id);
+                    continue;
+                }
+            }
+        }
         let out = stage.join(s.id);
         let done = build_mod(&req).and_then(|b| {
             write_mod(&out, &b)?;
