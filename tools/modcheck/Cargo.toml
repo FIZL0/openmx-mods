@@ -1,0 +1,13 @@
+[package]
+name = "modcheck"
+description = "Proves a built mod folder against the track mod standard (§5), with openmx's readers"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Scene, terrain, collision, PSR and .res: openmx's readers, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+# Finding a disc by its boot ELF and reading its members.
+discx = { path = "../discx" }
