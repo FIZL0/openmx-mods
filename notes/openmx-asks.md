@@ -161,3 +161,23 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
 - **New: the `.prt` reader is in the shell crate** (M9): `crates/openmx/src/particles.rs` reads the particle sheet,
   so this repo cannot prove a map's `Part\<map>particles.prt`. Fix: as for `.vig`, a crate with no shell
   dependencies.
+- **New: MX vs. ATV's terrain query is not quite MX Unleashed's** (T7, `notes/accuracy.md`). Proved on
+  Lago (`mxvatv_nat05`) with `tools/accuracy heights`. MX vs. ATV Unleashed's own query is in
+  `GAME_REL.BIN`: `0x4838f0`, and `0x4833c0` for the wheels. It ran on a RAM image of the game in a Free
+  Ride, against `contact_search::ground` and `nearest_surface` on the mod's `.trn`, at 8000 points in the
+  four modes. Every height, surface and corner weight is equal. The normals are not: 7114 of 8000 points
+  differ by 1–3 ulp a lane. MX vs. ATV's cell reader (`0x47b300`) hands normals back over 127: `k =
+  1.0/127.0`, x and z times `vertical_scale × k`, y times `k`. openmx's `Terrain::cell` keeps the raw
+  bytes. With that one step (`tools/accuracy/src/heights.rs`, `Over127`), all 8000 points are equal in
+  every field. Two more differences: (1) the query clamps the point into `[min + border, max − border]`
+  (object `+0x50`, 0.01 on Lago) before scaling, so off the map the original answers with the edge cell
+  where openmx's misses; (2) a global (`0x541518`) switches the reader to a packed normal table (`0x39e320`).
+  It is off on Lago. Fix: a per-source variant of the query for MX vs. ATV mod tracks (the normal step
+  and the clamp), chosen from mod.json's `source.boot`, if wheels on those tracks are to be bit-exact.
+- **MD10, what the harness passes** (T7). `tools/accuracy pair` runs `openmx --mod {mod} --shot {shot}
+  --shot-pose x,y,z,yaw,pitch,fov`. The template is `--openmx-args`, and `--mod` is a guess at MD2's flag.
+  Yaw is `atan2(forward.x, forward.z)` in degrees (0 = +z, 90 = +x), pitch `asin(forward.y)` (positive
+  up), no roll, and fov is the original's viewport number (85 on MX vs. ATV's ride camera). Whether 85
+  spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
+  so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
+  side decides whether the pairs compare HUDs too.
