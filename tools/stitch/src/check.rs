@@ -360,11 +360,38 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
 
     // Joins against each other, slopes, blend steps.
     let mut shared: HashMap<(i64, i64), (usize, f64)> = HashMap::new();
-    let far = 2.0 * lattice.unwrap_or(joins[0].spacing) + 3.0 * fade;
-    let dist = |x: f64, z: f64| -> f64 {
+    // Each tile's seam gates (C9): mod.json's stitch.gates where the build widened them, C1's
+    // `2 lattice + 3 fade` elsewhere. A cell is held to max_slope where it is past every one.
+    let base = 2.0 * lattice.unwrap_or(joins[0].spacing) + 3.0 * fade;
+    let listed: HashMap<String, Vec<f64>> = st
+        .and_then(|s| s.get("gates"))
+        .and_then(Json::arr)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|g| Some((g.get("tile")?.str()?.to_owned(), nums(g.get("edges")))))
+        .collect();
+    let gates: Vec<[f64; 4]> = tiles
+        .iter()
+        .map(|(t, _, _)| match listed.get(&t.id) {
+            Some(v) if v.len() == 4 => [v[0], v[1], v[2], v[3]],
+            _ => [base; 4],
+        })
+        .collect();
+    let clear = |x: f64, z: f64| -> f64 {
         rects
             .iter()
-            .map(|a| ((a[0] - x).max(x - a[2]).max(0.0)).hypot((a[1] - z).max(z - a[3]).max(0.0)))
+            .zip(&gates)
+            .map(|(a, g)| {
+                let (ux, uz) = ((a[0] - x).max(x - a[2]).max(0.0), (a[1] - z).max(z - a[3]).max(0.0));
+                let v = if x < a[0] { Some(g[0]) } else if x > a[2] { Some(g[2]) } else { None };
+                let h = if z < a[1] { Some(g[1]) } else if z > a[3] { Some(g[3]) } else { None };
+                let gate = match (v, h) {
+                    (Some(p), Some(q)) => p.max(q),
+                    (Some(p), None) | (None, Some(p)) => p,
+                    (None, None) => g.iter().copied().fold(0.0, f64::max),
+                };
+                ux.hypot(uz) - gate
+            })
             .fold(f64::INFINITY, f64::min)
     };
     for (ji, j) in joins.iter().enumerate() {
@@ -399,7 +426,7 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
                     let cx = j.at[0] + (f64::from(x) + 0.5) * j.spacing;
                     let cz = j.at[1] + (f64::from(z) + 0.5) * j.spacing;
                     let corners = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)];
-                    if corners.iter().all(|&(a, b)| dist(j.at[0] + f64::from(a) * j.spacing, j.at[1] + f64::from(b) * j.spacing) > far) {
+                    if corners.iter().all(|&(a, b)| clear(j.at[0] + f64::from(a) * j.spacing, j.at[1] + f64::from(b) * j.spacing) > 0.0) {
                         let g = crate::build::cell_slope(corners.map(|(a, b)| h[(a + b * w) as usize]), j.spacing);
                         if g > r.far_slope {
                             r.far_slope = g;
