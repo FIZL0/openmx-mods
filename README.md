@@ -3,14 +3,16 @@
 Tools that pull free-roam terrain out of other off-road games, and out of real-world elevation data, and turn
 it into freeride track mods for the MX Unleashed (PS2) port, [OpenMX](https://github.com/FIZL0/openmx).
 
-The port has no mod loader yet. `standard/` will define what one should load (see `PLAN.md`, T1).
+The port has no mod loader yet: that is openmx's Phase 14 (MD1–MD6). `standard/` will define what it loads
+(`plan/TODO.md`, T1).
 
 | Source | Platform | What it gives | Status |
 |---|---|---|---|
 | Real elevation (USGS 3DEP, SRTM) | — | real OHV areas: Glamis, Ocotillo Wells, Little Sahara, Hatfield-McCoy | planned, first |
-| MX vs ATV Unleashed | PS2 / Xbox | freeride areas, same studio (Rainbow) as MX Unleashed | planned |
+| MX vs ATV Unleashed | PS2 / Xbox | 56 maps in MX Unleashed's own formats (`notes/mxvatv.md`) | surveyed: a repack |
 | ATV Offroad Fury 1–4 | PS2 | open free-roam areas | planned |
-| MX vs ATV Untamed / Reflex / Alive | PS2 / PS3 / 360 | freeride maps | planned |
+| MX vs ATV Untamed | PS2 | 49 maps, same terrain format; scenes in binary BPB (`notes/mxvatv-later.md`) | surveyed: BPB to decode |
+| MX vs ATV Reflex / Alive | PS3 / 360 | freeride maps | planned, no disc |
 | Motocross Madness 2 | PC | open Baja maps, heightmap terrain | planned |
 | MX Bikes | PC | community freeride and compound maps (meshes) | planned |
 | MX Simulator | PC | community freeride tracks (heightmap PNGs) | parked: the track site is down |
@@ -21,16 +23,30 @@ The port has no mod loader yet. `standard/` will define what one should load (se
 ## Layout
 
 ```
-standard/   the freeride track mod standard (to write: PLAN.md T1)
+plan/       the task list (agent-runner format): TODO.md, DONE.md
+journal/    one folder per finished task
+standard/   the freeride track mod standard (to write: T1)
 notes/      format notes for each source game: where the terrain lives, file layouts, known gaps
 tools/      importers, one per source, all ending in the shared heightfield-to-.trn writer (T2)
 ```
 
 ## Requirements
 
-- A checkout of [OpenMX](https://github.com/FIZL0/openmx) next to this one as `../openmx`: its `game-sim`
-  crate (`track.rs`) reads the `.trn`/`.scn` format the writer has to produce, and is how output is checked.
-- Rust (cargo), and `7z` for unpacking discs.
+- A checkout of [OpenMX](https://github.com/FIZL0/openmx) next to this one, linked in as `openmx`
+  (`ln -s ../openmx openmx`, git-ignored): its `game-sim` crate (`archive.rs`, `track.rs`) reads every format
+  here, and is how output is checked.
+- Rust (cargo). The tools read the disc images directly; nothing needs `7z`.
+
+## Working the plan
+
+The tasks in `plan/TODO.md` are worked by [agent-runner](https://github.com/FIZL0/agent-runner) (`AGENTS.md`
+has the rules, `runner.toml` the settings, `./check.sh` is the gate):
+
+```sh
+agent-runner plan                # what is open
+agent-runner run --dry-run 3     # what three slots would start
+tmux new -s mods agent-runner run 3
+```
 
 ## The target format in short
 
