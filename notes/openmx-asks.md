@@ -48,3 +48,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
 - **MD3, nothing to change**: the edge (`0x001a6e50`, game-sim `world::Ground::area`) and the query
   have no grid-size limit below 16 root cells a side. The original's one cap is a 4000-leaf draw list
   (`0x001d5274`), which the port does not copy and needs no stand-in for.
+- **MD2, what the standard asks of the loader** (T1, `standard/OPENMX-TRACK-STANDARD.md`): (1) track
+  sounds: `crates/openmx/src/audio.rs` reads `tracks\{track}\{track}.aud` by exact name from the track
+  `.res`. MX vs. ATV keeps its maps under `Env\<MAP>\`, so a mod's `.aud` needs a suffix lookup
+  (`<stem>.aud`), as `toy.rs`, `splat.rs` and `particles.rs` already do for their files. (2) The track
+  stem: `<stem>.toy`, `<stem>particles.prt`, `<stem>_shadow_NN.pst` are built from `args.track`. For a mod
+  the stem is its one `.scn`'s file stem, not its id. (3) `<track>_2.res`: a mod has no second archive
+  (bike, physics, `biplanecpresets.ini`), so the ride takes them from a disc track's.
