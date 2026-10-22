@@ -125,3 +125,11 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
 - **New: the `.prt` reader is in the shell crate** (M9): `crates/openmx/src/particles.rs` reads the particle sheet,
   so this repo cannot prove a map's `Part\<map>particles.prt`. Fix: as for `.vig`, a crate with no shell
   dependencies.
+- **New: an elevation mod's ground paint** (M1, `notes/elevation.md`). The `elev_*` mods colour their
+  ground the way MXU's freeride tracks lay a whole-map mask: a `tracks/<id>/terrainscreenspacemesh.psm`
+  with one pass (free09's `ShaderPass_1` keys, `UScale = 1/extent`, `VScale = −1/extent`) naming
+  `<id>_naip`, a 1024×1024 8-bit `.pst` of the NAIP aerial image. `splat::Splat::parse` reads it (the
+  tool proves this), but `Splat::load` takes `&[Res]` and the stem from `args.track`. For a mod it needs
+  the mod folder as a suffix-lookup source and the stem of the mod's one `.scn` (MD2). The mods have no
+  `<stem>_shadow_NN.pst`, so the port lights the ground itself everywhere. Whether the original game
+  draws a one-pass psm with a 1 MB texture was not checked.
