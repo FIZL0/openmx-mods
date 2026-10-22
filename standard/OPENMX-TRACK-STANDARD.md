@@ -264,7 +264,10 @@ mods/tracks/world_mxvatv/
   is cut (C1 finds the band from the terrain and the scene's border and shootoff values). Inside `keep`
   the tile owns the ground. Outside it, the tile is not used.
 - `joins[].join` is the folder under `joins/`. Its `<join>.ps2.trn` is a PLN v7 terrain (T2's writer) at
-  `at`, and its scale may be any one of its neighbours' spacings. The ground is C1's solved blend, with no
+  `at`, and its scale is one of the world's tile spacings. C1 puts every join on one lattice for the whole
+  world, at the commonest tile spacing (the finer on a tie), so joins agree where they meet and each
+  interior's edges lie on lattice lines; `joins[].samples` (C1's own field) gives a join's samples a side.
+  The ground is C1's solved blend, with no
   height or slope step at any seam and nothing steeper than the bike climbs. Each sample's surface byte is
   the nearer tile's. The join has no `.col` and no scene. The heightfield is its collision, as on the disc.
 - `<join>.blend` is the ground's look across the join (MD9): one byte per terrain sample of the join for
