@@ -55,3 +55,11 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   stem: `<stem>.toy`, `<stem>particles.prt`, `<stem>_shadow_NN.pst` are built from `args.track`. For a mod
   the stem is its one `.scn`'s file stem, not its id. (3) `<track>_2.res`: a mod has no second archive
   (bike, physics, `biplanecpresets.ini`), so the ride takes them from a disc track's.
+- **MD2, lookups on a segment boundary** (T4, `tools/modcheck`): `game-render::disc::Res::find_suffix`
+  matches a plain string suffix, so `RockA.col` would also find `Col/xRockA.col` if that came first. On
+  the disc's own `.res` the order hides it; a mod folder has no member order. `modcheck` matches on a
+  `/` boundary and fails a name that finds two files. Fix: the same in the mod loader's lookup.
+- **MD7, the `.vig` reader is in the shell crate** (T4): `Clip::vig` / `Adpcm::vig` live in
+  `crates/openmx/src/audio.rs`, which brings wgpu, ggrs and iroh with it, so this repo cannot call
+  them to prove a music pack (§5 step 4). `modcheck` checks only that each song's file is there.
+  Fix: the `.vig` header and ADPCM decode in a crate with no shell dependencies (game-render or its own).
