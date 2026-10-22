@@ -22,6 +22,7 @@ pub mod drape;
 pub mod geotiff;
 pub mod sites;
 pub mod sky;
+pub mod surfaces;
 
 use dem::{Mosaic, Overlap};
 use drape::Rgb;
@@ -49,8 +50,12 @@ pub struct Request {
     pub cells: (u32, u32),
     /// The drape's size in pixels a side.
     pub texture: u32,
-    /// The surface id written on every sample.
+    /// The surface id written on every sample, unless `ground` classifies them.
     pub surface: u8,
+    /// What kind of place it is and the averaged NDVI from which its ground is green (M16): each
+    /// sample's surface id from the aerial picture (`surfaces::Ground::classify`). None, or no picture:
+    /// `surface` everywhere.
+    pub ground: Option<(surfaces::Ground, f32)>,
     /// `source.data` and `source.date` (§1).
     pub data: String,
     pub date: String,
@@ -86,6 +91,8 @@ pub struct Facts {
     pub leaves: usize,
     pub blocks: usize,
     pub spawn: [f32; 3],
+    /// Samples by surface id, ascending.
+    pub surfaces: Vec<(u8, u64)>,
 }
 
 /// A built mod: its files (paths in the folder, `/`-separated) and the facts.
@@ -151,6 +158,18 @@ pub fn cut(
     Ok((out, (i0, j0 + i64::from(nz) - 1), overlap))
 }
 
+/// Where a request's window lies without reading it: sample (0, 0)'s centre in model coordinates, the
+/// DEM's pixel in its units, the samples a side, and the EPSG code. The same window [`cut`] reads.
+pub fn window_of(req: &Request) -> Result<((f64, f64), f64, (u32, u32), Option<u16>), String> {
+    let m = Mosaic::open(&req.dem)?;
+    let g = m.geo.clone();
+    let samples = (256 * req.cells.0 + 1, 256 * req.cells.1 + 1);
+    let (ic, jc) = m.pixel_of(req.centre.0, req.centre.1);
+    let (i0, j0) = (ic - i64::from(samples.0 / 2), jc - i64::from(samples.1 / 2));
+    let corner = (g.x(i0 as f64), g.y((j0 + i64::from(samples.1) - 1) as f64));
+    Ok((corner, g.dx, samples, g.epsg))
+}
+
 /// The terrain's spacing for a pixel of `metres`: the f32 that the scene's `TerrainWidthScale` (written
 /// with six decimals by `trnwrite::scene`) reads back as, so the scene and the file agree exactly
 /// (the standard's §5 check compares them bit for bit). 1 m gives 3.280840 ft against 3.2808399: 0.1 mm
@@ -195,7 +214,23 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
         .map(|v| ((f64::from(*v) - datum) * v_unit / FOOT_M) as f32)
         .collect();
     let (mut grid, hs) = Grid::from_feet(samples.0, samples.1, &feet, scale)?;
-    grid.surfaces = vec![req.surface; feet.len()];
+    let corner = (g.x(corner_pixel.0 as f64), g.y(corner_pixel.1 as f64));
+    let classified = match req.ground {
+        Some((ground, green)) if !req.naip.is_empty() => {
+            let seen = surfaces::seen(&req.naip, corner, g.dx, samples, g.epsg)?;
+            let covers = ground.classify(&seen, samples.0 as usize, green);
+            grid.surfaces = covers.iter().map(|c| c.id()).collect();
+            Some((ground, green))
+        }
+        _ => {
+            grid.surfaces = vec![req.surface; feet.len()];
+            None
+        }
+    };
+    let mut counts = std::collections::BTreeMap::<u8, u64>::new();
+    for id in &grid.surfaces {
+        *counts.entry(*id).or_default() += 1;
+    }
     let mut o = Options::new(scale, hs);
     o.name = trnwrite::DISC_NAME.to_owned();
     let t = build(&grid, &o)?;
@@ -216,7 +251,6 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
         d.prove(&scene)?;
     }
 
-    let corner = (g.x(corner_pixel.0 as f64), g.y(corner_pixel.1 as f64));
     let facts = Facts {
         epsg: g.epsg,
         samples,
@@ -235,6 +269,7 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
         leaves: w.leaves,
         blocks: w.blocks,
         spawn,
+        surfaces: counts.into_iter().collect(),
     };
 
     let dir = format!("tracks/{}", req.id);
@@ -249,10 +284,7 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
             unit = if v_unit == 1.0 { "m" } else { "ft" },
             step = step_ft
         ),
-        format!(
-            "{}.ps2.trn: every surface id is {}: which of the bike's .phy surfaces is sand, dirt or rock is not known",
-            req.id, req.surface
-        ),
+        surface_todo(req, &facts, classified),
         format!(
             "{}.ps2.trn: normals are trnwrite's central differences, not the original tool's (unknown) formula",
             req.id
@@ -329,6 +361,55 @@ pub fn build_mod(req: &Request) -> Result<Built, String> {
     let json = mod_json(req, &facts, &todo);
     files.insert(0, ("mod.json".to_owned(), json.into_bytes()));
     Ok(Built { files, facts, todo })
+}
+
+/// The surfaces' line in `todo`: what each sample's id is and why (M16, `notes/elevation.md`).
+fn surface_todo(req: &Request, f: &Facts, classified: Option<(surfaces::Ground, f32)>) -> String {
+    let all: u64 = f.surfaces.iter().map(|(_, n)| n).sum();
+    let shares: Vec<String> = f
+        .surfaces
+        .iter()
+        .map(|(id, n)| {
+            let what = match *id {
+                surfaces::SAND => " (zone 5, sandy dirt)",
+                surfaces::GRASS => " (zone 4, off-track grass)",
+                surfaces::DIRT => " (zone 1, dirt)",
+                _ => "",
+            };
+            format!("{id}{what} {:.1}%", 100.0 * *n as f64 / all as f64)
+        })
+        .collect();
+    let base = "MX Unleashed's own freeride maps ride every painted layer (sand, rock, grass) as zone 1, \
+                so these ids go past what the original does";
+    match classified {
+        Some((ground, green)) => {
+            let how = match ground {
+                surfaces::Ground::Dunes => format!(
+                    "bare ground is sand and green (NAIP's NDVI averaged over {} m from {green}) is dirt, the scrub flats between dunes",
+                    2 * surfaces::RADIUS + 1
+                ),
+                surfaces::Ground::Desert => {
+                    "the site is desert badlands and washes, with nothing green in the picture: every sample is dirt; \
+                     the washes' sand is not told from the badlands' clay and rock (both pale from above)"
+                        .to_owned()
+                }
+                surfaces::Ground::Forest => format!(
+                    "green (NAIP's NDVI averaged over {} m from {green}) is grass, the rest dirt; the picture sees the canopy, \
+                     not the ground under it, and the river is dirt too (no water zone is used)",
+                    2 * surfaces::RADIUS + 1
+                ),
+            };
+            format!(
+                "{}.ps2.trn: surface ids from the aerial picture, {}: {how}. Rock rides as dirt (the bikes' .phy has no rock zone); {base}",
+                req.id,
+                shares.join(", "),
+            )
+        }
+        None => format!(
+            "{}.ps2.trn: every surface id is {}, not taken from the ground: {base}",
+            req.id, req.surface
+        ),
+    }
 }
 
 /// Read the written terrain back with openmx's `Terrain` and check every sample through every cell the
@@ -558,7 +639,7 @@ pub fn mod_json(req: &Request, f: &Facts, todo: &[String]) -> String {
     let dem = files(&req.dem);
     let naip = files(&req.naip);
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.1.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": {permission},\n{sky_from}  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"track\",\n  \"id\": {id},\n  \"name\": {name},\n  \"source\": {{\n    \"game\": \"Real elevation\",\n    \"data\": {data},\n    \"date\": {date}\n  }},\n  \"version\": \"1.2.0\",\n  \"author\": \"openmx-mods tools/elevation 0.1\",\n  \"permission\": {permission},\n{sky_from}  \"elevation\": {{\n    \"epsg\": {epsg},\n    \"dem\": [{dem}],\n    \"naip\": [{naip}],\n    \"corner\": [{cx:.6}, {cy:.6}],\n    \"corner_pixel\": [{pi}, {pj}],\n    \"pixel\": {pixel},\n    \"samples\": [{sx}, {sz}],\n    \"datum\": {datum},\n    \"vertical_unit_m\": {vu},\n    \"surfaces\": {{{surfaces}}},\n    \"axes\": \"x east, z north; sample (0, 0) is the south-west corner\"\n  }},\n  \"todo\": [\n{todo}\n  ]\n}}\n",
         id = json_str(&req.id),
         name = json_str(&req.name),
         data = json_str(&req.data),
@@ -583,6 +664,12 @@ pub fn mod_json(req: &Request, f: &Facts, todo: &[String]) -> String {
         sz = f.samples.1,
         datum = f.datum,
         vu = f.vertical_unit_m,
+        surfaces = f
+            .surfaces
+            .iter()
+            .map(|(id, n)| format!("\"{id}\": {n}"))
+            .collect::<Vec<_>>()
+            .join(", "),
         todo = list(todo),
         permission = json_str(if req.sky.is_some() { "own-disc" } else { "public-domain" }),
         sky_from = req.sky.as_ref().map_or(String::new(), |d| format!(
