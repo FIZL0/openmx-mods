@@ -1,0 +1,10 @@
+[package]
+name = "discx"
+description = "Lists and extracts PSR and .res members off a PS2 disc image, through openmx's readers"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# PSR and .res: openmx's readers, not a second copy (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }

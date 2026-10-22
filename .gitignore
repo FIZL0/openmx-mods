@@ -6,3 +6,5 @@ __pycache__/
 .runner/
 journal/*/scratch/
 openmx
+# Path dependencies only, which change with openmx; a committed lock would conflict on every new tool.
+Cargo.lock

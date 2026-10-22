@@ -1,0 +1,14 @@
+# The tools, one crate each (AGENTS.md). openmx's readers are path dependencies of the crates that need
+# them (`openmx/crates/...`), not members here: openmx is its own workspace and runs its own tests.
+[workspace]
+resolver = "3"
+# Every crate under tools/, so a new tool does not have to touch this file.
+members = ["tools/*"]
+# `openmx` is a link inside this directory, so without this its crates would join this workspace as
+# implicit members (cargo does that to path dependencies under the root) and run in `cargo test`.
+exclude = ["openmx"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
