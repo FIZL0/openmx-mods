@@ -32,6 +32,7 @@ goes in mod.json's `todo` and notes/openmx-asks.md.
 One giant map per game out of its non-racing maps (no stadium with crowd seats: no SX, FS or other arena
 maps), their edge berms removed and the maps joined smoothly; then one ultra map out of every game's giant
 map and MX Unleashed's. Inside each source map the ground stays the original's; only the joins change.
+- [ ] **C11** the combined and ultra maps in openmx (user, 2026-10-22: mod support verified before more games): load world_mxu, world_mxvatv, world_untamed and world_ultra through MD8, ride across a sample of joins, and check that every tile's ground queries equal its imported map's, the join ground equals stitch's, nothing jitters far from the origin (the ultra map's far corners), and the joins show no seam in look (MD9, --shot-pose pairs at every C9 gate, read by eye) under the Global sky. Results in notes/stitch.md (openmx); failures in notes/openmx-asks.md (after C5, T10) → tools/stitch/ · notes/stitch.md | t: tools/stitch tests — a world's openmx run built from its spec | j: openmx-worlds
 
 ### Stretch
 
