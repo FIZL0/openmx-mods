@@ -181,3 +181,9 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   spans the width or the height is not established (`notes/accuracy.md`). MD10 should say which it takes,
   so the pairs frame alike. The original's shots carry its HUD; `--overlay none` or `original` on openmx's
   side decides whether the pairs compare HUDs too.
+- **MD2 and MD10, a command line for the accuracy pairs** (T9, `notes/accuracy.md`, *openmx's half*).
+  MD2's plan text covers the track pick, but `tools/accuracy pair` runs openmx headless, one shot a pose:
+  `openmx <a mod track> --shot PATH --shot-pose x,y,z,yaw,pitch,fov`. It needs a flag that rides a mod
+  from the command line, either a folder (`--mod mods/tracks/mxvatv_nat05`, what `look::OPENMX_ARGS`
+  assumes) or `--track <mod id>` finding it in the mods folder, and both flags listed in `--help` (the
+  harness checks there before it runs). openmx `b63486a` has neither.
