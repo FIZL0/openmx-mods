@@ -147,6 +147,102 @@ SM_OF and SM_S1, and 16 on FS_C. SM_HS's scene says `TerrainWidth=5` over a 4-ro
 Nat_OR's says 4.5 ft over a 4.499999-ft one. Both are kept (§2a). AM_CS places two
 `AM_CS_Concretein*.psg` that are nowhere on the disc.
 
+### Against the game (M13)
+
+Every imported map, 2026-10-22, in PCSX2 (kit copy 9, the USA disc 1.01): a Free Ride on it with a bike, a
+RAM image of the ride, and `tools/accuracy` on the image and the mod, as M12 did on MX vs. ATV Unleashed
+(`notes/accuracy.md`, *Untamed (M13)*, says how). The mods in `out/mods/tracks/` are the importer's
+after the fixes below. Journal: `journal/2026-10-22-m13-untamed-accuracy`.
+
+**The game's code is MX vs. ATV Unleashed's, moved.** The gameplay module is `GAME_REL.BIN` again, at
+`0x48ea80` (`UI_REL.BIN` takes the same place in the menus). The terrain object has Unleashed's fields at
+Unleashed's offsets (box `+0x30/+0x40`, border `+0x50`, scale and tree `+0x90/+0x94`, split `+0x770`,
+samples per unit `+0x788`, coarse `+0x8b8`, cache flag `+0x9e0`); the queries are `0x4b0e30 (terrain,
+buf)` and the wheels' `0x4b0910`, the cell reader `0x4a8ea0`, with the same step over 127 for normals and
+the packed table behind the word at `0x5440e8`. The scene's readers are Unleashed's grown:
+`[SceneInfo]` (`0x30e490`) makes `DefaultStartDirection` unit as it reads it; `[Fog]` (`0x310180`) adds
+`FogStart` and `FogEnd`, whose defaults are the minimum and maximum distance; `[Environment]`
+(`0x30f0b0`) adds `DetailMapLODBias` and `EcosystemZone` (held less one). No scene on the disc gives
+`FogStart`, `FogEnd` or `EcosystemZone`; FS_C gives `DetailMapLODBias=-1` (its todo says so).
+
+**What is checked, per map:**
+
+- **Heights**: both queries run on the image against openmx's on the mod's `.trn`, 2,000 points in each
+  of the four ways a terrain object can be set. On all 40, every height, surface and corner weight is
+  equal; normals are 1–3 ulp off at 5,388–7,324 of the 8,000 points (67–92 %), and every field is equal
+  with the cell reader's step over 127. No map turns the packed table on.
+- **The box**: the game's terrain box is the file's leaves on all 40 (`tests/every_map.rs`), including
+  Nat_OR's, whose 4.499999-ft scale makes it 5,759.9985 (the EE's truncating multiply). openmx's
+  `world::Ground` (the scene's `TerrainWidth × 16^levels`) is 56 × 56 ft on the 17 one-level maps (the
+  12 SX, 4 FS, MT_A) where the game's is 896 × 896, and 5,760 × 5,760 on SM_HS where the game's is
+  4,032 × 5,760 (56 × 80 leaves, the scene says 5 × 5). M12's ask covers it.
+- **Scene**: 32 fields a map (35 with an ecosystem: 23 maps), as the game's readers left them, all
+  equal, the sun's direction and the start's direction (both made unit) within 1–2 ulp.
+- **Files**: every name in the game's resource name pool that is the map's is in the mod, on all 40. On
+  the 36 that are not FS the pool's head was overwritten before the capture: the names lost are the
+  first of the map's own archive (on Nat_IN its `.scn.bpb` and 11 props), which the mod holds whole. FS_C and FS_D also asked
+  for `Aud\Rider.aud.bpb`, the rider's sounds (in `MX08AUD.PSR`), counted as the game's.
+- **Shots**: the original's half of the pairs from 9–11 poses a map, 423 in all, in
+  `out/accuracy/<map>/` (not in git). openmx's half waits on MD2 and MD10, as on Unleashed.
+
+**What the importer was missing, and now copies.** The six shadow sets. `0x30cb50` makes each from
+`shadowCaster%d`, `shadowReceiver%d` and `terrainShadowReceiver%d` (and `dynamicShadowReceiver%d`, not
+asked for in a ride), and on Untamed their 18 `.psm.bpb` are an archive of their own, `res\Shadows.res`,
+which every ride opened. `untamed::load_map` adds it to each map's archives, so its members unpack into
+each mod at their own paths and mod.json names it among the members (its padding gets the usual todo).
+
+**Where the Free Ride starts.** At the scene's `DefaultStartPosition` facing `DefaultStartDirection`,
+or the master list's `StartPosition` on Nat_MA. In the RAM image, taken as soon as the ride camera was
+there, it was 15–17 ft behind the start along the start's direction on 30 maps (Nat_MA 9 ft, SX_A
+10, SX_G 12, MT_A 23, FS_C 42, SM_HS 53); on SX_H the camera had swung, and on SX_I, Nat_IN and Nat_DVCA
+the rider had rolled 65–189 ft on from it. On seven the start is under the ground: BT_A and BT_B (360 ft),
+SM_MB (334), Nat_CO (7.8), SX_I (9.6), SX_E (3.2), SX_H (2.4), and the camera there stood over the ground
+(342–368 ft over the start on the first three). The importer now treats Untamed as M12 does Unleashed: no
+"not looked up" entry, and a todo on those seven.
+
+| map | name | game's box (ft) | port's box | scene fields | map's files opened | shots | ride camera from the start |
+|---|---|---|---|---|---|---|---|
+| SX_A | Rocksbury | 896 × 896 | 56 × 56 | 32 | 188 (head lost) | 9 | -10 ft along, +4 up |
+| SX_C | Blacksburg | 896 × 896 | 56 × 56 | 32 | 179 (head lost) | 11 | -16 ft along, +7 up |
+| SX_B | Stratford | 896 × 896 | 56 × 56 | 32 | 167 (head lost) | 10 | -16 ft along, +9 up |
+| SX_G | Stoneybrook | 896 × 896 | 56 × 56 | 32 | 142 (head lost) | 11 | -12 ft along, +8 up |
+| SX_F | Collington | 896 × 896 | 56 × 56 | 32 | 199 (head lost) | 10 | -16 ft along, +8 up |
+| SX_E | Summerset | 896 × 896 | 56 × 56 | 32 | 182 (head lost) | 11 | -16 ft along, +11 up |
+| SX_D | Elkwood | 896 × 896 | 56 × 56 | 32 | 156 (head lost) | 9 | -16 ft along, +8 up |
+| SX_H | Elkwood Night | 896 × 896 | 56 × 56 | 32 | 196 (head lost) | 9 | -4 ft along, +11 up |
+| SX_I | Rhineback | 896 × 896 | 56 × 56 | 32 | 165 (head lost) | 10 | +65 ft along, +12 up |
+| SX_L | Fairfax | 896 × 896 | 56 × 56 | 32 | 165 (head lost) | 9 | -16 ft along, +8 up |
+| SX_K | Hudson | 896 × 896 | 56 × 56 | 32 | 158 (head lost) | 11 | -16 ft along, +8 up |
+| SX_J | Millwood | 896 × 896 | 56 × 56 | 32 | 173 (head lost) | 10 | -16 ft along, +4 up |
+| Nat_IN | Brown's Farm | 5760 × 5760 | same | 35 | 190 (head lost) | 11 | +72 ft along, -11 up |
+| Nat_NC | Dry Trough | 5760 × 5760 | same | 35 | 271 (head lost) | 11 | -17 ft along, -19 up |
+| Nat_MD | Agawaska | 5760 × 5760 | same | 35 | 199 (head lost) | 11 | -16 ft along, -1 up |
+| Nat_UT | Mil Mesas | 5760 × 5760 | same | 35 | 141 (head lost) | 11 | -16 ft along, -17 up |
+| Nat_NY | Gaithersville | 4480 × 4480 | same | 35 | 225 (head lost) | 11 | -16 ft along, +8 up |
+| Nat_DVCA | Cactus Valley | 4480 × 4480 | same | 35 | 274 (head lost) | 11 | +189 ft along, -37 up |
+| Nat_PA | Wellington | 5760 × 5760 | same | 35 | 183 (head lost) | 11 | -16 ft along, -121 up |
+| Nat_CO | Progressive Invitational | 4480 × 4480 | same | 35 | 201 (head lost) | 11 | -16 ft along, +16 up |
+| Nat_MA | Overlook Lake | 4480 × 4480 | same | 35 | 181 (head lost) | 11 | -9 ft along, +9 up |
+| Nat_SDCA | West Junction | 5760 × 5760 | same | 35 | 189 (head lost) | 11 | -16 ft along, -7 up |
+| Nat_OR | Pine Summit | 5760 × 5760 | same | 35 | 201 (head lost) | 11 | -16 ft along, +5 up |
+| Nat_AZ | Sawtooth Mills | 5760 × 5760 | same | 35 | 193 (head lost) | 11 | -17 ft along, -30 up |
+| SM_AS | Cayunga Air Field | 5760 × 5760 | same | 35 | 213 (head lost) | 11 | -16 ft along, -49 up |
+| SM_CF | Colby County | 4480 × 4480 | same | 35 | 204 (head lost) | 11 | -16 ft along, -31 up |
+| SM_HS | Mar Del Sol | 4032 × 5760 | 5760 × 5760 | 35 | 314 (head lost) | 11 | -53 ft along, +5 up |
+| SM_MB | Camp Bennet | 5760 × 5760 | same | 35 | 262 (head lost) | 11 | -16 ft along, +342 up |
+| SM_OF | Fort Wayne | 5760 × 5760 | same | 35 | 223 (head lost) | 11 | -17 ft along, -14 up |
+| SM_S1 | Motoville Speedway | 5760 × 5760 | same | 35 | 256 (head lost) | 11 | -15 ft along, -27 up |
+| BT_A | Corrido Armenta | 5760 × 5760 | same | 35 | 123 (head lost) | 11 | -16 ft along, +368 up |
+| BT_B | Corrido Armenta Night | 5760 × 5760 | same | 35 | 105 (head lost) | 11 | -17 ft along, +368 up |
+| FS_A | Cleaver FMX | 896 × 896 | 56 × 56 | 32 | 129 | 10 | -16 ft along, -2 up |
+| FS_B | Vicksburg FMX | 896 × 896 | 56 × 56 | 32 | 141 | 9 | -16 ft along, +4 up |
+| FS_C | Stoneybrook FMX | 896 × 896 | 56 × 56 | 32 | 212 | 11 | -42 ft along, -13 up |
+| FS_D | Rio Vista FMX | 896 × 896 | 56 × 56 | 32 | 152 | 10 | -16 ft along, +7 up |
+| MT_A | Wadsworth | 896 × 896 | 56 × 56 | 32 | 211 (head lost) | 10 | -23 ft along, +8 up |
+| AM_CS | I.S. Construction | 5760 × 5760 | same | 35 | 211 (head lost) | 11 | -16 ft along, -4 up |
+| AM_JY | TK's Salvage Yard | 4480 × 4480 | same | 35 | 148 (head lost) | 11 | -16 ft along, +8 up |
+| AM_GFUC | Chesterbridge | 5760 × 5760 | same | 35 | 164 (head lost) | 11 | -16 ft along, +6 up |
+
 ### Survey tables
 
 `cargo run --release -p survey -- untamed`, 2026-10-22. † = the terrain read through the view. The
@@ -264,4 +360,5 @@ No discs yet. Reflex has deformable terrain, so likely a heightfield again.
   table?) was not looked up in the ELF.
 - No `.psg` or texture parsed. The texture pages were walked, not decoded.
 - Heights are read, not checked against the running game (T7). The 3.5 vs 4.5 spacing comes from the
-  terrain header, not from a scene.
+  terrain header, not from a scene. (M13 checked the heights against the game on all 40 imported maps:
+  *Against the game (M13)*.)

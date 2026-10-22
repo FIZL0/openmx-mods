@@ -29,6 +29,11 @@ pub const UNTAMED: Origin = Origin { game: GAME, boot: BOOT, prefix: "untamed_",
 /// The one activity list, read by SLUS_217.01 as `%sMaster.atyList` (`0x002cb110` reads an
 /// activity's keys).
 pub const MASTER: &str = r"Env\Master.atyList.bpb";
+/// The shadow materials, an archive of their own on Untamed: `0x0030cb50` makes each shadow set from
+/// `shadowCaster%d`, `shadowReceiver%d` and `terrainShadowReceiver%d`, and in a ride on every map the
+/// game's name pool holds the six sets' 18 `.psm.bpb` with this archive (M13, as M12's loose `Tex\`
+/// ones on MX vs. ATV Unleashed). Its members are unpacked into every map's mod like the map's own.
+pub const SHADOWS: &str = r"res\Shadows.res";
 
 /// Every map archive on the disc: each folder `res\env\<MAP>\` with a `<MAP>.res`, in PSR order.
 pub fn map_folders(disc: &Disc) -> Vec<String> {
@@ -93,6 +98,9 @@ pub fn chosen(disc: &Disc, master: &[u8]) -> Vec<(String, Result<(), String>)> {
 /// reach.
 pub fn load_map(disc: &mut Disc, folder: &str, master: &(String, Vec<u8>)) -> Result<Map, String> {
     let mut map = load(disc, folder, &UNTAMED)?;
+    if let Some(e) = disc.find(SHADOWS).cloned() {
+        map.archives.push((e.name.clone(), disc.res(&e)?));
+    }
     map.ride = Some(free_ride(&master.0, &master.1, folder)?);
     map.pulled = pull_loose(disc, &map.archives)?;
     Ok(map)

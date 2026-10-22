@@ -370,6 +370,11 @@ struct Built {
 }
 
 fn build(tag: &str) -> Built {
+    build_with(tag, Vec::new())
+}
+
+/// [`build`] with more PSR members.
+fn build_with(tag: &str, extra: Vec<(&'static str, Vec<u8>)>) -> Built {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("import-untamed-{tag}"));
     let _ = std::fs::remove_dir_all(&root);
     let iso = root.join("iso");
@@ -390,6 +395,7 @@ fn build(tag: &str) -> Built {
         (r"Tex\Gone.tga", bytes(25, 100)),
     ];
     psr.extend(wanted_loose());
+    psr.extend(extra);
     let cnf = format!("BOOT2 = cdrom0:\\{BOOT};1\r\nVER = 1.01\r\n").into_bytes();
     let aud = build_psr(&[(r"Aud\x.vig", bytes(26, 100)), (r"Aud\y.vig", bytes(27, 100))]);
     let img = build_iso(&[(BOOT, bytes(6, 3000)), ("SYSTEM.CNF", cnf), ("MX08PS2.PSR", build_psr(&psr)), ("MX08AUD.PSR", aud)]);
@@ -405,6 +411,50 @@ fn load(b: &Built) -> Map {
 }
 
 // ---- the tests ----
+
+/// The shadow sets' archive (M13): every ride opens `res\Shadows.res`, so each map's mod holds its
+/// members as the map's own archives' are, and mod.json names it among the members.
+#[test]
+fn every_map_takes_the_shadow_archive() {
+    let shadows: Vec<(&str, Vec<u8>)> = vec![
+        (r"tex\shadowCaster1.psm.bpb", psm("RenderTarget")),
+        (r"tex\terrainShadowReceiver1.psm.bpb", psm("RenderTarget")),
+        (r"tex\shadowReceiver1.psm.bpb", psm("RenderTarget")),
+    ];
+    let b = build_with("shadows", vec![(r"res\Shadows.res", build_res_padded(&shadows, 1250))]);
+    let map = load(&b);
+    assert_eq!(map.archives.last().map(|(n, r)| (n.as_str(), r.padding)), Some((untamed::SHADOWS, 1250)));
+    let m = import(&map, &b.root.join("stage")).unwrap();
+    for (path, bytes) in &shadows {
+        assert_eq!(&std::fs::read(m.dir.join(path.replace('\\', "/"))).unwrap(), bytes, "{path}");
+    }
+    let j = Json::parse(&std::fs::read_to_string(m.dir.join("mod.json")).unwrap()).unwrap();
+    let members: Vec<&str> = j.get("source").and_then(|s| s.get("members")).and_then(Json::arr).unwrap().iter().filter_map(Json::str).collect();
+    assert_eq!(members[3], untamed::SHADOWS);
+    assert!(m.todo.iter().any(|t| t.starts_with(r"res\Shadows.res") && t.contains("1250 zero bytes")), "{:#?}", m.todo);
+    let r = check(&m.dir, &mut Discs::new(Some(b.image.parent().unwrap().to_path_buf())));
+    assert!(r.ok(), "{:#?}", r);
+}
+
+/// A Free Ride with no StartPosition in the master list starts at the scene's DefaultStartPosition on
+/// Untamed too (M13, every map ridden): no "not looked up" entry, and one only when that start is under
+/// the ground (SM_MB on the disc; here the generated ground is above y = 50).
+#[test]
+fn without_a_list_start_the_scene_spawns_as_the_game_does() {
+    let b = build("nostart");
+    let mut map = load(&b);
+    map.ride.as_mut().unwrap().spawn = None;
+    let m = import(&map, &b.root.join("stage")).unwrap();
+    assert!(m.spawn.is_none());
+    assert!(!m.todo.iter().any(|t| t.contains("was not looked up")), "{:#?}", m.todo);
+    assert!(
+        m.todo.iter().any(|t| t.starts_with("Test.scn: the spawn, the scene's DefaultStartPosition (100.0,50.0,100.0), is")
+            && t.contains("under the ground")
+            && t.contains("M13")),
+        "{:#?}",
+        m.todo
+    );
+}
 
 #[test]
 fn the_master_list_chooses_the_free_ride_and_national_maps() {

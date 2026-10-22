@@ -160,9 +160,118 @@ fn read(ram: &[u8], at: u32, n: u32) -> Vec<f32> {
     (0..n).map(|i| f32_at(ram, at + 4 * i).unwrap_or(f32::NAN)).collect()
 }
 
-/// The fields of the scene's `[SceneInfo]`, `[Fog]` and `[Environment]` against the game's, or why they
-/// could not be found.
+/// Where one game's scene readers leave what they read: [`MXVATV`] (the constants above) and
+/// [`UNTAMED`] (M13).
+#[derive(Clone, Copy, Debug)]
+pub struct Readers {
+    pub scene_info_vt: u32,
+    pub fog_vt: u32,
+    pub env_vt: u32,
+    pub light_vt: u32,
+    pub env_vt_word: u32,
+    pub env: &'static [(&'static str, u32, f32)],
+    pub transmitted: (&'static str, u32),
+    pub detail: (&'static str, u32, i32),
+    pub scales: [(&'static str, u32); 2],
+    /// `[Fog]`: `ColorRGB`, then `Visibility`, `Haziness`, `MinimumFogDistance`, `MaximumFogDistance`,
+    /// as offsets back from the vtable word.
+    pub fog_rgb: u32,
+    pub fog: [u32; 4],
+    /// Untamed's `FogStart` and `FogEnd`, whose defaults are the minimum and maximum distance.
+    pub fog_start_end: Option<(u32, u32)>,
+    /// Untamed's `[Environment]` ints past the detail multiplier: (key, word, default, minus one when
+    /// above zero) (`EcosystemZone`).
+    pub env_ints: &'static [(&'static str, u32, i32, bool)],
+    /// The `[SceneInfo]` reader makes `DefaultStartDirection` unit (Untamed's, with VU0's `vrsqrt`):
+    /// the text's vector is made unit here and compared as a computed field.
+    pub unit_direction: bool,
+}
+
+const UNIT_DIRECTION: &str = "SceneInfo DefaultStartDirection, made unit";
+
+/// MX vs. ATV Unleashed's (M12).
+pub const MXVATV: Readers = Readers {
+    scene_info_vt: SCENE_INFO_VT,
+    fog_vt: FOG_VT,
+    env_vt: ENV_VT,
+    light_vt: LIGHT_VT,
+    env_vt_word: ENV_VT_WORD,
+    env: &ENV,
+    transmitted: ENV_TRANSMITTED,
+    detail: ENV_DETAIL,
+    scales: ENV_SCALES,
+    fog_rgb: 0x20,
+    fog: [0x10, 0xc, 0x8, 0x4],
+    fog_start_end: None,
+    env_ints: &[],
+    unit_direction: false,
+};
+
+/// MX vs. ATV Untamed's (SLUS_217.01, M13). The same readers, grown: `[SceneInfo]` `0x30e490` (vtable
+/// `0x3e7800`, the members as Unleashed's; the direction is made unit as it is read), `[Fog]` `0x310180`
+/// (`0x3e77c0`) adds `FogStart` and `FogEnd` between the haziness and the distances, `[Environment]`
+/// `0x30f0b0` (`0x3e77d0` at word 0x169) adds `DetailMapLODBias` (word 0x153), which moves the
+/// detail multiplier to 0x154 and the box and the eco distances one word on, and `EcosystemZone` (0x168,
+/// stored less one when above zero). Lights: vtable `0x3d647c`, Unleashed's members.
+pub const UNTAMED: Readers = Readers {
+    scene_info_vt: 0x3e7800,
+    fog_vt: 0x3e77c0,
+    env_vt: 0x3e77d0,
+    light_vt: 0x3d647c,
+    env_vt_word: 0x169,
+    env: &UNTAMED_ENV,
+    transmitted: ("AmountOfTransmittedLight", 0x15d),
+    detail: ("DetailMapTilingMultiplier", 0x154, 8),
+    scales: ENV_SCALES,
+    fog_rgb: 0x28,
+    fog: [0x18, 0x14, 0x8, 0x4],
+    fog_start_end: Some((0x10, 0xc)),
+    env_ints: &[("EcosystemZone", 0x168, 1, true)],
+    unit_direction: true,
+};
+
+/// Untamed's `[Environment]` floats (`0x30f0b0`).
+pub const UNTAMED_ENV: [(&str, u32, f32); 19] = [
+    ("EcosystemWindStrength", 0x148, 0.0),
+    ("EcosystemWindGustRate", 0x149, 0.15),
+    ("EcoMaxPhysicsEco", 0x14b, 50.0),
+    ("Eco2dFadeDistance", 0x14c, 0.0),
+    ("Eco2dClipDistance", 0x14d, 0.0),
+    ("TerrainWidth", 0x14e, 0.0),
+    ("TerrainBreadth", 0x14f, 0.0),
+    ("TerrainWidthScale", 0x150, 0.0),
+    ("TerrainBreadthScale", 0x151, 0.0),
+    ("TerrainBorderWidth", 0x152, 0.0),
+    ("DetailMapLODBias", 0x153, 0.0),
+    ("Xmin", 0x155, 0.0),
+    ("Xmax", 0x156, 0.0),
+    ("Zmin", 0x157, 0.0),
+    ("Zmax", 0x158, 0.0),
+    ("MinDivisionSize", 0x159, 96.0),
+    ("EcoDistance2D", 0x15a, 180.0),
+    ("EcoDistance3D", 0x15b, 120.0),
+    ("ShrubberyDistLimit", 0x15c, 400.0),
+];
+
+/// The readers of the game with this boot ELF.
+pub fn readers(boot: &str) -> Option<Readers> {
+    if boot.eq_ignore_ascii_case(crate::source::MXVATV.boot) {
+        Some(MXVATV)
+    } else if boot.eq_ignore_ascii_case(crate::source::UNTAMED.boot) {
+        Some(UNTAMED)
+    } else {
+        None
+    }
+}
+
+/// The fields of the scene's `[SceneInfo]`, `[Fog]` and `[Environment]` against MX vs. ATV Unleashed's,
+/// or why they could not be found.
 pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
+    compare_with(ram, scene_text, &MXVATV)
+}
+
+/// [`compare`] with one game's [`Readers`].
+pub fn compare_with(ram: &[u8], scene_text: &str, r: &Readers) -> Result<Vec<Field>, String> {
     let s = sections(scene_text);
     let empty = BTreeMap::new();
     let sec = |n: &str| s.get(n).unwrap_or(&empty);
@@ -179,42 +288,69 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
     };
 
     let info = sec("sceneinfo");
-    let v = one(SCENE_INFO_VT, "[SceneInfo]")?;
+    // Untamed's reader makes the direction unit, and on SX_C a block of the class that was never read,
+    // all zeros, comes first in the image: the scene's is the first with a unit direction, else the first.
+    let unit = |v: u32| {
+        let d = read(ram, v.saturating_sub(0x14), 3);
+        ((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - 1.0).abs() < 1e-3
+    };
+    let blocks = with_vtable(ram, r.scene_info_vt);
+    let v = match blocks.iter().find(|&&v| unit(v)) {
+        Some(&v) => v,
+        None => one(r.scene_info_vt, "[SceneInfo]")?,
+    };
     let start = info.get("defaultstartposition").map(|t| floats(t));
     push("SceneInfo DefaultStartPosition".into(), start, vec![0.0; 3], read(ram, v - 0x24, 3));
     let dir = info.get("defaultstartdirection").map(|t| floats(t));
-    push("SceneInfo DefaultStartDirection".into(), dir, vec![0.0, 0.0, 1.0], read(ram, v - 0x14, 3));
+    let game_dir = read(ram, v - 0x14, 3);
+    match dir {
+        // Marked computed below, once `push` is done with `out`.
+        Some(d) if r.unit_direction && d.len() == 3 => {
+            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            push(UNIT_DIRECTION.into(), Some(d.iter().map(|c| c / len).collect()), vec![], game_dir);
+        }
+        _ => push("SceneInfo DefaultStartDirection".into(), dir, vec![0.0, 0.0, 1.0], game_dir),
+    }
 
     let fog = sec("fog");
+    let fog_vt = r.fog_vt;
     // A zone's fog is an object of the same class whose distances are not set: the scene's is the first
     // with a distance pair (0 <= min <= max, max >= 1).
-    let v = with_vtable(ram, FOG_VT)
+    let v = with_vtable(ram, fog_vt)
         .into_iter()
         .find(|&v| {
             let (lo, hi) = (f32_at(ram, v - 8).unwrap_or(f32::NAN), f32_at(ram, v - 4).unwrap_or(f32::NAN));
             (lo == 0.0 || lo.is_normal()) && lo >= 0.0 && hi.is_normal() && hi >= 1.0 && hi >= lo
         })
-        .ok_or_else(|| format!("no [Fog] reader (vtable {FOG_VT:#x}) with distances in the image"))?;
+        .ok_or_else(|| format!("no [Fog] reader (vtable {fog_vt:#x}) with distances in the image"))?;
     let rgb = fog.get("colorrgb").map(|t| {
         let mut c = floats(t);
         c.resize(3, 255.0);
         c.push(255.0);
         c
     });
-    push("Fog ColorRGB".into(), rgb, vec![255.0; 4], read(ram, v - 0x20, 4));
+    push("Fog ColorRGB".into(), rgb, vec![255.0; 4], read(ram, v - r.fog_rgb, 4));
+    let mut fog_vals = [0.0f32; 4];
     for (i, k) in ["Visibility", "Haziness", "MinimumFogDistance", "MaximumFogDistance"].iter().enumerate() {
-        let val = fog.get(&k.to_ascii_lowercase()).and_then(|t| floats(t).first().copied()).map(|f| vec![f]);
-        push(format!("Fog {k}"), val, vec![FOG_DEFAULTS[i]], read(ram, v - 0x10 + 4 * i as u32, 1));
+        let val = fog.get(&k.to_ascii_lowercase()).and_then(|t| floats(t).first().copied());
+        fog_vals[i] = val.unwrap_or(FOG_DEFAULTS[i]);
+        push(format!("Fog {k}"), val.map(|f| vec![f]), vec![FOG_DEFAULTS[i]], read(ram, v - r.fog[i], 1));
+    }
+    if let Some((start, end)) = r.fog_start_end {
+        for (k, off, d) in [("FogStart", start, fog_vals[2]), ("FogEnd", end, fog_vals[3])] {
+            let val = fog.get(&k.to_ascii_lowercase()).and_then(|t| floats(t).first().copied()).map(|f| vec![f]);
+            push(format!("Fog {k}"), val, vec![d], read(ram, v - off, 1));
+        }
     }
 
     let env = sec("environment");
-    let v = one(ENV_VT, "[Environment]")?;
-    let base = v - 4 * ENV_VT_WORD;
+    let v = one(r.env_vt, "[Environment]")?;
+    let base = v - 4 * r.env_vt_word;
     let word = |w: u32| base + 4 * w;
     let key = |k: &str| env.get(&k.to_ascii_lowercase()).and_then(|t| floats(t).first().copied());
     let border = key("TerrainBorderWidth").unwrap_or(0.0);
     let eco = env.get("ecosystemfile").is_some_and(|f| !f.is_empty() && !f.eq_ignore_ascii_case("none"));
-    for (k, w, d) in ENV {
+    for &(k, w, d) in r.env {
         let val = key(k);
         if (val.is_none() && ENV_CONDITIONAL.contains(&k)) || (!eco && ENV_ECO.contains(&k)) {
             continue;
@@ -228,14 +364,20 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
         };
         push(format!("Environment {k}"), val.map(|f| vec![f]), vec![d], read(ram, word(w), 1));
     }
-    let (k, w) = ENV_TRANSMITTED;
+    let (k, w) = r.transmitted;
     let val = env.get(&k.to_ascii_lowercase()).and_then(|t| floats(t).first().copied()).map(|f| vec![f]);
     push(format!("Environment {k}"), val, vec![0.0], read(ram, word(w), 1));
-    let (k, w, d) = ENV_DETAIL;
-    let val = env.get(&k.to_ascii_lowercase()).and_then(|t| t.trim().parse::<i32>().ok()).map(|i| vec![i as f32]);
+    let int = |k: &str| env.get(&k.to_ascii_lowercase()).and_then(|t| t.trim().parse::<i32>().ok());
+    let (k, w, d) = r.detail;
     let game = u32_at(ram, word(w)).map_or(f32::NAN, |i| i as i32 as f32);
-    push(format!("Environment {k}"), val, vec![d as f32], vec![game]);
-    for (k, w) in ENV_SCALES {
+    push(format!("Environment {k}"), int(k).map(|i| vec![i as f32]), vec![d as f32], vec![game]);
+    for &(k, w, d, less_one) in r.env_ints {
+        let held = |i: i32| if less_one && i > 0 { i - 1 } else { i };
+        let game = u32_at(ram, word(w)).map_or(f32::NAN, |i| i as i32 as f32);
+        let what = if less_one { format!("Environment {k} (less one)") } else { format!("Environment {k}") };
+        push(what, int(k).map(|i| vec![held(i) as f32]), vec![held(d) as f32], vec![game]);
+    }
+    for (k, w) in r.scales {
         let val = env.get(&k.to_ascii_lowercase()).map(|t| {
             let mut c = floats(t);
             c.resize(3, 1.0);
@@ -246,7 +388,7 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
     }
 
     let mut computed = Vec::new();
-    let lights: Vec<u32> = with_vtable(ram, LIGHT_VT).into_iter().map(|v| v - 4).collect();
+    let lights: Vec<u32> = with_vtable(ram, r.light_vt).into_iter().map(|v| v - 4).collect();
     let n: usize = sec("lights").get("numberoflights").and_then(|t| t.trim().parse().ok()).unwrap_or(0);
     for i in 1..=n {
         let l = sec(&format!("light{i}"));
@@ -289,6 +431,9 @@ pub fn compare(ram: &[u8], scene_text: &str) -> Result<Vec<Field>, String> {
         }
     }
     out.extend(computed);
+    for f in out.iter_mut().filter(|f| f.what == UNIT_DIRECTION) {
+        f.computed = true;
+    }
     Ok(out)
 }
 
@@ -363,5 +508,41 @@ mod tests {
         assert_eq!(get("Environment DetailMapTilingMultiplier").verdict(), "equal");
         assert_eq!(get("Environment EcoDiffuseScale").verdict(), "equal");
         assert!(f.iter().all(|x| x.ulps() == 0), "{}", text("t", &f));
+    }
+
+    #[test]
+    fn reads_untamed_blocks_with_their_extra_keys() {
+        let mut ram = vec![0u8; 0x4000];
+        // A SceneInfo block never read (zeros, as SX_C's image has one) before the scene's.
+        put_u32(&mut ram, 0x0a4, UNTAMED.scene_info_vt);
+        put(&mut ram, 0x100, &[10.0, 20.0, 30.0, 1.0, 0.6, 0.0, 0.8, 1.0]);
+        put_u32(&mut ram, 0x124, UNTAMED.scene_info_vt);
+        // Fog: colour, visibility, haziness, FogStart, FogEnd, then the distances, then the vtable.
+        put(&mut ram, 0x200, &[114.0, 117.0, 123.0, 255.0, 1.0, 0.0, 2000.0, 4000.0, 2000.0, 4000.0]);
+        put_u32(&mut ram, 0x228, UNTAMED.fog_vt);
+        let env = 0x1000u32;
+        put_u32(&mut ram, env + 4 * 0x169, UNTAMED.env_vt);
+        put(&mut ram, env + 4 * 0x14e, &[1.0, 1.0, 3.5, 3.5, 1000.0, 0.0]);
+        put_u32(&mut ram, env + 4 * 0x154, 8);
+        put(&mut ram, env + 4 * 0x155, &[-1000.0, 1896.0, -1000.0, 1896.0, 96.0, 180.0, 120.0, 400.0, 0.0]);
+        put(&mut ram, env + 4 * 0x160, &[1.0; 8]);
+        put_u32(&mut ram, env + 4 * 0x168, 2);
+        let scene = "[SceneInfo]\nDefaultStartPosition=10,20,30\nDefaultStartDirection=3,0,4\n\n[Environment]\n\
+            TerrainWidth=1\nTerrainBreadth=1\nTerrainWidthScale=3.5\nTerrainBreadthScale=3.5\nTerrainBorderWidth=1000\n\
+            EcosystemZone=3\n\n[Fog]\nColorRGB=114,117,123\nHaziness=0.0\nMinimumFogDistance=2000\nMaximumFogDistance=4000\n";
+        let f = compare_with(&ram, scene, &UNTAMED).unwrap();
+        let get = |w: &str| f.iter().find(|x| x.what == w).unwrap_or_else(|| panic!("no {w}"));
+        assert!(f.iter().all(|x| x.ulps() == 0), "{}", text("t", &f));
+        // The reader made the direction unit: the text's 3,0,4 is held as 0.6,0,0.8.
+        assert!(get("SceneInfo DefaultStartDirection, made unit").computed);
+        // FogStart and FogEnd default to the distances; EcosystemZone is held less one.
+        assert!(get("Fog FogStart").defaulted && get("Fog FogStart").game == vec![2000.0]);
+        assert_eq!(get("Environment EcosystemZone (less one)").game, vec![2.0]);
+        assert_eq!(get("Environment Xmax").scene, vec![1896.0]);
+        assert_eq!(get("Environment DetailMapLODBias").game, vec![0.0]);
+        // Unleashed's readers do not find Untamed's blocks.
+        assert!(compare_with(&ram, scene, &MXVATV).is_err());
+        assert_eq!(readers("SLUS_217.01").unwrap().env_vt, UNTAMED.env_vt);
+        assert!(readers("SLUS_207.67").is_none());
     }
 }

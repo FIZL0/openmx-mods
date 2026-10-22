@@ -179,15 +179,23 @@ pub fn openmx_ready(openmx: &Path, template: &str) -> Result<(), String> {
 /// The ride camera's field of view on MX vs. ATV, which the generated poses keep.
 pub const FOV: f32 = 85.0;
 
+/// The ride camera's field of view in the game with this boot ELF: 75 on Untamed (its Free Ride camera's
+/// viewport on every map ridden, M13), else [`FOV`].
+pub fn ride_fov(boot: &str) -> f32 {
+    if boot.eq_ignore_ascii_case(crate::source::UNTAMED.boot) { 75.0 } else { FOV }
+}
+
 /// The terrain's box as the game's object has it (M12): as far as the file's leaves reach, 16 samples a
 /// leaf at the file's scale. On every MX vs. ATV map it is the object's own box (`heights`' box check).
 /// openmx's `world::Ground` takes the scene's `TerrainWidth x 16^levels` samples instead, which on a
 /// one-level terrain (the arenas) is 16, not 256, and on Nat04 (56 x 80 leaves, the scene says 5 x 5)
 /// is 1280 across, not 896 (notes/openmx-asks.md).
+/// The product is the EE's (`terrain.scale` is an `F`), which truncates: Untamed's Nat_OR, at
+/// scale 4.499999, has a box of 5759.9985, where a rounding multiply gives 5759.999 (M13).
 pub fn terrain_box(_m: &crate::modfiles::TrackMod, terrain: &game_sim::track::Terrain) -> (f32, f32) {
     let (x, z) = leaf_extent(terrain);
-    let s = terrain.scale.0;
-    (x as f32 * s, z as f32 * s)
+    let s = terrain.scale;
+    ((s * ps2_float::F::from(x as i32)).0, (s * ps2_float::F::from(z as i32)).0)
 }
 
 /// How many samples across and along the file's leaves reach: the farthest leaf's far edge.

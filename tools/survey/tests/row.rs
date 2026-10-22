@@ -210,6 +210,13 @@ const EXPECTED: &[&str] = &[
     "Swing.col",
 ];
 
+/// [`EXPECTED`] as the survey gives it with the openmx linked here: the † marks a terrain
+/// `Terrain::parse` refuses, which openmx's S98 (MD1, 2026-10-22) stopped doing for paged terrains.
+fn expected() -> Vec<String> {
+    let refused = Terrain::parse(&build_trn()).is_err();
+    EXPECTED.iter().map(|c| if refused { c.to_string() } else { c.trim_end_matches(" †").to_string() }).collect()
+}
+
 fn survey(res: Vec<u8>) -> survey::MapRow {
     map_res("test", r"Env\test\test.res", res, &mut |name| {
         name == "shared.col"
@@ -220,18 +227,23 @@ fn survey(res: Vec<u8>) -> survey::MapRow {
 #[test]
 fn a_generated_res_gives_the_expected_row() {
     let row = survey(build_res(&members(), 0));
-    assert_eq!(row.cells(), EXPECTED);
+    assert_eq!(row.cells(), expected());
     assert_eq!(row.res_padding, 0);
     assert_eq!(row.source_note, None);
     let t = row.terrain.as_ref().unwrap();
-    assert!(
-        t.viewed
-            .as_ref()
-            .unwrap()
-            .contains("but the tree starts at"),
-        "{:?}",
-        t.viewed
-    );
+    // Viewed only while openmx refuses a paged terrain (before its S98, MD1).
+    if Terrain::parse(&build_trn()).is_err() {
+        assert!(
+            t.viewed
+                .as_ref()
+                .unwrap()
+                .contains("but the tree starts at"),
+            "{:?}",
+            t.viewed
+        );
+    } else {
+        assert_eq!(t.viewed, None);
+    }
     let refused: Vec<_> = row.refused().collect();
     assert_eq!(
         refused,
@@ -254,7 +266,7 @@ fn a_padded_directory_is_read_through_a_view_and_gives_the_same_row() {
         "openmx now takes padding: drop the view"
     );
     let row = survey(padded);
-    assert_eq!(row.cells(), EXPECTED);
+    assert_eq!(row.cells(), expected());
     assert_eq!(row.res_padding, 260);
     assert!(row.source_note.is_some());
     // Without any padding to take off, a refused .res stays refused.
@@ -274,8 +286,6 @@ fn the_view_moves_only_the_blocks_and_the_reader_sees_the_files_own() {
     let tex = textures(&trn, &l).unwrap();
     assert_eq!(tex.gap, 80);
     assert_eq!(tex.pages[1].at, tex.pages[0].at + 40);
-    assert!(Terrain::parse(&trn).is_err());
-
     let view = terrain_view(&trn, &l).unwrap();
     assert_eq!(view.len(), trn.len());
     assert_eq!(
@@ -283,7 +293,10 @@ fn the_view_moves_only_the_blocks_and_the_reader_sees_the_files_own() {
         trn[l.tree_at..],
         "the tree must not move"
     );
-    let t = Terrain::parse(&view).unwrap();
+    // openmx reads the file itself since its S98 (MD1, 2026-10-22); before that it refused it and the
+    // survey read the view.
+    let read = if Terrain::parse(&trn).is_err() { view.clone() } else { trn.clone() };
+    let t = Terrain::parse(&read).unwrap();
     for k in 0..2u16 {
         let (a, b) = (k as usize * BLOCK_BYTES, (k as usize + 1) * BLOCK_BYTES);
         let own = &trn[l.blocks_at + a..l.blocks_at + b];
@@ -482,7 +495,7 @@ fn an_untamed_bpb_scene_is_decoded_and_gives_the_same_row() {
     let mut m = members();
     m[0] = (r"Env\test\test.scn.bpb", scene.clone());
     let row = survey(build_res(&m, 100));
-    let mut want: Vec<String> = EXPECTED.iter().map(|s| s.to_string()).collect();
+    let mut want = expected();
     want[7] = format!("TestMap (BPB, {} B)", scene.len());
     assert_eq!(row.cells(), want);
 

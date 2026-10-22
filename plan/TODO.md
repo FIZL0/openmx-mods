@@ -23,7 +23,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 A map is done when it matches the game it came from, not when it loads. Terrain, collision, placements and
 scene values are copied as the disc has them, never resampled or approximated; what the port cannot show yet
 goes in mod.json's `todo` and notes/openmx-asks.md.
-- [ ] **M13** MX vs. ATV Untamed accuracy pass: the same as M12 for every imported Untamed map (M4), on Untamed running in PCSX2 (after M4, T7, M12) → tools/import-mxvatv/ · notes/mxvatv-later.md · notes/openmx-asks.md | t: tools/accuracy over every imported Untamed map | j: untamed-accuracy
 
 ### Music
 
