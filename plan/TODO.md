@@ -31,6 +31,20 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 - [ ] **M1** USGS 3DEP / SRTM → a height grid → T2's writer. Glamis dunes first (~1 m lidar), then Ocotillo Wells, Little Sahara (UT), Hatfield-McCoy; ground texture from the matching NAIP image. Public domain, so these mods may ship whole in `out/` releases (not in git). Fit to the limits T3 found (after T2, T1) → tools/elevation/ | t: tools/elevation tests on a generated GeoTIFF | j: elevation
 
+### Accuracy
+
+A map is done when it matches the game it came from, not when it loads. Terrain, collision, placements and
+scene values are copied as the disc has them, never resampled or approximated; what the port cannot show yet
+goes in mod.json's `todo` and notes/openmx-asks.md.
+
+### Music
+
+### Combined maps
+
+One giant map per game out of its non-racing maps (no stadium with crowd seats: no SX, FS or other arena
+maps), their edge berms removed and the maps joined smoothly; then one ultra map out of every game's giant
+map and MX Unleashed's. Inside each source map the ground stays the original's; only the joins change.
+
 ### Stretch
 
 Waiting on a disc in `iso/` or on a map author's permission; nothing here runs unattended.
