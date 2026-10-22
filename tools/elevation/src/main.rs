@@ -349,7 +349,12 @@ fn cover(a: &Args) -> Result<(), String> {
     let green: f32 = a
         .one("green")
         .map_or(Ok(site.green), |s| s.parse().map_err(|_| "--green"))?;
-    let covers = site.ground.classify(&seen, w, green);
+    let mut m = elevation::dem::Mosaic::open(&req.dem)?;
+    let (raw, _, _) = elevation::cut(&mut m, req.centre, samples)?;
+    let v_unit = elevation::unit_m(m.geo.vertical_units, "vertical")?;
+    let h_unit = elevation::unit_m(m.geo.linear_units, "horizontal")?;
+    let metres: Vec<f32> = raw.iter().map(|v| (f64::from(*v) * v_unit) as f32).collect();
+    let covers = site.ground.classify_with_dem(&seen, &metres, w, pixel * h_unit, green);
     // The picture itself, beside the classes, when asked for.
     if let Some(p) = a.one("picture") {
         let mut rgb = vec![0u8; w * h * 3];
@@ -363,7 +368,7 @@ fn cover(a: &Args) -> Result<(), String> {
         game_render::png::write_rgb(std::path::Path::new(&p), w, h, &rgb)?;
     }
     let mut rgb = vec![0u8; w * h * 3];
-    let mut count = [0u64; 4];
+    let mut count = [0u64; 5];
     let mut hist = [0u64; 20];
     for z in 0..h {
         for x in 0..w {
@@ -372,7 +377,8 @@ fn cover(a: &Args) -> Result<(), String> {
                 hist[((ndvi(s) + 1.0) * 10.0).clamp(0.0, 19.0) as usize] += 1;
             }
             let (c, k) = match (s, covers[x + z * w]) {
-                (None, _) => ([200, 0, 0], 3),
+                (None, _) => ([200, 0, 0], 4),
+                (_, Cover::Water) => ([40, 80, 200], 3),
                 (_, Cover::Sand) => ([230, 210, 140], 0),
                 (_, Cover::Dirt) => ([120, 85, 50], 1),
                 (_, Cover::Grass) => ([40, 150, 40], 2),
@@ -386,12 +392,13 @@ fn cover(a: &Args) -> Result<(), String> {
     game_render::png::write_rgb(std::path::Path::new(out), w, h, &rgb)?;
     let all = (w * h) as f64;
     println!(
-        "{id} ({}): sand {:.1}%, dirt {:.1}%, grass {:.1}%, no picture {:.1}%",
+        "{id} ({}): sand {:.1}%, dirt {:.1}%, grass {:.1}%, water {:.1}%, no picture {:.1}%",
         site.ground.name(),
         100.0 * count[0] as f64 / all,
         100.0 * count[1] as f64 / all,
         100.0 * count[2] as f64 / all,
-        100.0 * count[3] as f64 / all
+        100.0 * count[3] as f64 / all,
+        100.0 * count[4] as f64 / all
     );
     let line: Vec<String> = hist
         .iter()
