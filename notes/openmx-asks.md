@@ -19,6 +19,7 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
 - **MD9** the join ground blending smoothly in look (textures, detail) as well as shape; World sky: Global (default, one skybox and lighting) or Per map.
 - **MD10** `--shot-pose`, for the accuracy harness (T7).
 - **MD11** the track pick filtered by game: All games, MX Unleashed, MX vs. ATV Unleashed, Untamed, …
+- **MD13** MX vs. ATV scene keys: a `Hide=True` race model or object (start zones, gates, rings) neither drawn nor collided in a free ride.
 
 ## Open
 
