@@ -185,6 +185,25 @@ that in mind, or find the HUD's switch first.
 - Every map: `capture` in its Free Ride, then `heights`. Then `poses` (add landmarks with `--add`),
   `shoot`, and `pair` once openmx has MD2 and MD10. Check `pair`'s `--openmx-args` template (`--mod
   {mod} --shot {shot} --shot-pose {pose}`) against what MD2 and MD10 name their flags.
+
+## openmx's half (T9, waiting)
+
+On 2026-10-22 openmx's main (`b63486a`) has neither MD2 nor MD10: both are open in its `plan/TODO.md`,
+no branch or worktree carries them, and its `--help` has `--shot` and `--shot-frame` but no
+`--shot-pose` and no flag for a mod folder. `accuracy pair` on Lago says so in `index.md` and takes
+nothing. Ready for when they land:
+
+- The template is `look::OPENMX_ARGS`, the command line `look::openmx_args` (tested: a path with a
+  space stays one word, the `--shot-pose` word reads back as the pose). MD10's flag and its
+  `x,y,z,yaw,pitch,fov` are fixed by openmx's plan. MD2's flag is not named there: `--mod` is a
+  stand-in. When MD2 lands, change `OPENMX_ARGS` to its flag (if it is a track id rather than a
+  folder, `--track {id}` needs a `{id}` placeholder, from mod.json).
+- `pair` checks the binary's `--help` for every flag in the template as a whole word. The old check
+  looked for the string `--mod`, which `--modifiers` (in openmx's argument parser) would have passed.
+- Still to do then: settle the fov's axis (Poses, above) by shooting one pose in openmx with 85 and
+  comparing where the horizon and a landmark fall at the frame's edges, take the eight pairs, and write
+  what differs here. The original's shots carry the HUD; give openmx `--overlay original` or `none`
+  according to what the pairs are for.
 - Untamed (M13): no `source` row yet. It needs a kit config with its own module (look for a `*_REL.BIN`
   on its disc), its object layout, query, cell reader and camera found the way above, and a check of
   which normal path its reader takes.

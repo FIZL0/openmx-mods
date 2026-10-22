@@ -425,10 +425,10 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
     let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
     let out = out_dir(a, &m);
     let openmx = PathBuf::from(a.take("--openmx").unwrap_or_else(|| "openmx/target/release/openmx".into()));
-    let template = a.take("--openmx-args").unwrap_or_else(|| "--mod {mod} --shot {shot} --shot-pose {pose}".into());
+    let template = a.take("--openmx-args").unwrap_or_else(|| look::OPENMX_ARGS.into());
     a.done()?;
     let src = source_of(&m)?;
-    let ready = look::openmx_ready(&openmx);
+    let ready = look::openmx_ready(&openmx, &template);
     let mut ok = true;
     for r in look::rows(&out)? {
         if !r.original {
@@ -438,12 +438,7 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
         if !r.openmx
             && let Ok(()) = ready
         {
-            let args: Vec<String> = template
-                .split_whitespace()
-                .map(|w| {
-                    w.replace("{mod}", &m.folder.to_string_lossy()).replace("{shot}", &shot.to_string_lossy()).replace("{pose}", &r.pose.md10())
-                })
-                .collect();
+            let args = look::openmx_args(&template, &m.folder, &shot, &r.pose);
             let st = Command::new(&openmx).args(&args).status().map_err(|e| format!("{}: {e}", openmx.display()))?;
             if !st.success() || !shot.exists() {
                 eprintln!("{}: openmx gave no shot ({st})", r.name);

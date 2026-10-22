@@ -122,17 +122,52 @@ pub fn index(dir: &Path, map: &str, game: &str, waiting: Option<&str>) -> Result
     Ok(s)
 }
 
-/// Whether an openmx binary takes `--shot-pose` (MD10) and a mod track (MD2), from its `--help`.
-pub fn openmx_ready(openmx: &Path) -> Result<(), String> {
+/// `pair`'s default `--openmx-args`: `{mod}` the mod's folder, `{shot}` the PNG to write, `{pose}` the
+/// pose as [`Pose::md10`] writes it. The flags are the ones openmx's plan names (MD10's `--shot-pose`,
+/// the existing `--shot`); MD2 has not named its flag for a track from a mod folder yet, so `--mod` is a
+/// stand-in until it lands (T9).
+pub const OPENMX_ARGS: &str = "--mod {mod} --shot {shot} --shot-pose {pose}";
+
+/// openmx's command line for one pose: the template split on whitespace first, then each word's
+/// placeholders filled, so a path with spaces stays one argument.
+pub fn openmx_args(template: &str, folder: &Path, shot: &Path, pose: &Pose) -> Vec<String> {
+    template
+        .split_whitespace()
+        .map(|w| w.replace("{mod}", &folder.to_string_lossy()).replace("{shot}", &shot.to_string_lossy()).replace("{pose}", &pose.md10()))
+        .collect()
+}
+
+/// Whether `help` names `flag` as a word of its own: `--mod` is not in `--modifiers`.
+pub fn help_has_flag(help: &str, flag: &str) -> bool {
+    help.match_indices(flag).any(|(i, _)| {
+        let before = help[..i].chars().next_back();
+        let after = help[i + flag.len()..].chars().next();
+        let word = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
+}
+
+/// What an openmx `--help` lacks of the flags `template` uses (`--shot-pose`, MD10; `--mod`, MD2), or
+/// nothing.
+pub fn openmx_missing(help: &str, template: &str) -> Vec<String> {
+    template
+        .split_whitespace()
+        .filter(|w| w.starts_with("--"))
+        .map(|w| w.split('=').next().unwrap_or(w))
+        .filter(|f| !help_has_flag(help, f))
+        .map(|f| match f {
+            "--shot-pose" => "--shot-pose (openmx MD10)".to_owned(),
+            "--mod" => "--mod, a track from a mod folder (openmx MD2)".to_owned(),
+            f => f.to_owned(),
+        })
+        .collect()
+}
+
+/// Whether an openmx binary takes every flag of `template`, from its `--help`.
+pub fn openmx_ready(openmx: &Path, template: &str) -> Result<(), String> {
     let out = Command::new(openmx).arg("--help").output().map_err(|e| format!("{}: {e}", openmx.display()))?;
     let help = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    let mut missing = Vec::new();
-    if !help.contains("--shot-pose") {
-        missing.push("--shot-pose (openmx MD10)");
-    }
-    if !help.contains("--mod") {
-        missing.push("--mod, a track from a mod folder (openmx MD2)");
-    }
+    let missing = openmx_missing(&help, template);
     if missing.is_empty() { Ok(()) } else { Err(format!("{} has no {}", openmx.display(), missing.join(" and no "))) }
 }
 
