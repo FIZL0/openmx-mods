@@ -23,12 +23,22 @@ const USAGE: &str = "accuracy: a track mod against its source game running in PC
   accuracy capture --out IMAGE [--kit KIT] [--slot 8]
       Saves the running game (kit copy $KIT_PCSX2) into a scratch slot and extracts its EE RAM.
 
+  accuracy scene --mod DIR --ram IMAGE [--out DIR]
+      The scene's [SceneInfo], [Fog] and [Environment] as the game holds them in IMAGE, against the
+      mod's .scn, field by field (sceneram.rs). Writes DIR/scene.txt. Exit 1 if a field differs by more
+      than an ulp.
+
+  accuracy files --mod DIR --ram IMAGE [--out DIR]
+      The resource names the game opened for the map (its name pool in IMAGE) against the mod's files
+      (loaded.rs). Writes DIR/files.txt. Exit 1 if the game opened a file of the map the mod lacks.
+
   accuracy pose --ram IMAGE [--mod DIR]
       The viewports in IMAGE, and the camera pose of the one over the mod's terrain.
 
-  accuracy poses --mod DIR [--out DIR] [--add NAME=x,y,z,yaw,pitch,fov]...
+  accuracy poses --mod DIR [--out DIR] [--landmarks N] [--add NAME=x,y,z,yaw,pitch,fov]...
       Writes the map's standard poses into DIR/poses.txt (the scene's start, the centre looking four
-      ways, an overview, the highest ground looking across), and any --add ones.
+      ways, an overview, the highest ground looking across), one looking at each of the map's N
+      biggest landmarks (default 3, landmarks.rs), and any --add ones.
 
   accuracy shoot --mod DIR [--viewport ADDR] [--name POSE]... [--out DIR] [--kit KIT] [--settle MS]
   accuracy shoot --mod DIR [--viewport ADDR] --live NAME [--pad CMD]...
@@ -80,6 +90,8 @@ fn main() -> ExitCode {
         "heights" => cmd_heights(&mut a),
         "capture" => cmd_capture(&mut a),
         "pose" => cmd_pose(&mut a),
+        "scene" => cmd_scene(&mut a),
+        "files" => cmd_files(&mut a),
         "setup" => cmd_setup(&mut a),
         "poses" => cmd_poses(&mut a),
         "shoot" => cmd_shoot(&mut a),
@@ -310,8 +322,13 @@ fn cmd_poses(a: &mut Args) -> Result<bool, String> {
     let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
     let out = out_dir(a, &m);
     let extra = a.all("--add");
+    let n: usize = a.take("--landmarks").map_or(Ok(3), |s| s.parse().map_err(|e| format!("--landmarks: {e}")))?;
     a.done()?;
     for (name, p) in look::standard_poses(&m) {
+        look::write_pose(&out, &name, &p)?;
+    }
+    let marks = accuracy::landmarks::of_mod(&m, n)?;
+    for (name, p) in accuracy::landmarks::poses(&m, &marks) {
         look::write_pose(&out, &name, &p)?;
     }
     for e in extra {
@@ -369,9 +386,7 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
         let shot = (|| {
             wait();
             let p = live_pose(&k, &src, vp_at, &scratch)?;
-            let mut c = kit(&k, Some(&src));
-            c.arg("shot").arg(look::original_png(&out, &name));
-            run(c)?;
+            shot(&k, &src, &look::original_png(&out, &name))?;
             look::write_pose(&out, &name, &p)?;
             println!("{name}: the game's own camera, --shot-pose {}", p.md10());
             Ok::<(), String>(())
@@ -398,9 +413,7 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
         let r = (|| {
             place(&k, &src, vp_at, p)?;
             wait();
-            let mut c = kit(&k, Some(&src));
-            c.arg("shot").arg(look::original_png(&out, name));
-            run(c)?;
+            shot(&k, &src, &look::original_png(&out, name))?;
             // What the viewport held through the shot: the game normalises forward and up itself, so
             // the read-back is compared to a thousandth.
             let back = live_pose(&k, &src, vp_at, &scratch)?;
@@ -419,6 +432,50 @@ fn cmd_shoot(a: &mut Args) -> Result<bool, String> {
     hold_camera(&k, &src, false)?;
     let _ = std::fs::remove_file(&scratch);
     Ok(ok)
+}
+
+/// `./kit shot` into `png`. The kit copies PCSX2's screenshot once its size holds for 0.3 s, which can
+/// be before PCSX2 has written it all (M12: 35 of the first 600 shots ended short of the PNG's `IEND`).
+/// Then the screenshot is waited for in the copy's `snaps` folder (the newest file there, written since
+/// the shot was asked for) until it is whole, and copied again.
+fn shot(k: &Path, src: &source::Source, png: &Path) -> Result<(), String> {
+    let asked = std::time::SystemTime::now();
+    let mut c = kit(k, Some(src));
+    c.arg("shot").arg(png);
+    run(c)?;
+    if look::png_complete(png) {
+        return Ok(());
+    }
+    let snaps = config_dir(k)?.join("snaps");
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let newest = std::fs::read_dir(&snaps)
+            .map_err(|e| format!("{}: {e}", snaps.display()))?
+            .flatten()
+            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+            .filter(|(t, _)| *t >= asked - std::time::Duration::from_secs(1))
+            .max();
+        if let Some((_, from)) = newest
+            && look::png_complete(&from)
+        {
+            std::fs::copy(&from, png).map_err(|e| format!("{} -> {}: {e}", from.display(), png.display()))?;
+            return Ok(());
+        }
+    }
+    Err(format!("{}: the screenshot is cut short, and no whole one came in {}", png.display(), snaps.display()))
+}
+
+/// The running copy's PCSX2 config folder, from `kit pcsx2 status`.
+fn config_dir(k: &Path) -> Result<PathBuf, String> {
+    let status = run({
+        let mut c = kit(k, None);
+        c.args(["pcsx2", "status"]);
+        c
+    })?;
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("config").map(|r| PathBuf::from(r.trim())))
+        .ok_or_else(|| "`kit pcsx2 status` names no config folder: is the copy running?".to_string())
 }
 
 fn cmd_pair(a: &mut Args) -> Result<bool, String> {
@@ -454,4 +511,82 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
     std::fs::write(out.join("index.md"), &index).map_err(|e| format!("{}: {e}", out.display()))?;
     print!("{index}");
     Ok(ok)
+}
+
+fn cmd_scene(a: &mut Args) -> Result<bool, String> {
+    let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
+    let image = a.need("--ram")?;
+    let out = out_dir(a, &m);
+    a.done()?;
+    let src = source_of(&m)?;
+    if src.boot != source::MXVATV.boot {
+        return Err(format!("{}: the scene's readers are known on MX vs. ATV Unleashed only", src.game));
+    }
+    let ram = heights::load_ram(Path::new(&image))?;
+    // The image must be of this map: its terrain object holds the mod's tree.
+    terrain_in(&ram, &m, &src)?;
+    let json = std::fs::read_to_string(m.folder.join("mod.json")).map_err(|e| e.to_string())?;
+    let json = modcheck::json::Json::parse(&json)?;
+    let scn = json.get("lookups").and_then(|l| l.get("scene")).and_then(|s| s.str()).ok_or("mod.json names no scene")?;
+    let text = std::fs::read(m.folder.join(scn)).map_err(|e| format!("{scn}: {e}"))?;
+    let fields = accuracy::sceneram::compare(&ram, &String::from_utf8_lossy(&text))?;
+    let report = accuracy::sceneram::text(&m.id, &fields);
+    print!("{report}");
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(out.join("scene.txt"), &report).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(!fields.iter().any(|f| f.differs()))
+}
+
+fn cmd_files(a: &mut Args) -> Result<bool, String> {
+    use accuracy::loaded::{self, Have};
+    let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
+    let image = a.need("--ram")?;
+    let out = out_dir(a, &m);
+    a.done()?;
+    let ram = heights::load_ram(Path::new(&image))?;
+    let names = loaded::pool(&ram, &m.map);
+    if names.is_empty() {
+        return Err("no name pool in the image".into());
+    }
+    let whole = loaded::whole(&names, &m.map);
+    let (paths, files) = loaded::mod_files(&m.folder);
+    let mut rows = loaded::audit(&names, &paths, &files);
+    let disc = loaded::psr_names(&m.boot);
+    if let Some(psr) = &disc {
+        loaded::absent(&mut rows, psr);
+    }
+    let count = |h: Have| rows.iter().filter(|r| r.1 == h).count();
+    let mut s = format!(
+        "{}: the game opened {} names, {} of them the map's: {} at their path in the mod, {} by file name only, {} not in the mod{}\n",
+        m.id,
+        names.len(),
+        rows.len(),
+        count(Have::Path),
+        count(Have::Base),
+        count(Have::No),
+        match disc {
+            Some(_) => format!(", {} on no part of the disc (the game fell back)", count(Have::Absent)),
+            None => " (the disc was not found to tell which are on it)".into(),
+        }
+    );
+    if !whole {
+        s.push_str(&format!(
+            "  the pool's head was overwritten (it no longer holds env\\{0}\\{0}.scn): the names from the scene's to {1} are lost\n",
+            m.map.to_ascii_lowercase(),
+            names.first().map_or("", String::as_str)
+        ));
+    }
+    for (n, h) in &rows {
+        let tag = match h {
+            Have::Path => continue,
+            Have::Base => "name",
+            Have::No => "NOT",
+            Have::Absent => "absent",
+        };
+        s.push_str(&format!("  {tag:<6} {n}\n"));
+    }
+    print!("{s}");
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(out.join("files.txt"), &s).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(count(Have::No) == 0)
 }

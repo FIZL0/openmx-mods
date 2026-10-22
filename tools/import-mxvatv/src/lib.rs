@@ -264,7 +264,91 @@ pub fn pull_loose(disc: &mut Disc, archives: &[(String, ResFile)]) -> Result<Vec
             }
         }
     }
+
+    let dir = scn.rfind('/').map_or("", |i| &scn[..i]);
+    pull_physics(&mut o, dir, &stem)?;
+    pull_shadows(&mut o)?;
+    pull_particles(&mut o, dir)?;
     Ok(o.pulled)
+}
+
+/// The machines' particle sheets, by the machine (GAME_REL.BIN `0x004a6810`'s switch on its type), and
+/// the two zone tables (`atvparticlezones.dat` for an ATV, `mxparticlezones.dat` for the rest).
+pub const PARTICLE_SHEETS: [&str; 13] = [
+    "mxparticles.dat",
+    "mxaiparticles.dat",
+    "atvparticles.dat",
+    "atvaiparticles.dat",
+    "biplaneparticles.dat",
+    "helicopterparticles.dat",
+    "buggyparticles.dat",
+    "monsterparticles.dat",
+    "bajaparticles.dat",
+    "golfparticles.dat",
+    "SRparticles.dat",
+    "mxparticlezones.dat",
+    "atvparticlezones.dat",
+];
+
+/// The map's own particle sheets (M12, seen in the game's name pool on MC10). `0x004a6810` opens the
+/// machine's sheet and zone table in the map's folder (`%s%s`, the folder and the name) and takes
+/// `Part\`'s only when the map has none. Every name the switch can give is pulled where the map's
+/// folder has it loose, whichever machine rides.
+fn pull_particles(o: &mut Opener, dir: &str) -> Result<(), String> {
+    for name in PARTICLE_SHEETS {
+        o.open(&format!("{dir}/{name}"), &format!("the machine's particles, {name} in the map's folder (0x004a6810)"))?;
+    }
+    Ok(())
+}
+
+/// The physics objects the map's toys name (M12, seen in the game's name pool in a ride on Lago).
+/// SLUS_211.04 `0x002171b0` reads `[PhysicsCollections]` of `<map>.toy`: the first
+/// `NumberOfPhysicsCollections` sections `[PhysicsCollection<n>]`, each a `Name`, opened as
+/// `<map folder>\<Name>.pco` (`%s%s.pco`). A `Name` with a `*` is a group matched against the scene's
+/// models, which no map uses. GAME_REL.BIN `0x004922a0` then opens each `.pco`'s parts'
+/// collision, `Col\<Name>m.col` and `Col\<Name>f.col` (its name with `m.col` and `f.col` put on).
+fn pull_physics(o: &mut Opener, dir: &str, stem: &str) -> Result<(), String> {
+    let toy = format!("{dir}/{stem}.toy");
+    if !o.held.contains_key(&toy) {
+        return Ok(());
+    }
+    let secs = ini::parse(&ini::text(&o.held_bytes(&toy)?));
+    let get = |secs: &[ini::Section], sec: &str, key: &str| {
+        secs.iter().find(|s| s.name.eq_ignore_ascii_case(sec)).and_then(|s| s.get(key)).map(|v| v.trim().trim_matches('"').to_string())
+    };
+    let n: usize = get(&secs, "PhysicsCollections", "NumberOfPhysicsCollections").and_then(|v| v.parse().ok()).unwrap_or(0);
+    for i in 1..=n {
+        let Some(name) = get(&secs, &format!("PhysicsCollection{i}"), "Name").filter(|v| !v.is_empty() && !v.contains('*')) else {
+            continue;
+        };
+        let why = format!("physics collection {name} of {toy}");
+        let Some(pco) = o.open(&format!("{dir}/{name}.pco"), &why)? else { continue };
+        let parts = ini::parse(&ini::text(&pco));
+        let k: usize = get(&parts, "PhysicsParts", "NumberOfPhysicsParts").and_then(|v| v.parse().ok()).unwrap_or(0);
+        for p in 1..=k {
+            if let Some(part) = get(&parts, &format!("PhysicsPart{p}"), "Name").filter(|v| !v.is_empty()) {
+                for end in ["m.col", "f.col"] {
+                    o.open(&format!("Col\\{part}{end}"), &format!("part {part} of {name}.pco"))?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// How many shadow sets the game makes (M12: `0x0031bc90` is handed 6 on every map ridden).
+pub const SHADOW_SETS: usize = 6;
+
+/// The shadow materials: `0x0031bc90` opens `shadowCaster<n>`, `shadowReceiver<n>` and
+/// `terrainShadowReceiver<n>` for each of the [`SHADOW_SETS`] (`Tex\`, as `MST\TerrainShadow.mst`
+/// spells them), on every map.
+fn pull_shadows(o: &mut Opener) -> Result<(), String> {
+    for n in 1..=SHADOW_SETS {
+        for m in ["shadowCaster", "terrainShadowReceiver", "shadowReceiver"] {
+            o.open(&format!("Tex\\{m}{n}.psm"), &format!("shadow set {n} ({m}%d, 0x0031bc90)"))?;
+        }
+    }
+    Ok(())
 }
 
 /// A name with its extension swapped, as the game does it: from the last dot, or added when there
@@ -518,6 +602,27 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
             vec3(&sections, "SceneInfo", "DefaultStartPosition"),
             vec3(&sections, "SceneInfo", "DefaultStartDirection")
         ));
+    }
+
+    // Where the Free Ride starts on MX vs. ATV Unleashed (M12, every map ridden in PCSX2): at the
+    // .atyList's StartPosition where it gives one (MC01, FS05), else at the scene's DefaultStartPosition,
+    // the ride camera 14 ft behind it. So the entry above is no gap there, except where that position is
+    // under the ground (FS02, FS06, Nat10, Nat14, SM01-03): the game stands the rider on the ground over it.
+    if spawn.is_none() && map.origin.boot == BOOT {
+        let unknown = format!("{scn_name}: the spawn is the scene's DefaultStartPosition ");
+        todo.0.retain(|t| !t.starts_with(&unknown));
+        let field = game_sim::world::Ground::new(&terrain, &scene.terrain);
+        let field = field.field();
+        let [x, y, z] = scene.start.map(|c| c.0);
+        let ground = game_sim::contact_search::ground(&field, ps2_float::Vf::new(x, 0.0, z, 1.0)).point.y();
+        if y < ground - 1.0 {
+            todo.push(format!(
+                "{scn_name}: the spawn, the scene's DefaultStartPosition {}, is {:.1} ft under the ground there ({ground:.2}); \
+                 the game stands the rider on the ground over it (M12, seen in PCSX2), and whether openmx does was not checked",
+                vec3(&sections, "SceneInfo", "DefaultStartPosition"),
+                ground - y
+            ));
+        }
     }
 
     let mut uncopied = 0;
