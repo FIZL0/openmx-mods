@@ -20,6 +20,14 @@ The port has no mod loader yet: that is openmx's Phase 14 (MD1–MD6). `standard
 **No game data is in this repo.** You supply your own discs and downloads. Everything taken from them goes in
 `iso/`, `extracted/` and `out/`, which git ignores.
 
+## Building and installing
+
+`./build.sh --check` builds every mod your discs give into `out/mods/` (`mods` is a link to it), checks
+them, and copies them into the game's own `mods/` folder: openmx reads `mods/tracks/<id>/` beside its disc
+and `settings.txt`. By default that is `openmx/`; `--install DIR` names another copy of the game (another
+machine: copy `out/mods/` into the folder holding its disc), `--no-install` skips it. Ride one with
+`openmx --track <id>`, or pick it in the menu (Settings: Mods on).
+
 ## Layout
 
 ```

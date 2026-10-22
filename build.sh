@@ -6,6 +6,11 @@
 #   ./build.sh --check          import, package, then check everything in out/mods/
 #   ./build.sh --check-only     check out/mods/ as it is
 #   options: --iso DIR (default iso/, or $DISCX_ISO)   --out DIR (default out/)
+#            --install DIR (default: openmx/, where the port's disc and settings.txt are)   --no-install
+#
+# Every mod in out/mods/ is then copied into the game's own mods folder, INSTALL/mods/<dest>/<id>/, the
+# folder openmx reads beside its disc and settings.txt (each id replaced whole; other mods there are left
+# alone). `mods` in this repo is a link to out/mods/.
 #
 # Discs are found by their boot ELF (SYSTEM.CNF), never by file name: `discx discs`.
 #
@@ -33,7 +38,7 @@ after    -                      stitch         tracks   C1
 # MX Unleashed (SLUS_207.67) has no step: its tracks are already the port's own, and a mod of one is
 # only ever a world's tile (§1), which stitch copies from the disc itself.
 
-check=0 import=1
+check=0 import=1 install=openmx
 iso=${DISCX_ISO:-iso}
 out=out
 while [ $# -gt 0 ]; do
@@ -42,6 +47,8 @@ while [ $# -gt 0 ]; do
         --check-only) check=1 import=0 ;;
         --iso) iso=${2:?--iso needs a folder}; shift ;;
         --out) out=${2:?--out needs a folder}; shift ;;
+        --install) install=${2:?--install needs a folder}; shift ;;
+        --no-install) install="" ;;
         -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build: unknown argument $1 (--help)" >&2; exit 2 ;;
     esac
@@ -145,6 +152,25 @@ if [ $check = 1 ]; then
         "$bin/modcheck" --iso "$iso" "$out/mods" || failed=1
     else
         say "nothing to check: no $out/mods/"
+    fi
+fi
+# Into the game's mods folder: openmx's store is the folder holding its disc (or settings.txt).
+if [ -n "$install" ] && [ -d "$out/mods" ]; then
+    if compgen -G "$install/*.iso" >/dev/null || [ -f "$install/settings.txt" ]; then
+        dir=$(cd "$install" && pwd -P)/mods
+        got=0
+        for d in "$out"/mods/*/*/; do
+            [ -f "$d/mod.json" ] || continue
+            rel=${d#"$out/mods/"}
+            rel=${rel%/}
+            mkdir -p "$dir/$(dirname "$rel")"
+            rm -rf "${dir:?}/$rel"
+            cp -a --reflink=auto "$d" "$dir/$rel"
+            got=$((got + 1))
+        done
+        say "installed $got mods into $dir/"
+    else
+        say "not installed: $install/ holds no disc or settings.txt (--install DIR, the folder openmx runs from)"
     fi
 fi
 exit $failed
