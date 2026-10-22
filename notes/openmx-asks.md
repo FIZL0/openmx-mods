@@ -78,3 +78,50 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   `crates/openmx/src/audio.rs`, which brings wgpu, ggrs and iroh with it, so this repo cannot call
   them to prove a music pack (§5 step 4). `modcheck` checks only that each song's file is there.
   Fix: the `.vig` header and ADPCM decode in a crate with no shell dependencies (game-render or its own).
+- **New: game-render opens only `MX.PSR`** (M9, `tools/renderprobe`). `game-render/src/disc.rs`
+  `Disc::read_from` looks up `MX.PSR` by name, and reads 64 KiB of directory. MX vs. ATV's
+  `MXVSATV.PSR` directory is longer than that (20,391 members). `Res` has private fields and no
+  constructor except `Disc::res`. So `Assets::load`, `Sky::load`, `Grove::load` and `Splat::load` take
+  `&[Res]` that can only come out of an MXU disc. A mod's loader needs the same thing for a `.res` in a
+  mods folder (MD2). Fix: `Res::from_bytes(Vec<u8>)` (and `Res::parse` of the file it holds), and
+  `Disc` reading the directory length out of the PSR header. `renderprobe` gets round it for now with a
+  small in-memory ISO holding the `.res` unchanged.
+- **New: material texture names** (M9). `scene::Material::parse` keeps `TextureMap_1` as written, and
+  `world::texture_files` appends `.pst`. Three cases:
+  - (1) An extension: every MX vs. ATV map's `Tex\SunFlare<N>.psm` says `sunflare<N>.pst`, so the
+    lookup is `sunflare33.pst.pst` (Nat01). MXU's `free06` `sunflare03.psm` is the same. Nat05's
+    `Nat05_liverystable_detail.psm` says `….dxm`, and the `.pst` is beside it.
+  - (2) A space: Nat12's `Nat12_genericsandstone.psm` and `Nat12_pillarA.psm` say
+    `Nat12 _genericsandstone`. The file is `Nat12_genericsandstone.pst`, and 10 placed meshes go
+    untextured. `scene::slt_name` already drops spaces the way the original's text reader does.
+  - (3) Only the first texture map is read. The ground's `TerrainPlain.psm` has its detail map in
+    `TextureMap_2` (`NAT01_d`, see MD4).
+
+  Fix: drop whitespace from the value as `slt_name` does, and strip a trailing extension before
+  appending `.pst` / `.atm`. Whether the original strips any extension or only `.pst` was not looked up.
+- **New: `EcosystemFile` without its extension** (M9). SM01, SM02, SM03 and MC02 give `EcosystemFile=sm01`
+  (`mc02`); the archive holds `Env\sm01\sm01.esb`. `eco::Grove::load` does `read_suffix(file)` and
+  finds nothing, so these maps have no trees. Fix: try `<file>.esb` when the name has no extension.
+  What the original does with it was not looked up.
+- **New: `.psg` streams game-render does not take** (M9). `psg.rs` refuses:
+  - **V2-8 texture coordinates.** Nat12 `Eco\nat12_busha.psg` (and `bushb`, `bushc`, `weedsb`,
+    `waitaminute`: 6 of Nat12's 10 eco species) fail with `unexpected UNPACK of 12 x 2 x 8 bits at 489`;
+    so does loose `Geo\nat12_jumpgatea.psg`. Fix: accept `(2, 8)` UVs, scaled as the 16-bit ones are
+    once the scale is known.
+  - **Stream mask `0x1f`.** Nat16 `Geo\northernlights.psg` (placed) fails with `the file ends at 23513
+    but 3933048 bytes were wanted at 373`. Its one mesh has stream mask `0x1f`, and the reader knows only
+    bits 1, 2, 4 and 8.
+  - **V3-16 normals.** Loose `Tex\dallas_stadium.psg`: `unexpected UNPACK of 16 x 3 x 16 bits`. It is on
+    no map's archive, so this one is low priority.
+- **MD4, more evidence** (M9, `notes/mxvatv.md` *Render-side formats*). Each terrain page is a `.pst`
+  less its palette. Put the `.trn` header's palette (GS order, as `pst::unswizzle`) in front, and
+  `pst::Texture::parse` decodes all 1,812 pages of the 56 MX vs. ATV maps, and MXU `nat01`'s 32. The
+  pages are an aerial painting of the map in 256×256 tiles. The ground's material is `TerrainPlain.psm`
+  (`Vu1TerrainRenderer.vuo`): map 1 the pages, map 2 `<MAP>_d`, a 512×512 detail `.pst` loose beside the
+  map (`Env\Nat01\Nat01_d.PST`), alpha-blended. MX vs. ATV has no `terrainscreenspacemesh.psm` and no
+  `_shadow_NN.pst`, so `splat::Splat::load` gives nothing on all 56. game-render's
+  `terrain::Terrain::parse` takes page 0 from its header on as "the ground texture". Still open: which
+  tile a block draws, and how.
+- **New: the `.prt` reader is in the shell crate** (M9): `crates/openmx/src/particles.rs` reads the particle sheet,
+  so this repo cannot prove a map's `Part\<map>particles.prt`. Fix: as for `.vig`, a crate with no shell
+  dependencies.

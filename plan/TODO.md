@@ -14,7 +14,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 ### MX vs. ATV Unleashed
 
 - [ ] **M2** importer: `Env\<map>.res` → a mod folder per the standard. Terrain and collision copied as they are; the scene's keys diffed against every MX Unleashed scene's, and only what the port reads differently rewritten (start position, terrain file name, sky). The props (`.psg`, `.toy`, `.esb`) and textures: whatever openmx's game-render readers take, kept; the rest listed in mod.json's `todo` (after T1, T5, M8) → tools/import-mxvatv/ | t: tools/import-mxvatv tests on a generated `.res`; `--ignored` every freeride map imports and reads back | j: import-mxvatv
-- [ ] **M9** the render-side formats: the terrain's 16 embedded texture pages (65,560 bytes: a 256×256 8-bit page, 24-byte header, PSX palette), `<map>_mat.res`, `.pst`/`.psm`, `.psg` models, `.toy`, `.esb` and skies, each through openmx game-render's readers on a few maps: what reads, what differs, what is new. Notes in notes/mxvatv.md, port asks in notes/openmx-asks.md (after T5) → notes/mxvatv.md · notes/openmx-asks.md | t: none — each claim with the map and member it was checked on | j: mxvatv-render-formats
 
 ### MX vs. ATV Untamed
 
