@@ -155,8 +155,8 @@ the same set). Section names ending in digits are numbered: `[Model1]` … `[Mod
 | `SceneInfo` | `DefaultStartPosition`, `DefaultStartDirection` | both readers: the spawn (§2b) | **must** |
 | | `SceneName` | both readers: the name in the log | **must** |
 | `Environment` | `TerrainFile` | both readers: the terrain (§2). `track::Scene` refuses a scene without it | **must** |
-| | `TerrainWidth`, `TerrainBreadth` | game-sim: root cells a side. The map edge is width × 256 × scale (`0x001a6e50`) | **must**, ≤ 16, equal to the terrain tree's root cells |
-| | `TerrainWidthScale`, `TerrainBreadthScale` | game-sim: feet a sample, for the edge and the radar (`radar_init`) | **must**, equal to the `.trn`'s own scale |
+| | `TerrainWidth`, `TerrainBreadth` | game-sim: 256-sample units a side. The map edge is width × 256 × scale (`0x001a6e50`). This is the tree's root cells only on a two-level tree: a one-level tree (MX vs. ATV's supercross and freestyle maps) has 16 root cells of 16 samples and `TerrainWidth=1` | **must**, ≤ 16, equal to the terrain's samples a side / 256 (below, for a disc scene that disagrees) |
+| | `TerrainWidthScale`, `TerrainBreadthScale` | game-sim: feet a sample, for the edge and the radar (`radar_init`) | **must**, equal to the `.trn`'s own scale (below, for a disc scene that disagrees) |
 | | `TerrainBorderWidth`, `MinDivisionSize` | game-sim `TerrainLayout` | **must** (free06, nat01 and sx01 all have both) |
 | | `CubeFile` | game-render `sky`: `<name>.ps2.cub`, then the name as written | as the source has it |
 | | `EcosystemFile`, `EcoDistance2D`, `EcoDistance3D`, `ShrubberyDistLimit` | game-render `eco`: the ecosystem and its distances | as the source has it |
@@ -175,6 +175,16 @@ the same set). Section names ending in digits are numbered: `[Model1]` … `[Mod
 | `CollisionObjects` | `NumberOfCollisionObjects` | not read | kept, ignored |
 | `Object<n>` | `COL` (or `SLT`), `Position`, `LookVector`, `UpVector`, `Type` | game-sim: a collision shape placed | as the source has it |
 | anything else | | ignored by both readers, as the game's INI reader ignores keys no class claims | kept, ignored |
+
+A disc map whose own scene disagrees with its terrain is copied as it is, since the scene is never
+edited. On MX vs. ATV Unleashed four do: Nat04 has `TerrainWidth=5` over 4 root cells (a two-level
+tree, so 1024 samples, not 1280), SX07 has `TerrainBreadth=2` over a 256-sample terrain, and MC08 and
+SX18 have `TerrainWidthScale=3` and `TerrainBreadthScale=3` over a 3.5-ft terrain. Such a mod names each
+disagreement in `todo`, one entry per key that names both the scene file and the key, for example
+`"Nat04.scn: TerrainWidth=5 on the disc, the terrain is 1024 samples (4 root cells) wide"`. The check
+(§5 step 2) fails the mod without that entry, and with it reports the disagreement as a note. What the
+game does with such a scene (its edge and radar from the scene's numbers, the ground from the tree) is
+for T7 to see. A generated map (T2) has no such excuse: its scene must agree with its terrain.
 
 A scene that a source game writes differently (MX vs. ATV Untamed's binary `.scn.bpb`) is decoded to this
 INI text by the importer (M10's `tools/bpb`), not by the port. The decoded `.scn` sits beside the `.bpb`,
@@ -313,8 +323,9 @@ else:
 1. Every copied file equals its source member, byte for byte (read with `game_sim::archive::{Psr, Res}`).
 2. `track::Scene::parse` reads the scene. `track::Terrain::parse` reads the terrain it names (with MD1's
    relaxation until that lands, saying so). `track::Collision::parse` reads every `.col` the scene places,
-   or the refusal is in `todo`. The scene's `TerrainWidth × 256 × TerrainWidthScale` equals the terrain's
-   extent.
+   or the refusal is in `todo`. The scene's `TerrainWidth × 256` equals the terrain's samples a side and its
+   `TerrainWidthScale` the terrain's scale (and the same for breadth), or a `todo` entry names the scene
+   and the key (§2a).
 3. A world (§3): every tile's folder passes 1–2. Every seam point is continuous in height and slope. Each
    `.blend` sums to 255 per sample. Every `drop` names a section that exists. Under `keep` the tile's
    ground is identical to the tile alone (C1's `--check`).
