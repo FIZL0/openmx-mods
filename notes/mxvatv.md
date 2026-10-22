@@ -23,7 +23,8 @@ MX Unleashed calls the folder `Tracks\`; this disc calls it `Env\`. Unlike MX.PS
 mostly loose (20k of them) with the per-map `.res` beside them.
 
 Finding the PSR in the ISO: plain ISO 9660, root directory from the PVD at sector 16 (+156). openmx's
-`game-render/src/disc.rs` does exactly this for `MX.PSR`; only the file name differs.
+`game-render/src/disc.rs` does exactly this for `MX.PSR`; only the file name differs. `tools/discx` does it
+for all three discs: `discx ls mxvatv 'Env\*\*.res'`, `discx x mxvatv 'Env\Nat01\*' extracted/mxvatv/`.
 
 ## The 56 maps
 
