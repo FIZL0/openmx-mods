@@ -72,6 +72,64 @@ pub struct Plan {
     /// Every tile's spacing as `p/q` of the lattice's, where one with q ≤ 64 exists.
     pub ratio: Vec<Option<(i64, i64)>>,
     pub widen: f64,
+    /// The joins at a tile's own spacing, round each tile whose spacing is not the lattice's (C6).
+    pub collars: Vec<Collar>,
+    /// Tiles off the lattice that have no collar, and why.
+    pub uncollared: Vec<(usize, String)>,
+}
+
+/// A band of join ground at one tile's own spacing round its interior, for a tile whose spacing is not
+/// the lattice's (3.5 ft beside 4.5 ft), so its seams meet join samples at every one of its own samples.
+///
+/// The collar's outer edges lie on lines both lattices have, and its corners and every `period` feet
+/// along them (q tile samples, p lattice samples) are samples of both. Within `band` of an edge the field
+/// is pulled onto the straight line between those shared samples ([`Plan::at`]), fully on the edge and
+/// fading to nothing with zero slope, so the collar's piecewise-linear ground and the lattice's agree
+/// exactly along it.
+#[derive(Clone, Debug)]
+pub struct Collar {
+    /// The tile, which is also its source's index.
+    pub tile: usize,
+    pub spacing: f64,
+    /// World feet, the interior grown by `width` every way.
+    pub rect: [f64; 4],
+    pub width: f64,
+    pub period: f64,
+    pub band: f64,
+}
+
+/// `1` at 0, falling with zero slope at both ends to `0` at 1 and past.
+fn fall(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    (1.0 - t) * (1.0 - t) * (1.0 + 2.0 * t)
+}
+
+/// The distance between two closed rectangles.
+fn rect_gap(a: [f64; 4], b: [f64; 4]) -> f64 {
+    let dx = (a[0] - b[2]).max(b[0] - a[2]).max(0.0);
+    let dz = (a[1] - b[3]).max(b[1] - a[3]).max(0.0);
+    dx.hypot(dz)
+}
+
+/// One join piece to compute: its origin in world feet, its spacing (the lattice's, or a collared tile's)
+/// and its cells a side.
+#[derive(Clone, Debug)]
+pub struct Spec {
+    pub name: String,
+    pub at: [f64; 2],
+    pub spacing: f64,
+    pub cells: [u32; 2],
+}
+
+impl Spec {
+    fn rect(&self) -> [f64; 4] {
+        [
+            self.at[0],
+            self.at[1],
+            self.at[0] + f64::from(self.cells[0]) * self.spacing,
+            self.at[1] + f64::from(self.cells[1]) * self.spacing,
+        ]
+    }
 }
 
 /// `s / lattice` as a small fraction, if there is one.
@@ -215,7 +273,47 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], p: &Params, widen: f64) -> Result
     }
     let radius = 2.0 * dmax + 4.0 * step * stride as f64;
     let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
-    Ok(Plan { spacing: step, size, placed, sources, radius, fade: p.fade, ratio: ratios, widen })
+    let (collars, uncollared) = collars(&sources, &ratios, step, size, p.fade);
+    Ok(Plan { spacing: step, size, placed, sources, radius, fade: p.fade, ratio: ratios, widen, collars, uncollared })
+}
+
+/// A collar round every tile whose spacing is a small fraction p/q (q > 1) of the lattice's, where one
+/// fits: its pull band must stay `2 × lattice` clear of every other interior (so no other seam's pinned
+/// ring is touched) and of every other collar's band, and inside the world.
+fn collars(sources: &[Source], ratios: &[Option<(i64, i64)>], step: f64, size: [u32; 2], fade: f64) -> (Vec<Collar>, Vec<(usize, String)>) {
+    let mut out: Vec<Collar> = Vec::new();
+    let mut skipped = Vec::new();
+    for (t, src) in sources.iter().enumerate() {
+        let Some((_, q)) = ratios[t] else {
+            if (src.spacing - step).abs() > 1e-9 {
+                skipped.push((t, "its spacing has no small ratio to the lattice's".to_owned()));
+            }
+            continue;
+        };
+        if q == 1 {
+            continue; // every one of its samples is a lattice point already
+        }
+        let s = src.spacing;
+        let period = q as f64 * s;
+        let band = fade.max(period);
+        // The pull stays off the tile's own pinned ring: width − band > 2 × the coarser spacing.
+        let width = ((band + 2.0 * step.max(s)) / period).ceil() * period;
+        let r = src.rect;
+        let rect = [r[0] - width, r[1] - width, r[2] + width, r[3] + width];
+        let world = [f64::from(size[0]) * step, f64::from(size[1]) * step];
+        let why = if rect[0] < 0.0 || rect[1] < 0.0 || rect[2] > world[0] || rect[3] > world[1] {
+            Some("it would reach past the world's edge".to_owned())
+        } else if let Some(o) = sources.iter().find(|o| o.tile != t && rect_gap(rect, o.rect) < band + 2.0 * step) {
+            Some(format!("tile {}'s interior is too near", o.tile))
+        } else {
+            out.iter().find(|c| rect_gap(rect, c.rect) < band + c.band).map(|c| format!("tile {}'s collar is too near", c.tile))
+        };
+        match why {
+            Some(w) => skipped.push((t, format!("no collar of {width} ft fits: {w}"))),
+            None => out.push(Collar { tile: t, spacing: s, rect, width, period, band }),
+        }
+    }
+    (out, skipped)
 }
 
 /// The join ground at one world point.
@@ -229,8 +327,54 @@ pub struct Point {
 }
 
 impl Plan {
-    /// The ground at a world point, from the candidate sources `cands` (indices into `sources`).
+    /// The ground at a world point, from the candidate sources `cands` (indices into `sources`): the
+    /// blend, pulled straight between the shared samples along every collar edge it is near.
     pub fn at(&self, tiles: &[Tile], terrains: &[Terrain], cands: &[usize], x: f64, z: f64) -> Point {
+        let mut pt = self.blend(tiles, terrains, cands, x, z);
+        if pt.near > 2.0 * self.spacing && !self.collars.is_empty() {
+            pt.h += self.pull(tiles, terrains, x, z);
+        }
+        pt
+    }
+
+    /// How far the collar edges near a point pull the blend there: for each edge within its band, the
+    /// straight line between the shared samples either side of the point's foot on the edge, less the
+    /// blend at the foot, times the fall-off across the edge and past its ends. On an edge that is the
+    /// line itself. At a collar corner the other edge's pull is 0, its foot being a shared sample.
+    fn pull(&self, tiles: &[Tile], terrains: &[Terrain], x: f64, z: f64) -> f64 {
+        let all: Vec<usize> = (0..self.sources.len()).collect();
+        let f = |p: [f64; 2]| self.blend(tiles, terrains, &all, p[0], p[1]).h;
+        let p = [x, z];
+        let mut out = 0.0;
+        for c in &self.collars {
+            // (axis held fixed, its value): x = x0, z = z0, x = x1, z = z1.
+            for (fixed, v) in [(0, c.rect[0]), (1, c.rect[1]), (0, c.rect[2]), (1, c.rect[3])] {
+                let along = 1 - fixed;
+                let across = (p[fixed] - v).abs();
+                let (lo, hi) = (c.rect[along], c.rect[along + 2]);
+                let past = (lo - p[along]).max(p[along] - hi).max(0.0);
+                if across >= c.band || past >= c.band {
+                    continue;
+                }
+                let a = p[along].clamp(lo, hi);
+                let i = ((a - lo) / c.period).floor().min(((hi - lo) / c.period).round() - 1.0).max(0.0);
+                let (ka, kb) = (lo + i * c.period, lo + (i + 1.0) * c.period);
+                let on = |u: f64| {
+                    let mut q = [0.0; 2];
+                    q[fixed] = v;
+                    q[along] = u;
+                    q
+                };
+                let (ha, hb) = (f(on(ka)), f(on(kb)));
+                let line = ha + (hb - ha) * (a - ka) / c.period;
+                out += fall(across / c.band) * fall(past / c.band) * (line - f(on(a)));
+            }
+        }
+        out
+    }
+
+    /// The closed-form blend at a world point (no collar pull).
+    fn blend(&self, tiles: &[Tile], terrains: &[Terrain], cands: &[usize], x: f64, z: f64) -> Point {
         let step = self.spacing;
         let mut w = vec![0.0; cands.len()];
         for (i, &c) in cands.iter().enumerate() {
@@ -286,18 +430,45 @@ impl Plan {
             .collect()
     }
 
-    /// Join pieces: `(name, first lattice sample x, z, cells x, z)`, every chunk not wholly inside one
-    /// interior.
-    pub fn pieces(&self, chunk: u32) -> Vec<(String, u32, u32, u32, u32)> {
+    /// Join pieces, in the order mod.json lists them (which is precedence, §3): first each collar's,
+    /// `c<tile>_<x>_<z>` at its tile's spacing, then the lattice's, `j<x>_<z>`. A chunk wholly inside one
+    /// interior is left out, and so is a lattice chunk wholly inside a collar (the collar covers it).
+    pub fn pieces(&self, chunk: u32) -> Vec<Spec> {
         let mut out = Vec::new();
+        for c in &self.collars {
+            let s = c.spacing;
+            let n = [((c.rect[2] - c.rect[0]) / s).round() as u32, ((c.rect[3] - c.rect[1]) / s).round() as u32];
+            let src = &self.sources[c.tile];
+            for (jz, z0) in (0..n[1]).step_by(chunk as usize).enumerate() {
+                for (jx, x0) in (0..n[0]).step_by(chunk as usize).enumerate() {
+                    let spec = Spec {
+                        name: format!("c{:02}_{jx:03}_{jz:03}", c.tile),
+                        at: [c.rect[0] + f64::from(x0) * s, c.rect[1] + f64::from(z0) * s],
+                        spacing: s,
+                        cells: [chunk.min(n[0] - x0), chunk.min(n[1] - z0)],
+                    };
+                    let r = spec.rect();
+                    if !(src.contains(r[0], r[1]) && src.contains(r[2], r[3])) {
+                        out.push(spec);
+                    }
+                }
+            }
+        }
         let step = self.spacing;
+        let within = |r: [f64; 4], q: [f64; 4]| r[0] >= q[0] - 1e-6 && r[1] >= q[1] - 1e-6 && r[2] <= q[2] + 1e-6 && r[3] <= q[3] + 1e-6;
         for (jz, z0) in (0..self.size[1]).step_by(chunk as usize).enumerate() {
             for (jx, x0) in (0..self.size[0]).step_by(chunk as usize).enumerate() {
-                let (w, d) = (chunk.min(self.size[0] - x0), chunk.min(self.size[1] - z0));
-                let r = [f64::from(x0) * step, f64::from(z0) * step, f64::from(x0 + w) * step, f64::from(z0 + d) * step];
-                let inside = self.sources.iter().any(|s| s.contains(r[0], r[1]) && s.contains(r[2], r[3]));
+                let spec = Spec {
+                    name: format!("j{jx:03}_{jz:03}"),
+                    at: [f64::from(x0) * step, f64::from(z0) * step],
+                    spacing: step,
+                    cells: [chunk.min(self.size[0] - x0), chunk.min(self.size[1] - z0)],
+                };
+                let r = spec.rect();
+                let inside = self.sources.iter().any(|s| s.contains(r[0], r[1]) && s.contains(r[2], r[3]))
+                    || self.collars.iter().any(|c| within(r, c.rect));
                 if !inside {
-                    out.push((format!("j{jx:03}_{jz:03}"), x0, z0, w, d));
+                    out.push(spec);
                 }
             }
         }
@@ -372,12 +543,12 @@ pub fn bytes_255(w: &[f64]) -> Vec<u8> {
     out.into_iter().map(|x| x as u8).collect()
 }
 
-fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &(String, u32, u32, u32, u32)) -> Result<Piece, String> {
-    let (name, x0, z0, w, d) = spec;
-    let step = plan.spacing;
-    let rect = [f64::from(*x0) * step, f64::from(*z0) * step, f64::from(x0 + w) * step, f64::from(z0 + d) * step];
+fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &Spec) -> Result<Piece, String> {
+    let name = &spec.name;
+    let step = spec.spacing;
+    let rect = spec.rect();
     let cands = plan.candidates(rect);
-    let (sw, sd) = (*w as usize + 1, *d as usize + 1);
+    let (sw, sd) = (spec.cells[0] as usize + 1, spec.cells[1] as usize + 1);
     // One sample of margin all round, for the normals.
     let (mw, md) = (sw + 2, sd + 2);
     let mut h = vec![0.0; mw * md];
@@ -386,8 +557,8 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &(String, u32,
     let mut shares = vec![0.0; sw * sd * cands.len()];
     for mz in 0..md {
         for mx in 0..mw {
-            let (kx, kz) = (i64::from(*x0) + mx as i64 - 1, i64::from(*z0) + mz as i64 - 1);
-            let pt = plan.at(tiles, terrains, &cands, kx as f64 * step, kz as f64 * step);
+            let (kx, kz) = (mx as f64 - 1.0, mz as f64 - 1.0);
+            let pt = plan.at(tiles, terrains, &cands, spec.at[0] + kx * step, spec.at[1] + kz * step);
             h[mx + mz * mw] = pt.h;
             if (1..=sw).contains(&mx) && (1..=sd).contains(&mz) {
                 let i = (mx - 1) + (mz - 1) * sw;
@@ -415,7 +586,7 @@ fn piece(plan: &Plan, tiles: &[Tile], terrains: &[Terrain], spec: &(String, u32,
     let trn = trnwrite::build(&grid, &trnwrite::Options::new(step as f32, hs))?;
     let (bytes, _) = trnwrite::write(&trn)?;
     // Slopes, away from the seams and anywhere.
-    let far = 2.0 * step + 3.0 * plan.fade;
+    let far = 2.0 * plan.spacing + 3.0 * plan.fade;
     let (mut far_slope, mut near_slope) = (0.0f64, 0.0f64);
     for z in 0..sd - 1 {
         for x in 0..sw - 1 {
@@ -659,22 +830,28 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
     todo.push(s(
         "the world's outer edge is flat join ground with no berm; the shootoff there is the world's (openmx MD8)",
     ));
-    for (i, t) in tiles.iter().enumerate() {
-        if (t.spacing - plan.spacing).abs() > 1e-9 {
-            match plan.ratio[i] {
-                Some((pp, q)) => todo.push(s(format!(
-                    "{}: {} ft samples against the joins' {} ft: the seam is on the join lattice and meets it exactly at \
-                     the lattice points; between them (where the two lattices do not share a sample, {}:{}) the two \
-                     linear pieces differ by the tile's curvature; the joins bordering only this tile are not at its spacing (§3)",
-                    t.id, t.spacing, plan.spacing, pp, q
-                ))),
-                None => todo.push(s(format!(
-                    "{}: {} ft samples have no small ratio to the joins' {} ft: its seams are not on the join lattice and \
-                     meet the join only approximately",
-                    t.id, t.spacing, plan.spacing
-                ))),
-            }
-        }
+    for c in &plan.collars {
+        todo.push(s(format!(
+            "{}: {} ft samples against the lattice's {} ft: its joins (c{:02}_*) are at its own spacing for {} ft round \
+             its interior, and meet the lattice's along lines the two share, pulled straight between their shared \
+             samples every {} ft (a generated crease of at most the field's curvature over that length)",
+            tiles[c.tile].id, c.spacing, plan.spacing, c.tile, c.width, c.period
+        )));
+    }
+    for (i, why) in &plan.uncollared {
+        let t = &tiles[*i];
+        todo.push(s(match plan.ratio[*i] {
+            Some((pp, q)) => format!(
+                "{}: {} ft samples against the joins' {} ft ({pp}:{q}), and {why}: the seam meets the join lattice exactly \
+                 only at the lattice points; between them the two linear pieces differ by the tile's curvature",
+                t.id, t.spacing, plan.spacing
+            ),
+            None => format!(
+                "{}: {} ft samples have no small ratio to the joins' {} ft: its seams are not on the join lattice and \
+                 meet the join only approximately",
+                t.id, t.spacing, plan.spacing
+            ),
+        }));
     }
     let clamped: usize = results.iter().map(|r| r.clamped).sum();
     if clamped > 0 {
@@ -731,6 +908,23 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 ("fade", J::N(plan.fade)),
                 ("radius", J::N(plan.radius)),
                 ("widen", J::N(plan.widen)),
+                (
+                    "collars",
+                    J::A(
+                        plan.collars
+                            .iter()
+                            .map(|c| {
+                                o(vec![
+                                    ("tile", s(&tiles[c.tile].id)),
+                                    ("spacing", J::N(c.spacing)),
+                                    ("rect", J::A(c.rect.iter().map(|v| J::N(*v)).collect())),
+                                    ("period", J::N(c.period)),
+                                    ("band", J::N(c.band)),
+                                ])
+                            })
+                            .collect(),
+                    ),
+                ),
                 ("far_slope", J::N((far_slope * 1e4).round() / 1e4)),
                 ("near_slope", J::N((near_slope * 1e4).round() / 1e4)),
             ]),

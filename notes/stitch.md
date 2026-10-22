@@ -42,6 +42,22 @@ tiles are not all built is skipped with a line.
 
    A weight has zero gradient where it reaches 1, and so does the blur. That is why the ground meets
    each interior with the interior's height and slope.
+3a. **Collars** (C6, `build::Collar`). A tile whose spacing is p/q of the lattice's with q > 1 (3.5 ft
+   against 4.5: 7/9) gets joins at its own spacing, `c<tile>_<x>_<z>`, over its interior grown by
+   `width` every way. They come first in `joins`, so they own that ground (§3 precedence), and a
+   lattice chunk wholly inside a collar is not written. The interior's edges are on both lattices
+   already (step 2), so the collar's edges are too, and every `period` = q × spacing feet along them
+   (31.5 ft: 9 × 3.5 = 7 × 4.5) is a sample of both. Within `band` = max(fade, period) of a collar edge
+   the field is pulled onto the straight line between those shared samples: by
+   `fall(across / band) × fall(past the ends / band) × (line − field at the foot)`, where `fall` is 1 at 0
+   and drops to 0 with zero slope at both ends. On the edge the ground is that line, which both lattices
+   draw exactly, so collar and lattice are the same height at every sample of either. Off it the pull
+   fades out smoothly. At a collar corner the other edge's pull is 0, because the corner is a shared
+   sample. `width` is the least multiple of `period` past `band + 2 × lattice`, so the pull never
+   reaches the tile's pinned ring. A collar is only made where its band stays `2 × lattice` clear of
+   every other interior and other collars' bands, and inside the world. Otherwise the tile keeps C1's
+   behaviour, with a todo saying why. A tile whose spacing is a whole multiple of the lattice's (9 ft
+   on 4.5) needs no collar.
 4. **The look** (`<join>.blend`). The same weights, as bytes summing to 255 (largest remainder), for the
    tiles that have a share anywhere in the piece. A piece that only one tile reaches lists the nearest
    other tile with 0 everywhere, because modcheck wants two or more. The surface byte is the nearest
@@ -55,7 +71,12 @@ tiles are not all built is skipped with a line.
 
 mod.json gets two fields of the joiner's own (the loader ignores them, §1): `joins[].samples` (the
 piece's samples a side, which `check` and `map` read), and `stitch` (the lattice, `max_slope`, `fade`,
-the radius, the widening used, and the steepest join slope away from and near the seams).
+the radius, the widening used, the collars, and the steepest join slope away from and near the seams).
+
+`stitch check` takes a tile's seam points from the join that covers each stretch of the edge (the
+collar, round a collared tile). Where joins of two spacings meet, it also compares the two at every
+sample of either along the line (`join_seam_points`). Heights must agree to the join's quantum. The
+slope across is only reported, because each side's cell is at its own spacing.
 
 ## What the MX vs. ATV Unleashed maps showed
 
@@ -75,16 +96,20 @@ Measured with `stitch profile` on nat05, nat02, mc02 and mc06, imported by M2 in
   stand off its terrain altogether (the stands) and 546 in its cut band.
 - A world of nat05, nat02, mc02 and mc06: built in 2 s (32 threads), 96 pieces, 60 MB of joins (37 MB
   of tiles). `stitch check`: 29,492 seam points, worst height step 0.0034 ft, worst slope step 0.0015,
-  join slope 0.492 away from the seams. modcheck passed with the disc comparison. mc06's 3.5 ft samples
-  between 4.5 ft lattice points step by up to 0.51 ft (below).
+  join slope 0.492 away from the seams. modcheck passed with the disc comparison. With C1, mc06's 3.5 ft samples
+  between 4.5 ft lattice points stepped by up to 0.51 ft. Since C6 they meet a collar (below).
 
 ## Limits (each also in the world's `todo` where it applies)
 
-- **Mixed spacings.** A tile whose spacing differs from the lattice's meets the join exactly at the
-  lattice points on its edges. At its own samples in between, the two piecewise-linear edges differ by
-  the tile's curvature: 0.51 ft on mc06 (3.5 ft against 4.5). A 9 ft tile on a 4.5 ft lattice is
-  exact, because every one of its samples is a lattice point. A per-tile lattice beside such tiles
-  would fix this.
+- **Mixed spacings** (C6). A collared tile (step 3a) meets its joins exactly at every one of its
+  samples. C1 measured 0.51 ft steps between lattice points on mc06. A world of nat05, nat02 and mc06
+  now has none: 20,336 seam points, worst step 0.0035 ft, and 1,096 points where mc06's collar meets
+  the 4.5 ft lattice, worst 0.0017 ft. Along a collar edge the two sides' cells have slopes up to 0.08
+  apart on that world. That is one-sided differences at 3.5 and 4.5 ft of a curved field, about
+  `h'' × 4 ft`, the same size as the slope change between two neighbouring cells of one lattice
+  there. It is not a crease the field has, and not failed. Still not exact: a tile whose spacing has
+  no small ratio to the lattice's, or whose collar does not fit (a todo says which), meets the lattice
+  only at shared points, as before.
 - **The outer edge** of the world is flat-ish join ground with no berm. The shootoff is the world's
   (MD8).
 - **The radius** is twice the farthest any point is from an interior, so in a small world every tile
