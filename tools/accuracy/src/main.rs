@@ -55,6 +55,14 @@ const USAGE: &str = "accuracy: a track mod against its source game running in PC
       default look::OPENMX_ARGS (--mods {mods} --track {id} ... --shot {shot} --shot-pose {pose}).
       An openmx without every flag of TEMPLATE in its --help gets the original's shots indexed alone.
 
+  accuracy ride --mod DIR [--ram IMAGE] [--openmx BIN] [--openmx-dir DIR] [--out DIR] [--frames N] [--points N]
+      openmx on the mod (T10, ride.rs): rides the start headless for N frames (default 180) with a
+      --shot-pose shot from the overview (DIR/ride-overview.openmx.png), and one at the first animated
+      toy with collision where the map has one (DIR/ride-toy.openmx.png). Checks it loads with nothing
+      refused, the shell's ground equals the harness's (and with IMAGE the original's, N points in each
+      of four modes, default 2000) , the start and the ridden bike are on the ground, and its map edge is
+      the scene's. Writes DIR/openmx.txt and prints the row for notes/accuracy.md. Exit 1 if a check fails.
+
 The source game comes from mod.json's source.boot (SLUS_211.04: MX vs. ATV Unleashed; SLUS_217.01: MX vs.
 ATV Untamed). KIT defaults to
 ../ps2-decomp-kit/kit; $KIT_CONFIG to extracted/<game>/kit.toml.";
@@ -99,6 +107,7 @@ fn main() -> ExitCode {
         "poses" => cmd_poses(&mut a),
         "shoot" => cmd_shoot(&mut a),
         "pair" => cmd_pair(&mut a),
+        "ride" => cmd_ride(&mut a),
         other => Err(format!("unknown command {other} (--help)")),
     };
     match run {
@@ -547,6 +556,73 @@ fn cmd_pair(a: &mut Args) -> Result<bool, String> {
     std::fs::write(out.join("index.md"), &index).map_err(|e| format!("{}: {e}", out.display()))?;
     print!("{index}");
     Ok(ok)
+}
+
+fn cmd_ride(a: &mut Args) -> Result<bool, String> {
+    use accuracy::ride;
+    let m = TrackMod::load(Path::new(&a.need("--mod")?))?;
+    let out = out_dir(a, &m);
+    let ram = a.take("--ram").map(PathBuf::from);
+    let openmx = PathBuf::from(a.take("--openmx").unwrap_or_else(|| "openmx/target/release/openmx".into()));
+    let openmx_dir = PathBuf::from(a.take("--openmx-dir").unwrap_or_else(|| "openmx".into()));
+    let frames: u32 = a.take("--frames").map_or(Ok(ride::FRAMES), |s| s.parse().map_err(|e| format!("--frames: {e}")))?;
+    let n: usize = a.take("--points").map_or(Ok(2000), |s| s.parse().map_err(|e| format!("--points: {e}")))?;
+    a.done()?;
+    let abs = |p: &Path| std::path::absolute(p).map_err(|e| format!("{}: {e}", p.display()));
+    let (openmx, folder) = (abs(&openmx)?, abs(&m.folder)?);
+    look::in_a_mods_folder(&folder)?;
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let out = abs(&out)?;
+    let shell = ride::Shell::load(&folder)?;
+    let fov = look::ride_fov(&m.boot);
+    let mut overview = look::standard_poses(&m).into_iter().find(|(n, _)| n == "overview").map(|(_, p)| p).ok_or("no overview pose")?;
+    overview.fov = fov;
+
+    let run = |pose: &Pose, name: &str, frames: u32| -> Result<(String, String, bool, bool), String> {
+        let shot = look::openmx_png(&out, name);
+        let _ = std::fs::remove_file(&shot);
+        let o = Command::new(&openmx)
+            .args(ride::ride_args(&folder, &shot, pose, frames))
+            .current_dir(&openmx_dir)
+            .output()
+            .map_err(|e| format!("{}: {e}", openmx.display()))?;
+        let (so, se) = (String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned());
+        Ok((so, se, o.status.success(), look::png_complete(&shot)))
+    };
+    let (stdout, stderr, exit_ok, shot) = run(&overview, "ride-overview", frames)?;
+    let log = ride::read_log(&stdout, &stderr);
+    let mut v = ride::Verdict { id: m.id.clone(), ..Default::default() };
+    let json = std::fs::read_to_string(folder.join("mod.json")).map_err(|e| format!("{}/mod.json: {e}", folder.display()))?;
+    let json = modcheck::json::Json::parse(&json).map_err(|e| format!("{}/mod.json: {e}", folder.display()))?;
+    let todo = match json.get("todo") {
+        Some(modcheck::json::Json::Arr(items)) => items.iter().filter_map(|i| i.str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    };
+    v.loads = ride::loads_verdict(&m.id, &log, exit_ok, &todo);
+    if !shot {
+        v.loads = (false, format!("{}; no shot", v.loads.1));
+    }
+    v.heights = ride::heights_verdict(&shell, &m, ram.as_deref(), n, 0x7acc_5eed)?;
+    v.start = ride::start_verdict(&shell, &log);
+    v.edge = ride::edge_verdict(&shell, &m, &log);
+    let mut text = format!("{}\n", v.row());
+    if let Some((name, [x, y, z])) = ride::collision_toy(&folder) {
+        let mark = accuracy::landmarks::Landmark { slt: name.clone(), position: [x, y, z], bytes: 0 };
+        let mut pose = accuracy::landmarks::poses(&m, &[mark]).remove(0).1;
+        pose.fov = fov;
+        let (_, se, ok, shot) = run(&pose, "ride-toy", 2)?;
+        let _ = std::fmt::Write::write_fmt(&mut text, format_args!("toy {name} at {x}, {y}, {z}: {}\n", if ok && shot { "shot" } else { "no shot" }));
+        if !se.trim().is_empty() {
+            text.push_str(&se);
+        }
+    }
+    text.push_str("\n--- openmx stdout ---\n");
+    text.push_str(&stdout);
+    text.push_str("--- openmx stderr ---\n");
+    text.push_str(&stderr);
+    std::fs::write(out.join("openmx.txt"), &text).map_err(|e| format!("{}: {e}", out.display()))?;
+    println!("{}", v.row());
+    Ok(v.ok())
 }
 
 fn cmd_scene(a: &mut Args) -> Result<bool, String> {

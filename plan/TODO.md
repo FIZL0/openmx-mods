@@ -9,8 +9,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
-- [ ] **T10** every imported map loads and rides in openmx (user, 2026-10-22: mod support verified before more games): for all 56 MX vs. ATV Unleashed and 40 Untamed mods in out/, start openmx on the mod (MD2's flag) headless, ride the start a few seconds, and check that it loads with no refusal, the terrain query equals tools/accuracy's at its 8,000 points, the start is on the ground and the edge is the map's (MD3); one --shot-pose shot per map (MD10) read by eye for the ground's textures (MD4) and the windmill (MD5). A table per map in notes/accuracy.md (openmx: loads, heights, start, edge, look); what fails goes in notes/openmx-asks.md (after T9) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests — the per-map openmx run built from a mod | j: openmx-every-map — openmx landed MD2, MD3, MD4, MD5, MD10
-
 ### MX vs. ATV Unleashed
 
 
