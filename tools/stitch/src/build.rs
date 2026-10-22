@@ -27,6 +27,8 @@ pub struct Params {
     pub fade: f64,
     /// The tile that lights the world under Settings → World sky: Global (MD9). Default: the first.
     pub sky: Option<String>,
+    /// Lines the world spec adds to the world's todo (a gap the spec chose, e.g. a raised `max_slope`).
+    pub todo: Vec<String>,
     /// Threads for the join ground (0: as many as the machine has).
     pub threads: usize,
     /// Give each point only the tiles that can have a say there (the spatial grid, [`Plan::bins`]).
@@ -45,6 +47,7 @@ impl Params {
             chunk: 256,
             fade: 48.0,
             sky: None,
+            todo: Vec::new(),
             threads: 0,
             prune: true,
         }
@@ -1029,6 +1032,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
     todo.push(s(
         "the world's outer edge is flat join ground with no berm; the shootoff there is the world's (openmx MD8)",
     ));
+    todo.extend(p.todo.iter().map(s));
     for t in &tiles {
         let g = t.ground;
         if g != [0, 0, t.n.0, t.n.1] {

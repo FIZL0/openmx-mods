@@ -11,7 +11,8 @@
 //! ```
 //!
 //! A world spec (`worlds/<id>.json`): `{"id": "world_x", "name": "...", "tiles": ["mxvatv_nat05", ...]}`
-//! with optional `sky`, `max_slope`, `min_gap`, `chunk`, `fade`. Its tiles are looked up in
+//! with optional `sky`, `max_slope`, `min_gap`, `chunk`, `fade`, and `todo` (lines the world's mod.json todo
+//! carries, e.g. why the spec raises `max_slope`). Its tiles are looked up in
 //! `--mods`/tracks/. An `mxu_` tile is never there (MX Unleashed's tracks are only a world's tiles,
 //! §1, so no step packages them): it is imported off the MX Unleashed disc in `$DISCX_ISO` (or `iso/`)
 //! into `<STAGE>.mxu/`, beside the stage, so build.sh does not package it as a track (C4).
@@ -172,6 +173,7 @@ fn cmd_specs(args: &[String]) -> ExitCode {
             let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
             let mut p = Params::new(&g("id").ok_or("no id")?, &g("name").ok_or("no name")?);
             p.sky = g("sky");
+            p.todo = j.get("todo").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
             if let Some(v) = j.get("max_slope").and_then(Json::num) {
                 p.max_slope = v;
             }

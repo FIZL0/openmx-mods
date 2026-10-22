@@ -80,14 +80,14 @@ source's) and found every interior identical to its imported map. Through build.
 --mods` with no tiles built, `DISCX_ISO` set) the two worlds came out byte-identical to the ones built by
 hand (`diff -r`), in 37 s with the import.
 
-- **`world_mxu` is built at `max_slope` 8, not 0.5.** At 0.5 the rideable gate never passes, and that is
-  C9's problem. nat17's corner mountain meets its cut at an edge slope of 22.5, and the join carries 7.77
-  out to 171 ft from its interior at every widening. Without nat17, nat21 still holds 0.63 at 180 ft
-  through every widening. The spec says so (`max_slope_why`) and goes back to 0.5 once C9 lands. A gap is
-  `max(min_gap, 1.6 |Δh| / max_slope + 2 (lattice + fade))`. The mean edge heights differ by at most
-  114 ft, so a gap at 0.5 would be up to 470 ft, where at 8 every gap is `min_gap`, 300 ft.
-  The join ground next to nat17's mountain is a wall as steep as the mountain's flank, and nothing else in
-  the world comes close: the steepest join cell away from the seams is that one.
+- **`world_mxu` builds at the default `max_slope` 0.5** (C10, since C9's per-edge seam gates). C4 built
+  it at 8: nat17's corner mountain meets its cut at an edge slope of 22.5 and carried 7.77 out to 171 ft,
+  and nat21 0.63 at 180 ft, past C1's fixed 153 ft gate at every widening. With C9 the gates are each
+  edge's own (nat17's reach 392, 315, 1206 and 2808 ft; 15 of the 22 nationals have one past 153 ft, each
+  named in the world's todo), and at widen 1.5625 the world is 40,036 × 32,980 ft in 626 join pieces,
+  join slope 0.472 away from the gates. `stitch check` passes it: 256,196 seam points, worst height step
+  0.0106 ft. Inside a gate the join is as steep as the edge it continues (46.3 at worst near a seam; where
+  was not looked up): that is the ground C9 leaves unheld, and the todo says so.
 - **`world_mxu_free` builds at the default 0.5** with dead-flat joins (steepest 0.0002), because every
   freeride's edge is the same 189.9 ft plain. The world sits on a 9 ft lattice, the freerides' own. The
   tiles' origins are 6912 ft apart, one whole tile: the 300 ft `min_gap` is just under the 306 ft of the

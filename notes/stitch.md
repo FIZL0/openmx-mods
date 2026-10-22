@@ -15,8 +15,9 @@ stitch --mods OUT/mods --out STAGE                  build.sh: every tools/stitch
 
 A world spec for build.sh (C2 and later add theirs to `tools/stitch/worlds/`):
 `{"id": "world_mxvatv", "name": "...", "tiles": ["mxvatv_nat05", ...]}`, optionally `sky`,
-`max_slope`, `min_gap`, `fade`, `chunk`. The tiles are looked up in `--mods`/tracks/. A spec whose
-tiles are not all built is skipped with a line.
+`max_slope`, `min_gap`, `fade`, `chunk`, and `todo`: lines the world's mod.json todo carries after
+stitch's own (C10), for a gap the spec chooses, such as a raised `max_slope` and why. The tiles are looked
+up in `--mods`/tracks/. A spec whose tiles are not all built is skipped with a line.
 
 ## The method
 
