@@ -193,6 +193,51 @@ Next would be the rest of the clean list: nat14, nat15, nat17, nat13 (1050 block
 one big map whose page count breaks the one-page-per-16-blocks rule above), then sm01–03 and mc02–05,
 mc10. The other two groups wait on a decision about missing `.col` and on MD5.
 
+## The importer (M2): what the 56 mods hold and what is in their todo
+
+`tools/import-mxvatv` (2026-10-22, the USA disc) writes one track mod per map, `mxvatv_<map>`: the
+members of `Env\<MAP>\<map>.res`, `<map>_mat.res` and `<map>_mst.res` at their own paths (25,011 files
+over the 56 maps, 449 MB), and a `mod.json`. Nothing is edited. No two archives of a map hold one path
+with different bytes, and none spells one path two ways (the import would stop on either). Every mod
+reads back through `modcheck` against the disc. The loose members beside the archives are not copied
+(race, AI, camera, replay, the activities' `.aty`, `Anim\`). Every loose member at the path of an archive member
+(the scene, `.toy`, `.esb`, `.aud`, …) has the same bytes as that member. Every gap is a `todo` entry (1,112 over the 56). By kind:
+
+- **Name and start**: the `.atyList`'s `DisplayName`, and its `[Free Ride]` `StartPosition` /
+  `StartDirection` as `spawn` on MC01 and FS05. The other 54 spawn at the scene's
+  `DefaultStartPosition`, and their todo says that is not known to be the game's.
+- **Scene keys MX Unleashed never has**, against MXU's 57 scenes (`src/mxu_keys.rs`):
+  `EcoAmbientScale` and `EcoDiffuseScale` in every `[Environment]` (1,1,1 on all but two maps).
+  On the 27 big maps (Nat01–17, SM01–03, MC01–05, MC09–10), `[Model<n>]` and `[Object<n>]` also carry
+  `Activity` ("Free Ride", "Climb01".., "<name> Waypoint Race", "Airplane Race", "Killington Forwards
+  Race"), `Hide`, `HasCol`, `MinPitch`, `MaxPitch` and `PlayerToFace`. 20 of them also carry
+  `AlphaFade`, and 10 carry `Invisible`, `IsTrigger` and `Waypoint`. These are start zones, waypoint gates,
+  hill-climb markers and air-race rings. The port reads none of these keys, so it draws and collides every one
+  of them in a Free Ride. Which of them the game shows in a Free Ride was not looked up.
+- **Collision**: as the survey found (16 `.col` placed and on no part of the disc outside a `.res`; class 1 on
+  mc01, nat04, nat05, nat10).
+- **Scene against terrain**: Nat04, SX07, MC08, SX18, as §2a has them.
+- **Ecosystem**: MC02, SM01, SM02 and SM03 give `EcosystemFile=<map>` with no extension, and the
+  archive holds `<map>.esb`. game-render reads the name as written, so it finds no plants there.
+  Nat02's ecosystem names ten models (`nat02_busha.psg` … `nat02_treee.psg`) that its archives lack,
+  and they sit loose in the PSR's `Eco\`. MC03, MC04, MC05, MC09, MC10, Nat13, SM01 and SM03 (maps that reuse
+  another map's plants) lack that map's `<map>eco.psm` and `<map>bb.psm`, which are loose in `Tex\`.
+  Whether the game reads such loose members for a map was not looked up.
+- **Models**: 2,772 `.psg`, all read by `psg::Model::parse` except Nat12's five `Eco\` plants
+  (`unexpected UNPACK of 12 x 2 x 8 bits at 489`) and Nat16's `Geo\northernlights.psg` (`the file ends
+  at 23513 but 3933048 bytes were wanted at 373`).
+- **Textures**: all 2,889 `.pst`, 129 `.atm` and 56 skies decode. A material's texture is missing in
+  three ways. (1) `screen.psm` on the 32 stadium maps wants `RenderTarget`, a texture drawn at run time.
+  (2) Nat12's `Nat12 _genericsandstone` and `Nat12 _pillarA` carry a space, and the archive has the
+  name without it. (3) Nat05's and MC05's `Nat05_liverystable_detail.dxm` has a `.dxm` tail, and the
+  archive has the name without it.
+- **Animated objects**: the 44 `.mot` under `Env\<map>\anim\`. The 24 of mc01, mc07, mc08, nat04, nat05 and
+  nat10 are refused by `skin::Clip::parse` (`not a .mot: a name of … bytes`), so the port has no clip
+  for those windmills, signs and score-tower people.
+- **Kinds no reader here takes**: `.mst`, `.pco`, `.prt`, `.mcf`, `.vut`, `.emt`, kept as they are.
+  So are `<MAP>.aud` (the port reads only `tracks\<stem>\<stem>.aud`, MD2), `DetailMapTilingMultiplier`
+  where it is not 8 (12 maps, MD4), the texture pages (MD1, MD4) and the 80×80-leaf size (27 maps, MD3).
+
 ## Embedded textures
 
 The header's texture table (`textures`, `textures_again`, then that many words) is empty on MXU's
