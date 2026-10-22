@@ -595,8 +595,8 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     }
     // Where the Free Ride starts (M12, every map ridden in PCSX2): at the .atyList's StartPosition where
     // it gives one (MC01, FS05), else at the scene's DefaultStartPosition, the ride camera 14 ft behind
-    // and 5 above it at the start. Where that position is under the ground (Nat10, SM01-03), the game
-    // stands the rider on the ground over it.
+    // it. Where that position is under the ground (FS02, FS06, Nat10, Nat14, SM01-03), the game stands
+    // the rider on the ground over it.
     if spawn.is_none() && map.origin.boot != BOOT {
         todo.push(format!(
             "{scn_name}: the spawn is the scene's DefaultStartPosition {} facing {}: the .atyList's [Free Ride] gives no StartPosition, \
