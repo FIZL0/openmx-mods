@@ -417,3 +417,182 @@ fn on_untamed_the_loose_terrains_are_the_archives_own() {
     }
     eprintln!("untamed: {same} loose terrains identical to their archive's; no archive: {alone:?}");
 }
+
+/// [`SCENE`] as Untamed holds a scene: the same sections and keys compiled to a BPB by `tools/bpb`.
+fn scene_bpb() -> Vec<u8> {
+    use bpb::{Bpb, Key, Section, Value, hash};
+    let key = |name: &str, value: Value| Key {
+        hash: hash(name.as_bytes()),
+        name: name.as_bytes().to_vec(),
+        value,
+    };
+    let text = |s: &str| Value::Text(s.as_bytes().to_vec());
+    let section = |name: &str, index: Option<u16>, keys: Vec<Key>| Section {
+        hash: hash(name.as_bytes()),
+        name: name.as_bytes().to_vec(),
+        index,
+        keys,
+    };
+    let mut sections = vec![
+        section("SceneInfo", None, vec![key("SceneName", text("TestMap"))]),
+        section(
+            "Environment",
+            None,
+            vec![
+                key("TerrainFile", text("test.ps2.trn")),
+                key("TerrainWidth", Value::Int(1)),
+                key("TerrainBreadth", Value::Int(1)),
+                key("TerrainWidthScale", Value::Float(3.5)),
+                key("TerrainBreadthScale", Value::Float(3.5)),
+            ],
+        ),
+        section(
+            "Model",
+            Some(1),
+            vec![
+                key("SLT", text("rock.slt")),
+                key("Position", text("1.0,2.0,3.0")),
+            ],
+        ),
+    ];
+    for (i, (col, x)) in [
+        ("rock_a.col", 1),
+        ("Rock_A.col", 4),
+        ("shared.col", 5),
+        ("gone.col", 6),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sections.push(section(
+            "Object",
+            Some(i as u16 + 1),
+            vec![
+                key("COL", text(col)),
+                key("Position", text(&format!("{x}.0,2.0,3.0"))),
+            ],
+        ));
+    }
+    bpb::write(&Bpb { sections }).unwrap()
+}
+
+#[test]
+fn an_untamed_bpb_scene_is_decoded_and_gives_the_same_row() {
+    let scene = scene_bpb();
+    let mut m = members();
+    m[0] = (r"Env\test\test.scn.bpb", scene.clone());
+    let row = survey(build_res(&m, 100));
+    let mut want: Vec<String> = EXPECTED.iter().map(|s| s.to_string()).collect();
+    want[7] = format!("TestMap (BPB, {} B)", scene.len());
+    assert_eq!(row.cells(), want);
+
+    // A BPB the decoder refuses is a refused scene, not a missing one.
+    m[0] = (r"Env\test\test.scn.bpb", b"BPC\0".to_vec());
+    let row = survey(build_res(&m, 0));
+    assert!(
+        row.cells()[7].starts_with("refused: bpb: not a BPB"),
+        "{:?}",
+        row.cells()[7]
+    );
+}
+
+/// Every Untamed map's scene is its `<MAP>.scn.bpb`, decoded by `tools/bpb` and read by `Scene::parse`:
+/// the model and collision placements it reads are the `[ModelN]` with an `SLT` and the `[ObjectN]`
+/// with a `COL` the BPB holds (77,542 in all, as M10 counted on the loose scenes). A `.col` a scene
+/// places that neither its archive nor the PSR's `Col\` has is looked for in every other map archive.
+#[test]
+#[ignore = "needs the user's discs in iso/"]
+fn on_untamed_every_scene_is_read_from_its_bpb() {
+    use survey::SceneRow;
+    let dir = std::env::var_os("DISCX_ISO")
+        .map(std::path::PathBuf::from)
+        .unwrap_or("iso".into());
+    let Ok(path) = discx::resolve_image("untamed", &dir) else {
+        eprintln!("untamed: no disc in {}", dir.display());
+        return;
+    };
+    let mut disc = discx::Disc::open(&path).unwrap();
+    let loose: std::collections::BTreeSet<String> = disc
+        .matching(r"Col\*.col")
+        .into_iter()
+        .map(|e| e.name.rsplit('\\').next().unwrap().to_ascii_lowercase())
+        .collect();
+    let mut archives: Vec<_> = disc
+        .matching(r"res\env\*\*.res")
+        .into_iter()
+        .filter(|e| {
+            let n = e.name.to_ascii_lowercase();
+            !n.ends_with("_mat.res") && !n.ends_with("_mst.res")
+        })
+        .cloned()
+        .collect();
+    archives.extend(disc.find(r"Env\SM_IP\SM_IP.scn.bpb").cloned());
+    let (mut maps, mut placed, mut every_col) = (0, 0, std::collections::BTreeSet::new());
+    let mut missing = Vec::new();
+    for e in archives {
+        let b = disc.read(&e).unwrap();
+        let (row, scene) = if e.name.ends_with(".bpb") {
+            let files = vec![(e.name.clone(), b.clone())];
+            (
+                survey::map("SM_IP", &e.name, &files, &mut |n| loose.contains(n)),
+                b,
+            )
+        } else {
+            let v = res_view(b.clone()).unwrap();
+            let files = v.files().unwrap();
+            let scene = files
+                .iter()
+                .find(|(n, _)| n.to_ascii_lowercase().ends_with(".scn.bpb"))
+                .unwrap_or_else(|| panic!("{}: no .scn.bpb", e.name))
+                .1
+                .clone();
+            every_col.extend(files.iter().filter_map(|(n, _)| {
+                let n = n.to_ascii_lowercase();
+                n.ends_with(".col")
+                    .then(|| n.rsplit('\\').next().unwrap().to_owned())
+            }));
+            (
+                map_res(&e.name, &e.name, b, &mut |n| loose.contains(n)).unwrap(),
+                scene,
+            )
+        };
+        let SceneRow::Ini {
+            models,
+            placements,
+            bpb: Some(bytes),
+            missing: gone,
+            ..
+        } = &row.scene
+        else {
+            panic!("{}: {:?}", e.name, row.scene);
+        };
+        let held = bpb::parse(&scene).unwrap();
+        let count = |prefix: &[u8], file: &[u8]| {
+            held.sections
+                .iter()
+                .filter(|s| s.name.eq_ignore_ascii_case(prefix) && s.index.is_some())
+                .filter(|s| {
+                    s.keys
+                        .iter()
+                        .any(|k| k.name.eq_ignore_ascii_case(file) && !k.value.text().is_empty())
+                })
+                .count()
+        };
+        assert_eq!(*bytes, scene.len(), "{}", e.name);
+        assert_eq!(*models, count(b"Model", b"SLT"), "{}", e.name);
+        assert_eq!(*placements, count(b"Object", b"COL"), "{}", e.name);
+        placed += models + placements;
+        missing.extend(gone.iter().map(|g| (row.map.clone(), g.clone())));
+        maps += 1;
+    }
+    let elsewhere: Vec<_> = missing
+        .iter()
+        .filter(|(_, g)| every_col.contains(g))
+        .collect();
+    eprintln!(
+        "untamed: {maps} scenes read from their BPB, {placed} placements; placed but not found: \
+         {missing:?}; of those in another map's archive: {elsewhere:?}"
+    );
+    assert_eq!(maps, 49);
+    assert_eq!(placed, 77_542);
+}
