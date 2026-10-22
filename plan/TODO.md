@@ -9,7 +9,7 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
-- [~] **T9** the accuracy pairs' openmx half: once openmx has a track from a mod folder (MD2) and --shot-pose (MD10), set tools/accuracy pair's --openmx-args default to their real flags, settle the fov's axis with MD10 (notes/accuracy.md, Poses), and take Lago's (mxvatv_nat05) eight pairs end to end; read them and write what differs in notes/accuracy.md (after T7) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests — the openmx command line built from a pose | j: accuracy-pairs BLOCKED: openmx has neither MD2 (a track from a mod folder, by command-line flag) nor MD10 (--shot-pose); both open in openmx's plan/TODO.md at b63486a. Unblocks when both land: set look::OPENMX_ARGS to their flags, settle the fov axis, take Lago's 8 pairs with accuracy pair, write the differences in notes/accuracy.md
+- [ ] **T9** the accuracy pairs' openmx half: once openmx has a track from a mod folder (MD2) and --shot-pose (MD10), set tools/accuracy pair's --openmx-args default to their real flags, settle the fov's axis with MD10 (notes/accuracy.md, Poses), and take Lago's (mxvatv_nat05) eight pairs end to end; read them and write what differs in notes/accuracy.md (after T7) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests — the openmx command line built from a pose | j: accuracy-pairs
 
 ### MX vs. ATV Unleashed
 
