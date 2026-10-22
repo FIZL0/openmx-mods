@@ -452,6 +452,17 @@ impl Source {
         x >= self.rect[0] - E && x <= self.rect[2] + E && z >= self.rect[1] - E && z <= self.rect[3] + E
     }
 
+    /// The distance [`Source::extend`] finds, by the same arithmetic to the bit (for the pruning, which
+    /// must decide on exactly the distance the weight is taken from).
+    pub fn extend_distance(&self, x: f64, z: f64) -> f64 {
+        let s = self.spacing;
+        let [x0, z0, x1, z1] = self.keep.map(f64::from);
+        let fx = (x - self.at[0]) / s;
+        let fz = (z - self.at[1]) / s;
+        let (qx, qz) = (fx.clamp(x0, x1), fz.clamp(z0, z1));
+        ((fx - qx) * s).hypot((fz - qz) * s)
+    }
+
     /// The tile's ground carried past its edge: the edge's height plus its slope along the way out,
     /// times `taper(d)` (which is `d` for the first `step` and then levels off over `fade` feet).
     pub fn extend(&self, x: f64, z: f64, step: f64, fade: f64) -> Reach {
