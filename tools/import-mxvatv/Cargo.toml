@@ -16,3 +16,5 @@ discx = { path = "../discx" }
 modcheck = { path = "../modcheck" }
 # Untamed's binary INI (its scenes, materials, toys, activity list): M10's decoder.
 bpb = { path = "../bpb" }
+# The point the terrain query takes, for where the Free Ride starts (M12).
+ps2-float = { path = "../../openmx/crates/ps2-float" }

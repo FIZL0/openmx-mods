@@ -593,13 +593,30 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     if name.trim().is_empty() {
         name = map.folder.clone();
     }
-    if spawn.is_none() {
+    // Where the Free Ride starts (M12, every map ridden in PCSX2): at the .atyList's StartPosition where
+    // it gives one (MC01, FS05), else at the scene's DefaultStartPosition, the ride camera 14 ft behind
+    // and 5 above it at the start. Where that position is under the ground (Nat10, SM01-03), the game
+    // stands the rider on the ground over it.
+    if spawn.is_none() && map.origin.boot != BOOT {
         todo.push(format!(
             "{scn_name}: the spawn is the scene's DefaultStartPosition {} facing {}: the .atyList's [Free Ride] gives no StartPosition, \
              and where the game starts that Free Ride was not looked up (T7)",
             vec3(&sections, "SceneInfo", "DefaultStartPosition"),
             vec3(&sections, "SceneInfo", "DefaultStartDirection")
         ));
+    } else if spawn.is_none() {
+        let field = game_sim::world::Ground::new(&terrain, &scene.terrain);
+        let field = field.field();
+        let [x, y, z] = scene.start.map(|c| c.0);
+        let ground = game_sim::contact_search::ground(&field, ps2_float::Vf::new(x, 0.0, z, 1.0)).point.y();
+        if y < ground - 1.0 {
+            todo.push(format!(
+                "{scn_name}: the spawn, the scene's DefaultStartPosition {}, is {:.1} ft under the ground there ({ground:.2}); \
+                 the game stands the rider on the ground over it (M12, seen in PCSX2), and whether openmx does was not checked",
+                vec3(&sections, "SceneInfo", "DefaultStartPosition"),
+                ground - y
+            ));
+        }
     }
 
     let mut uncopied = 0;
