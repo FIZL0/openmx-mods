@@ -5,7 +5,7 @@ what C2–C5 need to know before they use it.
 
 ```
 stitch build OUT --id world_x --name NAME [--sky TILE] [--max-slope 0.5] [--min-gap 300] [--chunk 256]
-             [--fade 48] [--threads N] TILE_DIR...
+             [--fade 48] [--threads N] [--no-prune] TILE_DIR...
 stitch check WORLD_DIR [--mods DIR] [--iso DIR]     seams, slopes, look, tiles against their sources
 stitch profile TILE_DIR [SAMPLES]                   a map's edge profile and the cut find_keep makes
 stitch map WORLD_DIR OUT.pgm [FEET]                 the world's ground as a shaded greyscale picture
@@ -34,8 +34,12 @@ tiles are not all built is skipped with a line.
    - Inside an interior (closed), the tile's own ground, from the kept cell.
    - Within one lattice step of an interior (the pinned ring), that tile's edge height plus its edge
      slope times the distance. So the first join cell has the last tile cell's slope.
-   - Elsewhere, modified Shepard over every tile within the radius. The weight is
-     `((R − d′)₊ / (R d′))²`, where `d′` is the distance past the pinned ring. Each tile is extended
+   - Elsewhere, modified Shepard over every tile within its radius. The weight is
+     `((R − d′)₊ / (R d′))²`, where `d′` is the distance past the pinned ring. Each tile has its own `R`
+     (C7, `build::radii`): twice the farthest any coarse point of its neighbourhood is from its nearest
+     interior. Its neighbourhood is the points it is nearest to, or within a coarse cell's diagonal of
+     the nearest. So both tiles on each side of a gap reach at least twice as far as the gap's middle is
+     from either. A point only extends the tiles whose weight there is not 0 (`build::Bins`, below). Each tile is extended
      from its edge. The edge is blurred along its length by `σ = d′² / (d′ + fade)`, and the edge's
      slope is carried outward with a taper that levels off over `fade` feet. At a corner, the two edges
      are mixed by the angle.
@@ -87,10 +91,51 @@ Measured with `stitch profile` on nat05, nat02, mc02 and mc06, imported by M2 in
   would fix this.
 - **The outer edge** of the world is flat-ish join ground with no berm. The shootoff is the world's
   (MD8).
-- **The radius** is twice the farthest any point is from an interior, so in a small world every tile
-  is a candidate everywhere. Time grows with tiles × lattice points. On C2's scale (tens of 5760 ft
-  maps), expect minutes and gigabytes of joins. `--chunk` trades file count against wasted samples
-  inside interiors.
+- **The radius** is per tile (C7), but a tile beside a wide gap still reaches far: 8,163 ft on the
+  30-map world below, where most tiles reach 650–1,000. `--chunk` trades file count against wasted
+  samples inside interiors.
 - **`max_slope` 0.5 is a choice, not the game's.** MX Unleashed has no climbing limit (nothing in
   openmx's oracle). Join ground near a seam takes the tile's own edge slope (up to 1.77 near seams in
   the smoke world) and flattens over about 3 × fade.
+
+## At C2's scale (C7)
+
+**The pruning.** Each tile has its own radius (method, step 3). A spatial grid (`build::Bins`, squares of
+32 lattice cells) lists, for each square, the tiles whose weight is above 0 somewhere within one lattice
+step of it. A piece takes the union of the squares under it, and the coarse pass takes the point's
+square. Then each point works out every candidate's distance (by `Source::extend_distance`, `extend`'s
+own arithmetic) and extends only the nearest tile and the ones inside their radius. A tile left out has
+weight 0 exactly. The sums see the same terms in the same order, so the ground is the same to the bit.
+`--no-prune` (`Params::prune`) makes every tile a candidate everywhere. `tests/prune.rs` builds a nine-map
+world both ways and compares every file byte for byte. The coarse pass runs on threads and keeps only
+height and distance per point (C1 kept every weight: 5 GB on 30 maps).
+
+**The 30-map world**: every national (17), every MC (10, mc06–08 at 3.5 ft) and every SM (3) map of MX
+vs. ATV Unleashed, imported by `import-mxvatv` into the scratchpad. 32 threads, release build.
+
+| run | wall | peak memory | pieces | joins |
+|---|---|---|---|---|
+| C1, `--max-slope 1.7` | 56.2 s | 1.6 GB | 583 (one more widening) | 443 MB |
+| C7 pruned, `--max-slope 1.7` | 22.0 s | 0.44 GB | 505 | 367 MB |
+| C7 `--no-prune`, `--max-slope 1.7` | 32.0 s | 0.81 GB | 505 | 367 MB, identical to pruned (`diff -r`) |
+| C1, default 0.5 (fails, 14 coarse passes) | 182.9 s | 5.2 GB | – | – |
+| C7, default 0.5 (fails, 14 coarse passes) | 33.7 s | 0.47 GB | – | – |
+
+- Per pass on the 1.7 world: planning (the radii and the grid) about 1.2 s, coarse pass 0.3 s (C1:
+  about 13 s, single-threaded), solve and write 1.7 s pruned and 6.1 s unpruned. The rest of the 22 s
+  is loading 30 tiles and copying them (277 MB of tiles).
+- At the default 0.5, the first layout is 36,508 × 30,100 ft and 563 pieces, so about 420 MB of joins
+  (750 KB a 256-cell piece). Tile radii run from 705 to 8,163 ft.
+- `stitch check` on the 1.7 world (with the disc): 257,270 seam points, worst height step 0.0041 ft,
+  worst slope step 0.0018; 1,264 points between lattice points (mc06–08) step up to 0.72 ft (C6). It
+  still FAILS, on the two problems below. 39 s.
+
+**Why the world does not build at the default `max_slope`**: two things, neither fixed by wider gaps.
+
+- **nat04 has missing cells** (C8). Its terrain is 1024 × 1280 samples, but there are no cells past x ≈ 896
+  on its rows (`stitch profile`: NaN). `find_keep` keeps x up to 990, and the ring reads the missing cells
+  as 0 ft. The join beside them drops 400 ft: near-seam slope 63, coarse slope 1.37 at 171 ft at every
+  widening, and 2,800 `no cell` failures in `stitch check`.
+- **Steep edges** (C9). Without nat04, the 29 maps still fail: 0.726 at 171 ft from mc09 (steepest
+  edge cell 3.1) at every widening, and 0.608 at 315 ft with `--fade 96`. The edge's own slope carries
+  just past the gate's `2 lattice + 3 fade`.
