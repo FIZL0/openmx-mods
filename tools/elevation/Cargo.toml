@@ -1,0 +1,19 @@
+[package]
+name = "elevation"
+description = "Real elevation (USGS 3DEP lidar DEMs, NAIP imagery) to a track mod: a height grid through trnwrite, proved with openmx's readers"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# GeoTIFF is TIFF with a few extra tags: the decoder (strips, tiles, LZW, deflate, predictors) is this crate's.
+tiff = "0.10"
+# The writer and its grid: T2's, not a second copy.
+trnwrite = { path = "../trnwrite" }
+# The terrain and scene readers that prove the output (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+# The port's readers of the drape: `pst` and `splat`.
+game-render = { path = "../../openmx/crates/game-render" }
+# The standard's own check of a built folder (§5).
+modcheck = { path = "../modcheck" }
