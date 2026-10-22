@@ -1,0 +1,21 @@
+[package]
+name = "accuracy"
+description = "Compares a track mod with its source game running in PCSX2: the ground, point by point, and the look, in screenshot pairs (T7)"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The terrain, the scene and the port's own heightfield query: openmx's readers (AGENTS.md).
+game-sim = { path = "../../openmx/crates/game-sim" }
+ps2-float = { path = "../../openmx/crates/ps2-float" }
+# The original's query, run on the original's RAM: openmx's R5900 interpreter.
+ps2-oracle = { path = "../../openmx/crates/ps2-oracle" }
+# The disc found by its boot ELF, for `accuracy setup`.
+discx = { path = "../discx" }
+# The MD1 view and mod.json's reader.
+modcheck = { path = "../modcheck" }
+
+[dev-dependencies]
+# Generated terrains for the tests.
+trnwrite = { path = "../trnwrite" }
