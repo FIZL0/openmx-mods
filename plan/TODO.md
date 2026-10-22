@@ -9,6 +9,8 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
+- [ ] **M15** Elevation mods' sky, fog and lights: give tools/elevation's scenes a sky (CubeFile), [Fog] and [Light<n>] taken from a disc map of the same kind (a desert map for the dunes, a forest one for Hatfield), named in mod.json and its todo, since the data has none (M1 todo)
+- [ ] **M14** Elevation mods' surfaces: find which of the bike's .phy surface ids MXU's freeride ground uses for sand, dirt, rock and grass (free06–11's surface bytes against their splat layers), then give tools/elevation's maps real surface ids (dunes sand; Hatfield/Ocotillo from NAIP or a land-cover set), replacing today's all-0 (M1 todo)
 - [ ] **T7** accuracy harness: compare a mod against its source game running. Set up PCSX2 for each source disc with ../ps2-decomp-kit (a kit config per game under extracted/<game>/, PINE on), find each game's terrain query and its camera in RAM (as openmx's research did for MXU: terrain_point_query, the camera), and write tools/accuracy: (1) heights — read the original's own ground height and surface at ≥1,000 points per map over PINE and compare with openmx's Terrain on the imported file, which must be exact since the terrain is copied; (2) the look — screenshot pairs from the same poses, the original (./kit shot) and openmx (--shot from a pose, openmx MD10), side by side in out/accuracy/<map>/ for a person or an agent to read. Prove it on one MX vs. ATV Unleashed map end to end (after T5, M2) → tools/accuracy/ · notes/accuracy.md | t: tools/accuracy tests on generated data; the one map's heights all equal | j: accuracy-harness
 
 ### MX vs. ATV Unleashed
@@ -21,8 +23,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 - [ ] **M4** Untamed importer: M2's importer with M10's decoder in front, for Untamed's freeride and national maps; Untamed's `.col` (1,604) through openmx's reader first (after M2, M10) → tools/import-mxvatv/ | t: `--ignored` every chosen Untamed map imports and reads back | j: import-untamed
 
 ### Real elevation
-
-- [ ] **M1** USGS 3DEP / SRTM → a height grid → T2's writer. Glamis dunes first (~1 m lidar), then Ocotillo Wells, Little Sahara (UT), Hatfield-McCoy; ground texture from the matching NAIP image. Public domain, so these mods may ship whole in `out/` releases (not in git). Fit to the limits T3 found (after T2, T1) → tools/elevation/ | t: tools/elevation tests on a generated GeoTIFF | j: elevation
 
 ### Accuracy
 

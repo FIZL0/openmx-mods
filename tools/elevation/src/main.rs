@@ -1,0 +1,444 @@
+//! `elevation`: real elevation to a track mod. `elevation help` for usage.
+
+use elevation::geotiff::GeoTiff;
+use elevation::sites::{DEM_URL, NAIP_TOKEN, NAIP_URL, SITES};
+use elevation::{Built, Request, build_mod, write_mod};
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+const USAGE: &str = r#"elevation: a lidar DEM (USGS 3DEP GeoTIFF) and an aerial image (NAIP) to a track mod
+
+  elevation --out STAGE [--from DIR]  build every site (`elevation sites`) whose files are in DIR
+                                      (default extracted/elevation: dem/ and naip/) into STAGE/<id>/
+                                      (build.sh's data step), each checked with modcheck
+  elevation sites                     the sites, their windows and files
+  elevation fetch [--from DIR]        download the sites' files that are missing (curl; about 3.6 GB)
+  elevation info FILE.tif...          where each GeoTIFF lies, its grid and units
+  elevation relief FILE.tif... --cells N [--step M]
+                                      the windows of N×N root cells with the most relief (to choose one)
+  elevation preview OUT.png FILE.tif... [--every N] [--centre E,N --size PX]
+                                      a shaded picture of the mosaic, one pixel every N (default 10), north up
+  elevation build OUTDIR --id elev_x --name NAME --dem FILE.tif [--dem ...] --centre E,N
+                  [--cells W[,D]] [--naip FILE.tif]... [--texture PX] [--surface ID]
+                  --data TEXT --date YYYY-MM-DD
+                                      write the mod folder OUTDIR (out/mods/tracks/<id>), then check it
+                                      with modcheck (the standard's §5)
+
+--centre is in the DEM's projected coordinates (UTM easting, northing). --cells defaults to 8 (2049 samples,
+2 km at 1 m), --texture to 1024, --surface to 0. A map is 256 × cells + 1 DEM pixels a side, one sample a
+pixel; nothing is resampled. notes/elevation.md lists the sites, their tiles and where to fetch them.
+"#;
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match run(&args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("elevation: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Every value of `--name`, and the arguments that are not flags.
+struct Args {
+    flags: Vec<(String, String)>,
+    plain: Vec<String>,
+}
+
+impl Args {
+    fn new(a: &[String]) -> Result<Args, String> {
+        let (mut flags, mut plain) = (Vec::new(), Vec::new());
+        let mut i = 0;
+        while i < a.len() {
+            if let Some(f) = a[i].strip_prefix("--") {
+                let v = a.get(i + 1).ok_or(format!("--{f} wants a value"))?;
+                flags.push((f.to_owned(), v.clone()));
+                i += 2;
+            } else {
+                plain.push(a[i].clone());
+                i += 1;
+            }
+        }
+        Ok(Args { flags, plain })
+    }
+    fn all(&self, name: &str) -> Vec<String> {
+        self.flags
+            .iter()
+            .filter(|(f, _)| f == name)
+            .map(|(_, v)| v.clone())
+            .collect()
+    }
+    fn one(&self, name: &str) -> Option<String> {
+        self.all(name).pop()
+    }
+    fn need(&self, name: &str) -> Result<String, String> {
+        self.one(name)
+            .ok_or(format!("--{name} is needed\n\n{USAGE}"))
+    }
+}
+
+fn pair<T: std::str::FromStr + Copy>(s: &str) -> Result<(T, T), String> {
+    let v: Vec<T> = s
+        .split(',')
+        .map(|p| p.trim().parse().map_err(|_| format!("{s:?}: not a number")))
+        .collect::<Result<_, _>>()?;
+    match v[..] {
+        [a] => Ok((a, a)),
+        [a, b] => Ok((a, b)),
+        _ => Err(format!("{s:?}: one or two numbers")),
+    }
+}
+
+fn run(args: &[String]) -> Result<(), String> {
+    let Some(cmd) = args.first() else {
+        print!("{USAGE}");
+        return Ok(());
+    };
+    if cmd == "--out" {
+        return stage(&Args::new(args)?);
+    }
+    let a = Args::new(&args[1..])?;
+    match cmd.as_str() {
+        "sites" => {
+            for s in SITES {
+                println!(
+                    "{}  {:?}  centre {:.0},{:.0}  {}×{} root cells",
+                    s.id, s.name, s.centre.0, s.centre.1, s.cells.0, s.cells.1
+                );
+                for d in s.dem {
+                    println!("  dem   {DEM_URL}/{}/TIFF/{}", d.project, d.file);
+                }
+                for n in s.naip {
+                    println!("  naip  {NAIP_URL}/{}", n.path);
+                }
+            }
+            Ok(())
+        }
+        "fetch" => fetch(&a),
+        "info" => {
+            for p in &a.plain {
+                let t = GeoTiff::open(p.as_ref())?;
+                let g = &t.geo;
+                println!(
+                    "{p}\n  {}×{} px, {} band(s), {}×{} a pixel, EPSG {:?}, model {}, units {:?} / vertical {:?}, nodata {:?}\n  \
+                     west {:.3} east {:.3} north {:.3} south {:.3}",
+                    g.width,
+                    g.height,
+                    g.bands,
+                    g.dx,
+                    g.dy,
+                    g.epsg,
+                    g.model,
+                    g.linear_units,
+                    g.vertical_units,
+                    g.nodata,
+                    g.left,
+                    g.left + g.dx * f64::from(g.width),
+                    g.top,
+                    g.top - g.dy * f64::from(g.height)
+                );
+            }
+            Ok(())
+        }
+        "relief" => relief(&a),
+        "preview" => preview(&a),
+        "build" => {
+            let out = PathBuf::from(
+                a.plain
+                    .first()
+                    .ok_or(format!("build wants OUTDIR\n\n{USAGE}"))?,
+            );
+            let req = Request {
+                id: a.need("id")?,
+                name: a.need("name")?,
+                dem: a.all("dem").into_iter().map(PathBuf::from).collect(),
+                naip: a.all("naip").into_iter().map(PathBuf::from).collect(),
+                centre: pair(&a.need("centre")?)?,
+                cells: pair(&a.one("cells").unwrap_or("8".into()))?,
+                texture: a
+                    .one("texture")
+                    .map_or(Ok(1024), |s| s.parse().map_err(|_| "--texture".to_owned()))?,
+                surface: a
+                    .one("surface")
+                    .map_or(Ok(0), |s| s.parse().map_err(|_| "--surface".to_owned()))?,
+                data: a.need("data")?,
+                date: a.need("date")?,
+            };
+            if req.dem.is_empty() {
+                return Err(format!("--dem is needed\n\n{USAGE}"));
+            }
+            let b = build_mod(&req)?;
+            write_mod(&out, &b)?;
+            report(&out, &b)
+        }
+        "help" | "-h" | "--help" => {
+            print!("{USAGE}");
+            Ok(())
+        }
+        other => Err(format!("{other:?}: not a command\n\n{USAGE}")),
+    }
+}
+
+/// The build's facts, then the standard's check of the folder (§5).
+fn report(out: &std::path::Path, b: &Built) -> Result<(), String> {
+    let f = &b.facts;
+    println!(
+        "{}: {}×{} samples at {} ft, corner (south-west sample) {:.3}, {:.3} (pixel {}, {}), datum {} , {:.2}..{:.2} ft, \
+                 step {:.5} ft, read back within {:.5} ft; {} leaves, {} blocks; tile overlap {} px, {} differ (largest {}); start {:?}",
+        out.display(),
+        f.samples.0,
+        f.samples.1,
+        f.scale,
+        f.corner.0,
+        f.corner.1,
+        f.corner_pixel.0,
+        f.corner_pixel.1,
+        f.datum,
+        f.low_ft,
+        f.high_ft,
+        f.step_ft,
+        f.worst_ft,
+        f.leaves,
+        f.blocks,
+        f.overlap.pixels,
+        f.overlap.differ,
+        f.overlap.largest,
+        f.spawn
+    );
+    let r = modcheck::check(&out, &mut modcheck::Discs::new(None));
+    for n in &r.note {
+        println!("  note: {n}");
+    }
+    for e in &r.fail {
+        println!("  FAIL: {e}");
+    }
+    if r.ok() {
+        Ok(())
+    } else {
+        Err(format!("modcheck: {} failures", r.fail.len()))
+    }
+}
+
+/// build.sh's data step: every site whose files are here, into `STAGE/<id>/`. A site without its files
+/// is skipped with a line naming them; a site that fails to build fails the step.
+fn stage(a: &Args) -> Result<(), String> {
+    let stage = PathBuf::from(a.need("out")?);
+    let from = PathBuf::from(a.one("from").unwrap_or("extracted/elevation".into()));
+    let mut failed = Vec::new();
+    for s in SITES {
+        let req = match s.request(&from) {
+            Ok(r) => r,
+            Err(missing) => {
+                println!(
+                    "elevation: skip {}: not fetched ({}); `elevation fetch`",
+                    s.id,
+                    missing.join(", ")
+                );
+                continue;
+            }
+        };
+        let out = stage.join(s.id);
+        let done = build_mod(&req).and_then(|b| {
+            write_mod(&out, &b)?;
+            report(&out, &b)
+        });
+        if let Err(e) = done {
+            println!("elevation: FAIL {}: {e}", s.id);
+            failed.push(s.id);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} failed", failed.join(", ")))
+    }
+}
+
+/// Download each site's files that are not there yet, with curl: the DEM tiles from USGS's bucket and
+/// the NAIP quads from Planetary Computer with its anonymous read token.
+fn fetch(a: &Args) -> Result<(), String> {
+    use std::process::Command;
+    let from = PathBuf::from(a.one("from").unwrap_or("extracted/elevation".into()));
+    let curl = |url: &str, to: &std::path::Path| -> Result<(), String> {
+        let part = to.with_extension("part");
+        println!("fetch {}", to.display());
+        let ok = Command::new("curl")
+            .args(["-sSfL", "-o"])
+            .arg(&part)
+            .arg(url)
+            .status()
+            .map_err(|e| format!("curl: {e}"))?;
+        if !ok.success() {
+            return Err(format!("curl failed on {url}"));
+        }
+        std::fs::rename(&part, to).map_err(|e| e.to_string())
+    };
+    let mut token: Option<String> = None;
+    for s in SITES {
+        for d in s.dem {
+            let to = from.join("dem").join(d.file);
+            if !to.is_file() {
+                std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
+                curl(&format!("{DEM_URL}/{}/TIFF/{}", d.project, d.file), &to)?;
+            }
+        }
+        for n in s.naip {
+            let to = from.join("naip").join(n.file());
+            if to.is_file() {
+                continue;
+            }
+            if token.is_none() {
+                let out = Command::new("curl")
+                    .args(["-sSf", NAIP_TOKEN])
+                    .output()
+                    .map_err(|e| format!("curl: {e}"))?;
+                let text = String::from_utf8_lossy(&out.stdout).replace("\\u0026", "&");
+                let t = text
+                    .split("\"token\":\"")
+                    .nth(1)
+                    .and_then(|r| r.split('"').next())
+                    .ok_or(format!("no token in {text:?}"))?;
+                token = Some(t.to_owned());
+            }
+            std::fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
+            curl(
+                &format!("{NAIP_URL}/{}?{}", n.path, token.as_deref().unwrap()),
+                &to,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Slide an N×N-root-cell window over the mosaic in steps and print the ten with the largest relief
+/// (high minus low) that have data everywhere, read from the file's full-resolution pixels.
+fn relief(a: &Args) -> Result<(), String> {
+    let cells: u32 = a.need("cells")?.parse().map_err(|_| "--cells")?;
+    let n = 256 * cells + 1;
+    let step: i64 = a
+        .one("step")
+        .map_or(Ok(256), |s| s.parse().map_err(|_| "--step"))?;
+    let mut m = elevation::dem::Mosaic::open(&a.plain)?;
+    // The mosaic's extent in the first raster's pixels.
+    let (mut i1, mut j1) = (0i64, 0i64);
+    for (r, (i, j)) in m.rasters.iter().zip(&m.at) {
+        i1 = i1.max(i + i64::from(r.geo.width));
+        j1 = j1.max(j + i64::from(r.geo.height));
+    }
+    let (i0, j0) = m.at.iter().fold((i64::MAX, i64::MAX), |(a, b), (i, j)| {
+        (a.min(*i), b.min(*j))
+    });
+    // One strip of rows at a time, the whole width.
+    let w = (i1 - i0) as u32;
+    let mut found = Vec::new();
+    let mut j = j0;
+    while j + i64::from(n) <= j1 {
+        let (px, _) = m.window(i0, j, w, n)?;
+        let mut i = 0i64;
+        while i + i64::from(n) <= i64::from(w) {
+            let (mut lo, mut hi, mut bad) = (f32::INFINITY, f32::NEG_INFINITY, false);
+            'rows: for r in 0..n as usize {
+                for v in
+                    &px[r * w as usize + i as usize..r * w as usize + (i + i64::from(n)) as usize]
+                {
+                    if v.is_nan() {
+                        bad = true;
+                        break 'rows;
+                    }
+                    lo = lo.min(*v);
+                    hi = hi.max(*v);
+                }
+            }
+            if !bad {
+                let g = &m.geo;
+                let centre = (
+                    g.x((i0 + i) as f64 + f64::from(n / 2)),
+                    g.y((j) as f64 + f64::from(n / 2)),
+                );
+                found.push((hi - lo, centre, lo, hi));
+            }
+            i += step;
+        }
+        j += step;
+    }
+    found.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (r, c, lo, hi) in found.iter().take(10) {
+        println!(
+            "centre {:.1},{:.1}  relief {r:.1} ({lo:.1}..{hi:.1})",
+            c.0, c.1
+        );
+    }
+    if found.is_empty() {
+        println!("no window of {n} samples has data everywhere");
+    }
+    Ok(())
+}
+
+/// A hillshade of the mosaic at one pixel in `every`, north up, with no data in red: for choosing a
+/// window by eye. Each pixel is the mosaic's own (no filter), lit from the north-west.
+fn preview(a: &Args) -> Result<(), String> {
+    let (out, files) = a
+        .plain
+        .split_first()
+        .ok_or(format!("preview wants OUT.png and files\n\n{USAGE}"))?;
+    let every: i64 = a
+        .one("every")
+        .map_or(Ok(10), |s| s.parse().map_err(|_| "--every"))?;
+    let mut m = elevation::dem::Mosaic::open(files)?;
+    let (mut i1, mut j1) = (0i64, 0i64);
+    for (r, (i, j)) in m.rasters.iter().zip(&m.at) {
+        i1 = i1.max(i + i64::from(r.geo.width));
+        j1 = j1.max(j + i64::from(r.geo.height));
+    }
+    let (mut i0, mut j0) = m.at.iter().fold((i64::MAX, i64::MAX), |(a, b), (i, j)| {
+        (a.min(*i), b.min(*j))
+    });
+    // Only a square of `--size` pixels around `--centre`, if given.
+    if let Some(c) = a.one("centre") {
+        let (x, y): (f64, f64) = pair(&c)?;
+        let size: i64 = a.need("size")?.parse().map_err(|_| "--size")?;
+        let (ic, jc) = m.pixel_of(x, y);
+        (i0, j0, i1, j1) = (
+            ic - size / 2,
+            jc - size / 2,
+            ic - size / 2 + size,
+            jc - size / 2 + size,
+        );
+    }
+    let (w, h) = (((i1 - i0) / every) as usize, ((j1 - j0) / every) as usize);
+    let mut z = vec![f32::NAN; w * h];
+    // A strip of `every` rows at a time; its first row is the one kept.
+    for y in 0..h {
+        let (px, _) = m.window(i0, j0 + y as i64 * every, (i1 - i0) as u32, 1)?;
+        for x in 0..w {
+            z[x + y * w] = px[x * every as usize];
+        }
+    }
+    let d = (every as f64 * m.geo.dx) as f32;
+    let mut rgb = vec![0u8; w * h * 3];
+    for y in 0..h {
+        for x in 0..w {
+            let at = |x: usize, y: usize| z[x.min(w - 1) + y.min(h - 1) * w];
+            let c = at(x, y);
+            let px = &mut rgb[3 * (x + y * w)..3 * (x + y * w) + 3];
+            let (gx, gy) = ((at(x + 1, y) - c) / d, (at(x, y + 1) - c) / d);
+            if !(c.is_finite() && gx.is_finite() && gy.is_finite()) {
+                px.copy_from_slice(&[200, 0, 0]);
+                continue;
+            }
+            // Light from the north-west, 45 degrees up; +y in the picture is south.
+            let n = (gx * gx + gy * gy + 1.0).sqrt();
+            let l = ((gx - gy) * -0.5 + 0.7071) / n;
+            px.fill((l.clamp(0.0, 1.0) * 255.0) as u8);
+        }
+    }
+    game_render::png::write_rgb(std::path::Path::new(out), w, h, &rgb)?;
+    println!(
+        "{out}: {w}×{h}, one pixel every {every} ({} a pixel), west {:.0} north {:.0}",
+        d,
+        m.geo.x(i0 as f64) - m.geo.dx / 2.0,
+        m.geo.y(j0 as f64) + m.geo.dy / 2.0
+    );
+    Ok(())
+}
