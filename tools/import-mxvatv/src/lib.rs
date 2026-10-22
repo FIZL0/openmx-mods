@@ -593,18 +593,22 @@ fn import_into(map: &Map, id: &str, dir: &Path) -> Result<Imported, String> {
     if name.trim().is_empty() {
         name = map.folder.clone();
     }
-    // Where the Free Ride starts (M12, every map ridden in PCSX2): at the .atyList's StartPosition where
-    // it gives one (MC01, FS05), else at the scene's DefaultStartPosition, the ride camera 14 ft behind
-    // it. Where that position is under the ground (FS02, FS06, Nat10, Nat14, SM01-03), the game stands
-    // the rider on the ground over it.
-    if spawn.is_none() && map.origin.boot != BOOT {
+    if spawn.is_none() {
         todo.push(format!(
             "{scn_name}: the spawn is the scene's DefaultStartPosition {} facing {}: the .atyList's [Free Ride] gives no StartPosition, \
              and where the game starts that Free Ride was not looked up (T7)",
             vec3(&sections, "SceneInfo", "DefaultStartPosition"),
             vec3(&sections, "SceneInfo", "DefaultStartDirection")
         ));
-    } else if spawn.is_none() {
+    }
+
+    // Where the Free Ride starts on MX vs. ATV Unleashed (M12, every map ridden in PCSX2): at the
+    // .atyList's StartPosition where it gives one (MC01, FS05), else at the scene's DefaultStartPosition,
+    // the ride camera 14 ft behind it. So the entry above is no gap there, except where that position is
+    // under the ground (FS02, FS06, Nat10, Nat14, SM01-03): the game stands the rider on the ground over it.
+    if spawn.is_none() && map.origin.boot == BOOT {
+        let unknown = format!("{scn_name}: the spawn is the scene's DefaultStartPosition ");
+        todo.0.retain(|t| !t.starts_with(&unknown));
         let field = game_sim::world::Ground::new(&terrain, &scene.terrain);
         let field = field.field();
         let [x, y, z] = scene.start.map(|c| c.0);
