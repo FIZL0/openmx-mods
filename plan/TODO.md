@@ -9,8 +9,8 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
+- [ ] **M20** Untamed's 360 and backflip in PCSX2 (M19 follow-up): which PS2 button is MAPKEY_STUNT_MOD (SLUS_217.01 0x4fd630 reads the key set's +0x18), and a capture of each on a lip with the bike's attitude per frame, as M19 did for MX vs. ATV Unleashed (notes/tricks.md, extracted/mxvatv/watch/air.toml); also a clean landing of a 360 on a jump long enough for one, and the wreck reason a landing mid-clip gives (0xb or 0xf)
 ### MX vs. ATV Unleashed
-- [ ] **M19** MX vs. ATV's tricks for openmx (user, 2026-10-23: every trick MX vs. ATV adds over MX Unleashed, native in openmx, plus its whips, 360s and front flips on R1). From both discs (MXVSATV.PSR, MX08PS2.PSR; MXU's is rider\anim\stunts.ini, 57 stunts, openmx crates/game-sim/src/trick.rs): each game's stunt table (names, display names, HoldTime/SafeTime/Duration or what replaces them, scores), its gesture map (which buttons and stick make which trick: MXStuntMapping_16x9.lyt.bpb is the pause screen's chart), the rider animations each new trick plays, and how the whip, the 360 (flat spin) and the front flip are driven — the air control's torque, which buttons hold it, the limits and the landing test. The ELF parts need a Ghidra project for SLUS_211.04 (and SLUS_217.01 where it differs) under extracted/<game>/ghidra (AGENTS.md, Decompiling); prove the stunt tables by reading them back and the air moves against the game in PCSX2 (T7: a whip, a 360 and a front flip captured, the bike's attitude per frame). Write notes/tricks.md: the list of tricks MXU lacks, per game, and what openmx needs for each; add a trick-pack folder to the standard (mods/tricks/<game>/: the table and the animations as the disc has them) and build it with build.sh (after T7) → notes/tricks.md · standard/ · tools/ | t: tests reading each game's stunt table back | j: mxvatv-tricks
 
 
 ### MX vs. ATV Untamed

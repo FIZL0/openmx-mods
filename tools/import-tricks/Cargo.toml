@@ -1,0 +1,19 @@
+[package]
+name = "import-tricks"
+description = "MX vs. ATV Unleashed's and Untamed's stunt tables, stunt animations and rotation tuning as trick packs (standard §6), each table read back"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# MX Unleashed's stunts.ini through openmx's own loader (the comparison, and the read-back that shows
+# what it makes of the later tables), and every .mot through openmx's clip reader.
+game-sim = { path = "../../openmx/crates/game-sim" }
+game-render = { path = "../../openmx/crates/game-render", default-features = false }
+# The disc by its boot ELF and its PSR members; Untamed's table and .phy are BPB.
+discx = { path = "../discx" }
+bpb = { path = "../bpb" }
+
+[dev-dependencies]
+# The disc test proves each built pack as build.sh --check does.
+modcheck = { path = "../modcheck" }
