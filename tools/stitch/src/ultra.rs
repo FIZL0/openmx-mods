@@ -251,6 +251,31 @@ impl World {
         Source { tile: index, rect: self.rect(at), at, spacing: self.spacing, keep: [0, 0, self.size[0], self.size[1]], ring: self.ring.clone(), gates }
     }
 
+    /// Height at a lattice sample anywhere in the world (world feet, local), from the first of its
+    /// lattice joins with a sample there, read off its file (kept in `files` for the next ask): what a
+    /// new piece that reaches into the world (C11) holds there, so its samples are the world's own.
+    fn ground(&self, x: f64, z: f64, files: &mut std::collections::HashMap<String, Vec<u8>>) -> Option<f64> {
+        for p in &self.joins {
+            if (p.spacing - self.spacing).abs() > 1e-9 {
+                continue;
+            }
+            let f = [(x - p.at[0]) / p.spacing, (z - p.at[1]) / p.spacing];
+            if f.iter().zip(p.samples).any(|(v, n)| *v < -1e-6 || *v > f64::from(n - 1) + 1e-6 || (v - v.round()).abs() > 1e-6) {
+                continue;
+            }
+            if !files.contains_key(&p.name) {
+                let bytes = std::fs::read(self.dir.join("joins").join(&p.name).join(format!("{}.ps2.trn", p.name))).ok()?;
+                files.insert(p.name.clone(), bytes);
+            }
+            let t = Terrain::parse(&files[&p.name]).ok()?;
+            let (lx, lz) = (f[0].round() as u32, f[1].round() as u32);
+            let (cx, cz) = (lx.min(p.samples[0] - 2), lz.min(p.samples[1] - 2));
+            let q = t.cell(cx, cz, 1)?;
+            return Some(f64::from((t.scale * q.height[((lx - cx) + 2 * (lz - cz)) as usize]).0));
+        }
+        None
+    }
+
     /// Height at a lattice sample on the edge or one step inside (local sample units); `None` deeper.
     fn band_height(&self, ix: u32, iz: u32) -> Option<f64> {
         let [nx, nz] = self.size;
@@ -402,6 +427,10 @@ pub struct UPiece {
     pub name: String,
     pub origin: [u32; 2],
     pub cells: [u32; 2],
+    /// The rectangle of new ground it is cut from, `[x0, z0, x1, z1]` in lattice cells: the piece
+    /// reaches past it (C11, [`crate::build::cuts`]), and where that is deep inside a world its ground is
+    /// the rectangle's nearest.
+    pub inner: [u32; 4],
 }
 
 impl UltraPlan {
@@ -479,7 +508,10 @@ impl UltraPlan {
     }
 
     /// The new join pieces: the ground outside every world, cut along every world's edges into
-    /// rectangles and each of those into chunks, `u<column>_<row>_<x>_<z>`.
+    /// rectangles and each of those into chunks, `u<column>_<row>_<x>_<z>`. A rectangle's chunks start
+    /// a whole foot before it (where it is not at the map's edge) and run past its far end
+    /// ([`crate::build::cuts`], `Over`; `Back` on the map's own far edge), so openmx's last row and
+    /// column of each are someone's.
     pub fn pieces(&self, chunk: u32) -> Vec<UPiece> {
         let step = self.spacing;
         let mut xs = vec![0, self.size[0]];
@@ -500,9 +532,14 @@ impl UltraPlan {
                 if self.inside(mid[0], mid[1]).is_some() {
                     continue;
                 }
-                for (jz, z0) in (zw[0]..zw[1]).step_by(chunk as usize).enumerate() {
-                    for (jx, x0) in (xw[0]..xw[1]).step_by(chunk as usize).enumerate() {
-                        out.push(UPiece { name: format!("u{a:02}_{b:02}_{jx:02}_{jz:02}"), origin: [x0, z0], cells: [chunk.min(xw[1] - x0), chunk.min(zw[1] - z0)] });
+                let whole = |o: u32| (f64::from(o) * step).fract() == 0.0;
+                let before = |v: u32| (1..=v).map(|k| v - k).find(|o| whole(*o)).unwrap_or(0);
+                let inner = [xw[0], zw[0], xw[1], zw[1]];
+                // Over, but not past the map's own outer edge.
+                let end = |v: u32, n: u32| if v == n { crate::build::End::Back } else { crate::build::End::Over };
+                for (jz, (z0, cz)) in crate::build::cuts(before(zw[0]), zw[1], chunk, end(zw[1], self.size[1]), &whole).into_iter().enumerate() {
+                    for (jx, (x0, cx)) in crate::build::cuts(before(xw[0]), xw[1], chunk, end(xw[1], self.size[0]), &whole).into_iter().enumerate() {
+                        out.push(UPiece { name: format!("u{a:02}_{b:02}_{jx:02}_{jz:02}"), origin: [x0, z0], cells: [cx, cz], inner });
                     }
                 }
             }
@@ -566,6 +603,7 @@ pub struct Done {
 /// Compute one new piece. `tile_of[w][t]` is world `w`'s tile `t` in the ultra map's tile list.
 fn piece(plan: &UltraPlan, worlds: &[World], tile_of: &[Vec<usize>], n_tiles: usize, spec: &UPiece) -> Result<Done, String> {
     let step = plan.spacing;
+    let files = std::cell::RefCell::new(std::collections::HashMap::new());
     let (sw, sd) = (spec.cells[0] as usize + 1, spec.cells[1] as usize + 1);
     let (mw, md) = (sw + 2, sd + 2);
     let at = [f64::from(spec.origin[0]) * step, f64::from(spec.origin[1]) * step];
@@ -578,7 +616,19 @@ fn piece(plan: &UltraPlan, worlds: &[World], tile_of: &[Vec<usize>], n_tiles: us
         for mx in 0..mw {
             let (kx, kz) = (mx as f64 - 1.0, mz as f64 - 1.0);
             let (x, z) = (at[0] + kx * step, at[1] + kz * step);
-            let pt = plan.at(worlds, x, z).ok_or_else(|| format!("{}: ({x}, {z}) is deep inside a world", spec.name))?;
+            // Past its rectangle, inside a world (C11's overlap): the world's height where the band
+            // has one, and the look and surface of the rectangle's nearest point, whose foot on the
+            // world's edge is the right one.
+            let r = spec.inner.map(|v| f64::from(v) * step);
+            let edge = || plan.at(worlds, x.clamp(r[0], r[2]), z.clamp(r[1], r[3]));
+            let deep = |wi: usize| worlds[wi].ground(x - plan.at[wi][0], z - plan.at[wi][1], &mut files.borrow_mut());
+            let pt = match (plan.inside(x, z), plan.at(worlds, x, z)) {
+                (None, Some(pt)) => Some(pt),
+                (Some(_), Some(pt)) => edge().map(|e| Pt { h: pt.h, ..e }),
+                (Some(wi), None) => edge().map(|e| Pt { h: deep(wi).unwrap_or(e.h), ..e }),
+                (None, None) => edge(),
+            }
+            .ok_or_else(|| format!("{}: ({x}, {z}) is deep inside a world", spec.name))?;
             h[mx + mz * mw] = pt.h;
             if (1..=sw).contains(&mx) && (1..=sd).contains(&mz) {
                 let i = (mx - 1) + (mz - 1) * sw;

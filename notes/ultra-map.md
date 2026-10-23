@@ -47,7 +47,9 @@ tile is.
    from the band itself.
 5. **Pieces.** The bounding rectangle is cut along every world's edges. Each cell of that cut that is
    not inside a world is chunked into pieces of at most 256 lattice cells: `u<column>_<row>_<x>_<z>`.
-   They never overlap a world, so precedence (§3) is simple. Each world's joins are listed first, in the
+   Since C11 they are whole leaves that start a whole foot inside the cell before and run past their
+   cell's end (`build::cuts`), so openmx's dropped last row and column are someone's; inside a world they
+   hold the world's own ground, and the world, listed first, owns it (§3). Each world's joins are listed first, in the
    world's own order, then the new ones.
 6. **Rideable.** The steps are build's: a coarse pass (every 4th sample) and then the full pieces measure
    the steepest new cell past every world's gate. Past `max_slope`, every gap is widened by 1.25.

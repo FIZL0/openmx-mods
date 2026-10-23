@@ -138,14 +138,15 @@ fn a_step_at_a_worlds_edge_fails_the_check() {
     p.threads = 4;
     let built = stitch::ultra::build(&[a, b], &root.join("out"), &p).unwrap();
     let m = meta(&built.dir);
-    // The new piece that touches world_one's x1 edge, rewritten 2 ft higher.
+    // The new piece that touches world_one's x1 edge (it starts a whole foot inside it, C11), rewritten
+    // 2 ft higher.
     let rect = nums(m.get("stitch").and_then(|s| s.get("worlds")).and_then(Json::arr).unwrap()[0].get("rect"));
     let piece = m
         .get("joins")
         .and_then(Json::arr)
         .unwrap()
         .iter()
-        .find(|j| j.get("join").and_then(Json::str).is_some_and(|n| n.starts_with('u')) && (nums(j.get("at"))[0] - rect[2]).abs() < 1e-6)
+        .find(|j| j.get("join").and_then(Json::str).is_some_and(|n| n.starts_with('u')) && (0.0..=9.0).contains(&(rect[2] - nums(j.get("at"))[0])))
         .unwrap();
     let name = piece.get("join").and_then(Json::str).unwrap();
     let samples = nums(piece.get("samples"));

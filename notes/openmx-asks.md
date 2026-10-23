@@ -386,3 +386,35 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   `GasGyroTorque` (175 on the Pro 250), subtracted from the pitch lane as `BrakeGyroTorque` is added
   (`0x4e6720`); `air::Params` has no such field. With MX vs. ATV's lower `UnrollGain`/`UnyawGain` (1.9 /
   2.3 against 3.5) this is all a "whip" is; no new step.
+- **MD8, a terrain's last cell is nobody's** (C11, `notes/stitch.md` *In openmx*). A leaf holds 17 × 17
+  samples (`BLOCK_SAMPLES`), so a tree of n leaves has 16n cells and 16n + 1 samples. game-sim
+  `tiles::Tile::samples()` returns 16n and `Tile::local` asks `i + 1 < n`, so a world piece's last row
+  and column of cells are no one's (the same off-by-one as T10's `Ground::at` ask above). With
+  openmx-mods' joins edge to edge every 256 cells this left a 4.5 ft strip without ground every
+  1,152 ft in both axes, and `Tiled::off_world` threw a rider back 150 ft before each (world_untamed,
+  thrown at x 6760.7 before the strip at 6907.5). stitch now overlaps its pieces by a leaf, so the
+  worlds have no such strip, but the cells are still dropped. Fix: a cell `i` is in the terrain when
+  `i < 16n` (`every_cell` `[0, 0, 16n, 16n]`), and `Ground::at` likewise.
+- **MD8, a one-level tile is 16 samples to `Tiled`** (C11). `Tile::samples()` is `TerrainWidth ×
+  16^levels`, but a one-level tree (MX vs. ATV's SX and FS maps, trnwrite's 256-sample maps) has
+  `TerrainWidth=1` and 16 root leaves (the standard §2), so `Tiled::new` refuses it: `keep [35, 34, 222,
+  222] in a terrain of 16 x 16 samples` (a generated 257-sample tile). No world has such a tile today.
+  Fix: size a tile from its tree (as `worlds::find` sizes a join) or from `Ground`'s `width × 256`.
+- **MD8, a stopped bike creeps far from the origin** (C11). On `--trace-brake` a bike that has stopped
+  still moves two ulps of its position a tick: 0.0012 ft at x 2,634, 0.0078 ft at x 37,008
+  (world_mxu's mxu_nat13 start) and 0.0156 ft, 0.47 ft/s, at x 113,040 (the same spot in world_ultra).
+  The sim's position is world feet in single floats, where 1/128 ft is the step past 65,536. Riding is
+  as even as alone (largest second difference 0.0208 ft both), and the ground answers bit-exact, but a
+  bike parked on the ultra map's far side slides. Fix: integrate the rider in a local frame (the tile's,
+  or an origin moved with the rider) and keep world feet for the queries.
+- **MD9, a world's paint past the GPU's limits is dirt, silently** (C11). game-render
+  `WorldPaint::pack` (`terrain.rs:760`) puts every tile's pages in one texture array of
+  `max_texture_array_layers` and their leaf images in one picture of `max_texture_dimension_2d` rows, in
+  tile order; a tile past either is drawn in dirt with no line. On world_ultra (77 tiles, MXU's first)
+  world_untamed's tiles come out plain sand (untamed_sm_hs, grass and earth in world_untamed, is sand
+  there; shot pairs in `shots_at_every_gate`). Fix: pack only the streamed tiles (MD17's reach), and
+  say which tile is dirt and why.
+- **MD17, `--world-ground all` leaves the near ground undrawn** (C11). With `--world-ground all` a shot
+  at a pose over mxu_nat09 in world_mxu draws the far tiles but leaves the near ground blank (the sky
+  colour), where the default (`near`, rider under the pose) draws it. Probably `GROUND_BYTES` keeping
+  chunks in build order, not by distance. Low: nothing uses it but a test.

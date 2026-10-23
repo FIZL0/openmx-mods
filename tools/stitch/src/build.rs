@@ -21,7 +21,7 @@ pub struct Params {
     pub max_slope: f64,
     /// The narrowest gap between two interiors, feet.
     pub min_gap: f64,
-    /// Join pieces are at most this many lattice cells a side.
+    /// Join pieces are at most this many lattice cells a side (whole leaves, at most 256: [`cuts`]).
     pub chunk: u32,
     /// How far a tile's edge slope carries into the join before it levels off, feet.
     pub fade: f64,
@@ -143,6 +143,74 @@ impl Spec {
             self.at[1] + f64::from(self.cells[1]) * self.spacing,
         ]
     }
+}
+
+/// Cells a terrain leaf spans: a leaf holds 17 × 17 samples, the last shared with the next leaf.
+pub const LEAF: u32 = 16;
+
+/// How a run of pieces meets the far end of what it covers ([`cuts`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum End {
+    /// The last piece ends on the far end, moved back over the one before it: nothing past the end is
+    /// written (a world's lattice, a collar).
+    Back,
+    /// The last piece runs a cell or more past the far end, onto what lies beyond (the ultra map's new
+    /// ground, whose neighbour past the end starts right there).
+    Over,
+}
+
+/// Cut cells `[a, b)` of one axis into pieces `(origin, cells)` for openmx (C11). openmx owns a join's
+/// terrain over its tree's whole leaves, so every piece is whole leaves ([`LEAF`]) and its file holds the
+/// ground on all of them, with no padding a reader could take for ground. It owns every cell but the
+/// last row and column of them, so each piece reaches a leaf into the next, which covers that cell.
+/// `chunk` is the most cells a piece has (rounded down to whole leaves, 32 to 256: a one-level tree
+/// has 16 leaves a side); pieces start `chunk − 16` apart. `whole` says whether an origin is on a whole
+/// foot; a piece moved back that is not is moved back a cell more until it is. A run shorter than a leaf
+/// is one piece of whole leaves from `a`, past `b` whatever `end` says.
+pub fn cuts(a: u32, b: u32, chunk: u32, end: End, whole: &dyn Fn(u32) -> bool) -> Vec<(u32, u32)> {
+    let f = (chunk / LEAF * LEAF).clamp(2 * LEAF, LEAF * LEAF);
+    let leaves = |n: u32| n.div_ceil(LEAF) * LEAF;
+    let mut out = Vec::new();
+    if b <= a {
+        return out;
+    }
+    let mut o = a;
+    let last = loop {
+        // Back: the rest fits in this piece; Over: it fits with a cell to spare past `b`.
+        let fits = match end {
+            End::Back => o + f >= b,
+            End::Over => o + f > b,
+        };
+        if fits {
+            break o;
+        }
+        out.push((o, f));
+        o += f - LEAF;
+    };
+    let rest = b - last;
+    match end {
+        End::Over => out.push((last, leaves(rest + 1))),
+        End::Back => {
+            let back = |n: u32| {
+                let mut s = b - n;
+                while s > a && !whole(s) {
+                    s -= 1;
+                }
+                (s, n)
+            };
+            let n = leaves(rest);
+            if b - a < LEAF {
+                out.push((a, LEAF));
+            } else if last == a && rest % LEAF != 0 {
+                // One run of a few leaves and a part: its whole leaves, and one more ending on `b`.
+                out.push((a, rest / LEAF * LEAF));
+                out.push(back(LEAF));
+            } else {
+                out.push(back(n));
+            }
+        }
+    }
+    out
 }
 
 /// The fewest lattice samples, `at_least` or more, whose length is a whole number of feet: a world's far
@@ -593,21 +661,24 @@ impl Plan {
     }
 
     /// Join pieces, in the order mod.json lists them (which is precedence, §3): first each collar's,
-    /// `c<tile>_<x>_<z>` at its tile's spacing, then the lattice's, `j<x>_<z>`. A chunk wholly inside one
-    /// interior is left out, and so is a lattice chunk wholly inside a collar (the collar covers it).
+    /// `c<tile>_<x>_<z>` at its tile's spacing, then the lattice's, `j<x>_<z>`, each axis cut by
+    /// [`cuts`] (whole leaves, a leaf of overlap, the last piece ending on the collar's or the world's
+    /// edge). A chunk wholly inside one interior is left out, and so is a lattice chunk wholly inside a
+    /// collar (the collar covers it).
     pub fn pieces(&self, chunk: u32) -> Vec<Spec> {
         let mut out = Vec::new();
         for c in &self.collars {
             let s = c.spacing;
             let n = [((c.rect[2] - c.rect[0]) / s).round() as u32, ((c.rect[3] - c.rect[1]) / s).round() as u32];
             let src = &self.sources[c.tile];
-            for (jz, z0) in (0..n[1]).step_by(chunk as usize).enumerate() {
-                for (jx, x0) in (0..n[0]).step_by(chunk as usize).enumerate() {
+            let whole = |a: usize| move |o: u32| (c.rect[a] + f64::from(o) * s).fract() == 0.0;
+            for (jz, (z0, cz)) in cuts(0, n[1], chunk, End::Back, &whole(1)).into_iter().enumerate() {
+                for (jx, (x0, cx)) in cuts(0, n[0], chunk, End::Back, &whole(0)).into_iter().enumerate() {
                     let spec = Spec {
                         name: format!("c{:02}_{jx:03}_{jz:03}", c.tile),
                         at: [c.rect[0] + f64::from(x0) * s, c.rect[1] + f64::from(z0) * s],
                         spacing: s,
-                        cells: [chunk.min(n[0] - x0), chunk.min(n[1] - z0)],
+                        cells: [cx, cz],
                     };
                     let r = spec.rect();
                     if !(src.contains(r[0], r[1]) && src.contains(r[2], r[3])) {
@@ -618,13 +689,14 @@ impl Plan {
         }
         let step = self.spacing;
         let within = |r: [f64; 4], q: [f64; 4]| r[0] >= q[0] - 1e-6 && r[1] >= q[1] - 1e-6 && r[2] <= q[2] + 1e-6 && r[3] <= q[3] + 1e-6;
-        for (jz, z0) in (0..self.size[1]).step_by(chunk as usize).enumerate() {
-            for (jx, x0) in (0..self.size[0]).step_by(chunk as usize).enumerate() {
+        let whole = |o: u32| (f64::from(o) * step).fract() == 0.0;
+        for (jz, (z0, cz)) in cuts(0, self.size[1], chunk, End::Back, &whole).into_iter().enumerate() {
+            for (jx, (x0, cx)) in cuts(0, self.size[0], chunk, End::Back, &whole).into_iter().enumerate() {
                 let spec = Spec {
                     name: format!("j{jx:03}_{jz:03}"),
                     at: [f64::from(x0) * step, f64::from(z0) * step],
                     spacing: step,
-                    cells: [chunk.min(self.size[0] - x0), chunk.min(self.size[1] - z0)],
+                    cells: [cx, cz],
                 };
                 let r = spec.rect();
                 let inside = self.sources.iter().any(|s| s.contains(r[0], r[1]) && s.contains(r[2], r[3]))

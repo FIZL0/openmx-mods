@@ -22,6 +22,7 @@
 pub mod build;
 pub mod check;
 pub mod jsonw;
+pub mod openmx;
 pub mod ultra;
 
 use game_sim::track::{ActivityModel, Scene, Terrain, switch};
