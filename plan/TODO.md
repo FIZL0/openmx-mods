@@ -10,6 +10,7 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 ### Tooling
 
 - [ ] **M20** Untamed's 360 and backflip in PCSX2 (M19 follow-up): which PS2 button is MAPKEY_STUNT_MOD (SLUS_217.01 0x4fd630 reads the key set's +0x18), and a capture of each on a lip with the bike's attitude per frame, as M19 did for MX vs. ATV Unleashed (notes/tricks.md, extracted/mxvatv/watch/air.toml); also a clean landing of a 360 on a jump long enough for one, and the wreck reason a landing mid-clip gives (0xb or 0xf)
+- [ ] **M21** do MX vs. ATV's 360 and backflip run at once? (user, 2026-10-23: openmx should do 360 backflips and 360 front flips, openmx MD20). From SLUS_211.04 (0x4e53d0 the 360, 0x4e4f20 the backflip) and Untamed (0x4fd630, 0x4fd0d0): whether one arming excludes the other (the stick's x for the 360 and y for the backflip on the same R1 + lip, a diagonal), whether both torques go into the body on one frame, and how the two landing tests (35 degrees of heading, the backflip's upright clip) combine. Then try it in PCSX2 (T7's capture: R1 + stick back and to the side off a big lip, the bike's attitude per frame) and say whether the game does a 360 backflip, and if not what stops it. notes/tricks.md, a section 'Both at once' (after M19) → notes/tricks.md | t: none (research; the capture's rows are the proof) | j: mxvatv-360-flips
 ### MX vs. ATV Unleashed
 
 
