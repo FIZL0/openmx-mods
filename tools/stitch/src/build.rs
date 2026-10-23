@@ -103,7 +103,8 @@ pub struct Collar {
     /// The tile, which is also its source's index.
     pub tile: usize,
     pub spacing: f64,
-    /// World feet, the interior grown by `width` every way.
+    /// World feet, the interior grown every way by a whole number of periods, each edge on a whole foot;
+    /// `width` is the widest edge's.
     pub rect: [f64; 4],
     pub width: f64,
     pub period: f64,
@@ -144,6 +145,13 @@ impl Spec {
     }
 }
 
+/// The fewest lattice samples, `at_least` or more, whose length is a whole number of feet: a world's far
+/// edge starts the joins cut along it (an ultra map's), and openmx asks a whole foot of every `at` (an odd
+/// count of 4.5 ft samples ends on a half).
+pub fn whole_samples(at_least: u32, step: f64) -> u32 {
+    (at_least..at_least + 64).find(|n| (f64::from(*n) * step).fract() == 0.0).unwrap_or(at_least)
+}
+
 /// `s / lattice` as a small fraction, if there is one.
 pub fn ratio(s: f64, lattice: f64) -> Option<(i64, i64)> {
     let r = s / lattice;
@@ -174,6 +182,10 @@ pub fn gap_for(dh: f64, p: &Params, rooms: f64, widen: f64) -> f64 {
 /// Place one interior's near edge at or past `want` (world feet) along one axis: the tile's origin on a
 /// whole leaf (16 samples), and the interior's edges on the join lattice where the spacings allow it
 /// (the near edge cut a few samples more, the far edge a few less). Returns (origin, lo, hi).
+///
+/// The origin is rounded to whole feet, which openmx asks of every `at` so world − `at` is exact. For a
+/// spacing a float holds exactly that is the leaf itself; for one it holds only nearly (Untamed's
+/// Nat_OR, 4.499999 ft) a whole number of its leaves is a hair off a foot, and the foot is kept.
 fn place_axis(want: f64, s: f64, lo: u32, hi: u32, ratio: Option<(i64, i64)>) -> (f64, u32, u32) {
     let leaf = 16.0 * s;
     let k = ((want - f64::from(lo) * s) / leaf).ceil() as i64;
@@ -188,7 +200,7 @@ fn place_axis(want: f64, s: f64, lo: u32, hi: u32, ratio: Option<(i64, i64)>) ->
         lo2 = lo + d as u32;
         hi2 = lo2 + ((hi - lo2) as i64 / q * q) as u32;
     }
-    (k as f64 * leaf, lo2, hi2)
+    ((k as f64 * leaf).round(), lo2, hi2)
 }
 
 /// Lay the tiles out in a grid, ordered by the height of their interiors' edges and filled in a snake,
@@ -274,7 +286,7 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
             Source { tile: t, rect, at: at[t], spacing: s, keep: k, ring: tiles[t].ring(k), gates: gates[t] }
         })
         .collect();
-    let size = [((far[0] + pad) / step).ceil() as u32, ((far[1] + pad) / step).ceil() as u32];
+    let size = [0, 1].map(|a| whole_samples(((far[a] + pad) / step).ceil() as u32, step));
     let radii = radii(&sources, size, step);
     let radius = radii.iter().copied().fold(0.0, f64::max);
     let bins = Bins::new(&sources, &radii, size, step);
@@ -407,11 +419,22 @@ fn collars(sources: &[Source], ratios: &[Option<(i64, i64)>], step: f64, size: [
         let period = q as f64 * s;
         let band = fade.max(period);
         // The pull stays off the tile's own pinned ring: width − band > 2 × the coarser spacing.
-        let width = ((band + 2.0 * step.max(s)) / period).ceil() * period;
+        let periods = ((band + 2.0 * step.max(s)) / period).ceil();
         let r = src.rect;
-        let rect = [r[0] - width, r[1] - width, r[2] + width, r[3] + width];
+        // Each edge as many periods out as that, or a few more until it is on a whole foot: the collar's
+        // joins start on its edges, and openmx asks a whole foot of every `at` (a 31.5 ft period puts
+        // every other edge on a half).
+        let edge = |e: usize| {
+            let out = if e < 2 { -1.0 } else { 1.0 };
+            (0..8).map(|n| r[e] + out * (periods + f64::from(n)) * period).find(|v| v.fract() == 0.0)
+        };
+        let edges = [edge(0), edge(1), edge(2), edge(3)];
+        let rect = edges.map(|e| e.unwrap_or(f64::NAN));
+        let width = (0..4).map(|e| (rect[e] - r[e]).abs()).fold(0.0, f64::max);
         let world = [f64::from(size[0]) * step, f64::from(size[1]) * step];
-        let why = if rect[0] < 0.0 || rect[1] < 0.0 || rect[2] > world[0] || rect[3] > world[1] {
+        let why = if edges.contains(&None) {
+            Some(format!("no edge {period} ft periods out is on a whole foot"))
+        } else if rect[0] < 0.0 || rect[1] < 0.0 || rect[2] > world[0] || rect[3] > world[1] {
             Some("it would reach past the world's edge".to_owned())
         } else if let Some(o) = sources.iter().find(|o| o.tile != t && rect_gap(rect, o.rect) < band + 2.0 * step) {
             Some(format!("tile {}'s interior is too near", o.tile))
