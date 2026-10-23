@@ -371,6 +371,15 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   plus: arms only with **R1 alone** (`buttons & 0xf == 4`; MXU needs none), plays the rider's backflip clip
   while the bike is over, and landing mid-clip is a wreck. A ruleset switch (MXU / MX vs. ATV), since
   MXU's own backflip must stay bit-exact.
+- **MD20, a 360 backflip: not in either game** (M21, `notes/tricks.md` "Both at once"). For MX vs. ATV
+  and Untamed rules, the 360 and the backflip are exclusive per jump. Both arm on the same lip, but once
+  one fires, the other's lip test (`active` or `applied` of the first) fails and clears its arm, through
+  the grace and the flight. A diagonal flick that crosses both fire lines on one frame gives the backflip
+  (its step runs first). Only one torque goes into the body, and each landing is judged by its own move's
+  test alone. The 360's own pitch share (−`…TorqueX`) makes it a cork about a diagonal axis (captured,
+  365° clean on Untamed), and the stick held back in the air steepens it. MD20's both-at-once move,
+  "started while the other is turning" and "clean only if both are done", is the port's invention:
+  put it behind `air::INVENTED` with named constants, and keep the accurate ruleset exclusive.
 - **New: `skin::Clip::parse` and `.mot` versions 6 and 7** (M19). Every MX vs. ATV rider stunt clip and
   the bike clips of the stunts MXU lacks are refused, e.g. `Rider\Anim\MX_ThreeSixtyL.mot`: `not a .mot:
   a name of 1281844556 bytes at 38`, `Veh\Anim\Bike_ThreeSixtyL.mot`: `… 184575339 bytes at 26` (123 of

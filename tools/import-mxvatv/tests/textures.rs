@@ -340,9 +340,10 @@ fn each_material_is_resolved_as_openmx_resolves_it_and_a_miss_says_why() {
     let _ = std::fs::remove_dir_all(&dir);
     let has = |file: &str, why: &str| said.iter().any(|(f, w)| f == file && w.contains(why));
     assert!(!said.iter().any(|(f, _)| f.starts_with("good")), "{said:?}");
-    assert!(has("thq.psm", "answers with Tex\\BaleTHQ.psm where Tex\\thq.psm is the file"), "{said:?}");
+    // openmx c66d022: find_suffix prefers a whole-name match, so `thq.psm` now reads `thq.psm`.
+    assert!(!said.iter().any(|(f, _)| f.starts_with("thq")), "{said:?}");
     assert!(has("white.psm", "no file ends in it"), "{said:?}");
     assert!(has("Nat12 _spaced.pst", "no file ends in it"), "{said:?}");
     assert!(has("broken.pst", "its reader refuses it"), "{said:?}");
-    assert_eq!(said.len(), 4, "{said:?}");
+    assert_eq!(said.len(), 3, "{said:?}");
 }
