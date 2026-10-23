@@ -10,7 +10,8 @@
 #
 # Every mod in out/mods/ is then copied into the game's own mods folder, INSTALL/mods/<dest>/<id>/, the
 # folder openmx reads beside its disc and settings.txt (each id replaced whole; other mods there are left
-# alone). `mods` in this repo is a link to out/mods/.
+# alone), except a track whose mod.json says a `category` other than `freeride` (the stadiums and FMX
+# arenas): that one is removed from there instead, until openmx reads the field. `mods` in this repo is a link to out/mods/.
 #
 # Discs are found by their boot ELF (SYSTEM.CNF), never by file name: `discx discs`.
 #
@@ -158,17 +159,24 @@ fi
 if [ -n "$install" ] && [ -d "$out/mods" ]; then
     if compgen -G "$install/*.iso" >/dev/null || [ -f "$install/settings.txt" ]; then
         dir=$(cd "$install" && pwd -P)/mods
-        got=0
+        got=0 left=0
         for d in "$out"/mods/*/*/; do
             [ -f "$d/mod.json" ] || continue
             rel=${d#"$out/mods/"}
             rel=${rel%/}
+            # Not free ride (stadiums and FMX arenas, user 2026-10-22): openmx lists every track mod as a
+            # free ride and does not read `category` yet (notes/openmx-asks.md), so they are not installed.
+            if grep -Eq '"category": *"[^"]*"' "$d/mod.json" && ! grep -Eq '"category": *"freeride"' "$d/mod.json"; then
+                rm -rf "${dir:?}/$rel"
+                left=$((left + 1))
+                continue
+            fi
             mkdir -p "$dir/$(dirname "$rel")"
             rm -rf "${dir:?}/$rel"
             cp -a --reflink=auto "$d" "$dir/$rel"
             got=$((got + 1))
         done
-        say "installed $got mods into $dir/"
+        say "installed $got mods into $dir/ ($left stadium mods left out until openmx reads category)"
     else
         say "not installed: $install/ holds no disc or settings.txt (--install DIR, the folder openmx runs from)"
     fi

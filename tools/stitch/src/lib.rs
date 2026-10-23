@@ -147,6 +147,10 @@ impl Tile {
         if meta.get("kind").and_then(Json::str) != Some("track") {
             return Err(format!("{id}: not a track mod (a world's tile is a track, §3)"));
         }
+        // A world is made of free-ride tracks only: no stadium or FMX arena (user, 2026-10-22).
+        if let Some(c) = meta.get("category").and_then(Json::str).filter(|c| *c != "freeride") {
+            return Err(format!("{id}: category {c:?}, and a world takes only free-ride tracks (§3)"));
+        }
         let all = files(dir)?;
         let scenes: Vec<&String> = all.iter().filter(|f| f.to_ascii_lowercase().ends_with(".scn")).collect();
         let [scene_file] = scenes.as_slice() else {
