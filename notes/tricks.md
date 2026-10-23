@@ -236,3 +236,98 @@ In `notes/openmx-asks.md` (M19). In short:
 6. **Varial**: a pose stunt like the 24; it needs only the table, its clips and a remap to reach it.
 7. **Wheelie and stoppie**: their hold scores.
 8. **Whips**: `GasGyroTorque` in the air control (the `.phy` numbers do the rest).
+
+## Both at once: no 360 backflip (M21)
+
+Asked for openmx's MD20 (a 360 backflip and a 360 front flip, with R1 and the stick on a diagonal): do
+MX vs. ATV's two moves run together? **No, in either game.** On a lip the two steps lock each other out:
+whichever fires first wins the jump, and if both fire on the same frame the backflip does. Nothing in the
+air or at the landing combines them. What the game has instead is the 360 itself, which is already a
+corked spin: its pitch torque turns the bike about an axis halfway between its pitch and yaw axes (at
+the full flick). There is no front flip to combine with anything (above).
+
+**The two steps, side by side** (SLUS_211.04; Untamed's `0x4fd0d0` and `0x4fd630` are the same at
+other offsets, with the stunt modifier in place of R1-alone):
+
+| | backflip `0x4e4f20` | 360 `0x4e53d0` |
+|---|---|---|
+| order | first: both callers (`0x4b95f0`, `0x4d917c`; Untamed `0x4dbc20`, `0x4f115c`) call it before the 360 | second (`0x4b95fc`, `0x4d9188`; Untamed `0x4dbc2c`, `0x4f1168`) |
+| clears on entry | applied +0x1194 | applied +0x11d0 |
+| lip test refuses if the other has | **applied +0x11d0 or active +0x11d8** | **applied +0x1194 or active +0x119c** |
+| on a refused lip | its arm +0x11a0 and active cleared | its arm +0x11dc and active cleared |
+| arms on | R1 alone, stick y < −0.8 | R1 alone, stick \|x\| > 0.7 (direction by sign) |
+| fires on | armed and y > +0.8 | armed and x past 0.7 the armed way |
+| torque into the body (`vtable+0x78`) | its own vector +0x11c0 (pitch) | its own vector +0x1210 (pitch, yaw) |
+| ends on | wheels down, a touch, \|torque\| < floor | wheels down, a touch, \|yaw torque\| < `MinThreeSixtyTorqueY` |
+| landing test | its clip state +0x1754 ≠ 0 → wreck | its clip state +0x1758 ≠ 0 (still past 35°) → wreck |
+
+(M19's line above, "no backflip armed or turning (+0x1194, +0x119c)", should read "applied or active":
+the backflip's arm, +0x11a0, is not tested, so both can be armed together.)
+
+So:
+
+- **Arming does not exclude.** A diagonal (R1, stick up and to one side) arms both on the same lip frame.
+  The game's stick reaches (−1, −1) at a corner: x and y are not normalised to a circle.
+- **Firing does.** The first step to fire sets its "active" flag. From the next step call on, the other
+  step's lip test fails, and that failure clears its arm, every frame, for as long as the first move
+  lasts: the 0.6 / 0.9 s grace on the ground, then the whole flight. Off the lip (no wheel down) neither can
+  arm anyway, so the second move cannot start in the air either.
+- **A tie goes to the backflip.** With both armed and the stick flicked straight to the opposite
+  diagonal, y and x cross their fire lines on the same frame. The backflip's step runs first and fires,
+  and the 360's step, called next with the backflip active, clears its own arm. If x crosses first (flick
+  sideways, then down), the 360 fires and the backflip never can.
+- **One torque per frame.** Only the active move's step calls the body's moment function. The two
+  "applied" flags are never set on the same frame.
+- **The landing tests never combine.** Each move's ending checks only its own clip. The other move is not
+  running, so its test does not apply. The 360's landing is judged by heading alone (within 35° of
+  take-off, not upright); the backflip's by its clip (the bike over and back). The shared tail differs as
+  well: after a backflip, control comes back once the bike is upright in the air (roll < π/2, pitch inside
+  `AirbornePitch{Down,Up}WreckAngle`); after a 360, only at touchdown.
+- **No combination row.** None of the 46 (MX vs. ATV) or 54 (Untamed) stunt rows combines a 360 and a
+  flip. The ELFs and overlays (`SLUS_211.04`, `SLUS_217.01`, each `GAME_REL.BIN` and `UI_REL.BIN`) name
+  the two only apart: `Left 360`/`Right 360`, `Backflip`, the stats `NumThreeSixty`, `NumBackFlips`,
+  `STR_STAT_MOST_360_LANDED`, `STR_STAT_MOST_BACKFLIPS_LANDED`. Their "combo" strings (`Combo Score`,
+  `NumStuntsInCombo`, `combo challenge`) belong to the HUD's score for a chain of stunts, not to a
+  combined rotation; how that chain is scored was not traced.
+
+**The 360 is already part backflip.** The 360 fires with pitch −lerp(flick, 600, 1100) as well as yaw
+dir × lerp(flick, 200, 1100), both held through the air in the body frame. At the full flick (X −1100,
+Y +1100) the bike turns about one body axis tilted roughly 45° between its pitch and yaw axes. The nose
+comes up and over the shoulder, the bike lies near flat on its side halfway (up.y about 0), and a full
+turn brings it back to its take-off attitude: a cork, not a flat spin. The slow flick (600 / 200) is
+mostly pitch (M19 `slowspin`; M20 `step30`/`step60` went over on its back). Holding the stick back in
+the air, with R1 still down (the 360 does not decay while a trick button is held), adds the air
+control's pitch on top. That steepens the cork; it does not make a second, separate flip.
+
+**Captured** (PCSX2 kit copy 9; MX vs. ATV state 4, its first lip, bike 0xe714e0; Untamed state 8,
+Rocksbury's first big jump, bike 0x1be47f0; both with gas and R1 held from the state). The driver,
+`extracted/mxvatv/watch/both.py`, is M20's closed-loop pattern for either game. It puts the stick on the
+first lip frame, flicks once the step reports armed and centres once a move fires (so the input is
+frame-exact on the game's own flags), and logs the bike every frame it sees (every other vsync).
+`both_sum.py` gives the summaries below. CSVs `m21-*.csv` in `extracted/{mxvatv,untamed}/capture/` (not
+in git). Rotations are the body-frame steps of the quaternion summed (x pitch, y yaw). "Path" is the
+total turned; "net" is the angle between the take-off and touchdown attitudes. Wrecks are counted from
+take-off to 1 s after touchdown (MX vs. ATV: +0x6e4, incremented by the wreck call `0x4e2260`; Untamed:
++0x708).
+
+| run | stick, R1 held | MX vs. ATV (1.6 s of air) | Untamed (1.9 s of air) |
+|---|---|---|---|
+| `diag` | up-left (both arm, frame 120 / 280), then down-right | **backflip fires** (−1400), the 360's arm cleared the same frame; x −265°, y 0°; wreck (under-rotated, mid-clip) | **backflip fires**, 360 arm cleared; x −332°, y 0°, landed upright, clean |
+| `diagx` | up-left, then right, then down-right a frame later | **360 fires** (−1100 / +1100); the backflip, armed, is cleared and never fires; path 306°, landed 37° off heading mid-clip: wreck | **360 fires**, backflip never; path 365°, 9° off, clean |
+| `spinflip` | left, right (360 fires), then up, down on the ground | 360 only; up then down never arms the backflip; as `spin` | 360 only; as `spin` |
+| `flipspin` | up, down (backflip fires), then left, right on the ground | backflip only; left then right never arms the 360; as `diag` | backflip only; as `diag` |
+| `spin` | left, right | x −212°, y +217°, path 306°, up.y down to +0.07; landed 37° off heading with the clip running: wreck | x −258°, y +259°, **path 366°, net 11°**, up.y down to −0.04; landed 9° off: clean |
+| `spinpull` | left, right, then the stick held back from take-off | x −289°, y +217°, **path 365°, net 10°**, up.y down to −0.22; landed 9° off: **clean** | x −350°, y +259°, path 436°: over-rotated, landed 101° off: wreck |
+| `flip` | up, down | x −254°: under-rotated, wreck | x −321°, landed upright: clean |
+
+In all 14 runs, no frame had both moves active or both applied. The `flipspin` and `spinflip` stick
+moves came while the first move's grace was still running on the ground (frames 128–134 / 288–294, take-off at
+156 / 302), the one window the arm could have opened, and nothing armed.
+
+**Does the game do a 360 backflip?** Not as two moves. Its lip tests make the 360 and the backflip
+exclusive per jump, and the diagonal gives a plain backflip. What it does have is the 360 as a cork
+(about 45° of pitch share at the full flick), which the stick held back steepens. That is as close as
+either disc comes. For openmx (MD20) this means: a "360 backflip" with both torques and both landing
+tests at once is the port's own invention, like the front flip (`air::INVENTED`, named constants). The
+accurate port keeps the two exclusive, with the backflip winning a tie and the 360's pitch share as the
+`.phy` gives it.

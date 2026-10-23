@@ -698,7 +698,8 @@ fn a_name_openmx_s_suffix_lookup_answers_with_another_file_is_in_todo() {
     let d = disc_loose("suffix", t, m, Vec::new(), Vec::new());
     let got = import_disc(&d).unwrap();
     let has = |all: &[&str]| assert!(got.todo.iter().any(|t| all.iter().all(|w| t.contains(w))), "no todo has all of {all:?}: {:#?}", got.todo);
-    has(&["Res::find_suffix", "answers with another file", "MD2", r"shrubbb.psm → Tex\AShrubBB.psm (Tex/ShrubBB.psm is the file)"]);
+    // openmx c66d022: find_suffix prefers a whole-name match, so `shrubbb.psm` now reads `ShrubBB.psm`.
+    assert!(!got.todo.iter().any(|t| t.contains("shrubbb.psm →")), "{:#?}", got.todo);
     has(&["names the map has no file for", r"treebb.psm → Tex\BigTreeBB.psm"]);
     // modcheck still reads it back: the todo is a note, not a fault.
     let r = check(&got.dir, &mut Discs::new(Some(d.iso.clone())));
