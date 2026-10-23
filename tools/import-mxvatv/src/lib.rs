@@ -44,6 +44,8 @@ pub const GAME: &str = "MX vs. ATV Unleashed";
 pub const AUTHOR: &str = "openmx-mods tools/import-mxvatv 0.1";
 /// The mods' own version (§1): bump it when what the importer writes changes.
 pub const VERSION: &str = "1.0.0";
+/// Stadiums' version: 1.1.0 added `category: "stadium"` (and on FMX arenas `shootoff: false`) to their mod.json.
+pub const STADIUM_VERSION: &str = "1.1.0";
 
 /// The game a map comes from: what `mod.json`'s `source` and `id` say (§1), and where its map
 /// archives sit on the PSR.
@@ -1422,6 +1424,18 @@ fn q(s: &str) -> String {
     o
 }
 
+/// Whether a map folder is a freestyle (FMX) arena: MX vs. ATV Unleashed's FS01–08, Untamed's FS_A–D.
+pub fn is_fmx(folder: &str) -> bool {
+    folder.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("fs"))
+}
+
+/// Whether a map folder is a stadium (notes/mxvatv.md, notes/mxvatv-later.md): the FMX arenas, the
+/// supercross ones (SX01–18, SX_A–L), MX vs. ATV Unleashed's MC06–08 and Untamed's MT_A.
+pub fn is_stadium(folder: &str) -> bool {
+    let f = folder.to_ascii_uppercase();
+    is_fmx(&f) || f.starts_with("SX") || f.starts_with("MT") || ["MC06", "MC07", "MC08"].contains(&f.as_str())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn mod_json(
     origin: &Origin,
@@ -1445,7 +1459,17 @@ fn mod_json(
     o += "  \"standard\": 1,\n  \"kind\": \"track\",\n";
     o += &format!("  \"id\": {},\n  \"name\": {},\n", q(id), q(name));
     o += &format!("  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"members\": {}\n  }},\n", q(origin.game), q(origin.boot), list(members, "    "));
-    o += &format!("  \"version\": {},\n  \"author\": {},\n  \"permission\": \"own-disc\",\n", q(VERSION), q(AUTHOR));
+    // Stadiums and FMX arenas (user, 2026-10-22): their own category in the pick, not free ride, and in
+    // no world; FMX arenas also have no shootoff (§2c).
+    let stadium = is_stadium(folder);
+    let version = if stadium { STADIUM_VERSION } else { VERSION };
+    o += &format!("  \"version\": {},\n  \"author\": {},\n  \"permission\": \"own-disc\",\n", q(version), q(AUTHOR));
+    if stadium {
+        o += "  \"category\": \"stadium\",\n";
+    }
+    if is_fmx(folder) {
+        o += "  \"shootoff\": false,\n";
+    }
     if let Some((p, d, from)) = spawn {
         o += &format!("  \"spawn\": {{\"position\": {p}, \"direction\": {d}, \"from\": {}}},\n", q(from));
     }
@@ -1460,3 +1484,32 @@ fn mod_json(
     o
 }
 
+
+#[cfg(test)]
+mod fmx {
+    use super::*;
+
+    #[test]
+    fn stadiums_are_their_own_category_and_fmx_arenas_have_no_shootoff() {
+        for f in ["FS01", "fs08", "FS_A", "FS_D"] {
+            assert!(is_fmx(f) && is_stadium(f), "{f}");
+        }
+        for f in ["SX01", "sx18", "SX_A", "SX_L", "MC06", "mc07", "MC08", "MT_A"] {
+            assert!(is_stadium(f) && !is_fmx(f), "{f}");
+        }
+        for f in ["MC01", "MC05", "MC09", "MC10", "Nat03", "SM_MB", "AM_CS", "BT_A", "F", ""] {
+            assert!(!is_stadium(f) && !is_fmx(f), "{f}");
+        }
+        let origin = Origin { game: GAME, boot: BOOT, prefix: "mxvatv", archives: "Env" };
+        let json = |folder: &str| mod_json(&origin, "mxvatv_x", "X", folder, &[], None, &[], &[], &[]);
+        let fs = json("FS01");
+        assert!(fs.contains("\"category\": \"stadium\",") && fs.contains("\"shootoff\": false,"), "{fs}");
+        assert!(fs.contains(&format!("\"version\": \"{STADIUM_VERSION}\"")), "{fs}");
+        let sx = json("SX01");
+        assert!(sx.contains("\"category\": \"stadium\",") && !sx.contains("shootoff"), "{sx}");
+        assert!(sx.contains(&format!("\"version\": \"{STADIUM_VERSION}\"")), "{sx}");
+        let mc = json("MC01");
+        assert!(!mc.contains("category") && !mc.contains("shootoff"), "{mc}");
+        assert!(mc.contains(&format!("\"version\": \"{VERSION}\"")), "{mc}");
+    }
+}

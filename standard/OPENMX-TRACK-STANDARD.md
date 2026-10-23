@@ -222,6 +222,20 @@ The source game may start a freeride somewhere else, for example from an activit
 against the running game. A `spawn` with no source is a guess, and a guess is not allowed. v1 has only
 one spawn. A list of named starts would come in a later version.
 
+### 2c. Category and the shootoff
+
+Two optional `mod.json` fields:
+
+| field | what |
+|---|---|
+| `category` | Where the track pick lists the mod. `freeride` (the default) is free ride. `stadium` is its own heading, not free ride, and no world (§3) takes it as a tile. Until openmx reads the field, `build.sh` does not install a mod whose category is not `freeride`. |
+| `shootoff` | `true` by default. `false`: the port puts no shootoff at the track's edge; the arena's own walls and collision bound it. |
+
+Every stadium and FMX arena is `"category": "stadium"`: MX vs. ATV Unleashed's FS01–08, SX01–18 and
+MC06–08, and Untamed's FS_A–D, SX_A–L and MT_A (user, 2026-10-22: not in the big world maps, in a category
+of their own rather than free ride). The FMX arenas (FS01–08, FS_A–D) also set `shootoff` to `false`
+(user, 2026-10-22). import-mxvatv writes both.
+
 ## 3. World mod (the combined maps, C1)
 
 A world is several tracks laid side by side as one ground. Each track is a **tile**, kept whole as its
@@ -291,6 +305,7 @@ mods/tracks/world_mxvatv/
 - `spawn`: `{"tile": "<tile>"}` uses that tile's spawn (§2b) moved by its `at`, or
   `{"position": [x, y, z], "direction": [x, y, z], "from": "…"}` in world feet. It defaults to the first
   tile's.
+- A tile is always a free-ride track: never one whose `category` is `stadium` (§2c); stitch refuses one.
 - A world may hold another world's tiles (the ultra map, C5). It copies the tiles and joins it keeps. It
   does not point at another mod.
 - `source.games` lists every game a tile came from. The pick shows worlds under their own heading (MD11).

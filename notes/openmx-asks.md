@@ -351,3 +351,11 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   mill without its wheel, Nat04's Ferris wheel is its stand alone (toy shots in this slot's
   `out/accuracy/<id>/`, not in git). That is openmx's own V43 (animated toys, open), and their `.mot`
   are still refused (M2's `skin::Clip::parse` entry above). Nothing to file here beyond V43.
+- **New: `category` and `shootoff` in a track's mod.json** (standard §2c; user, 2026-10-22: FMX maps not in
+  the big world maps, no shootoff; stadiums and FMX in a category of their own, not free ride). Every
+  stadium and FMX arena (MX vs. ATV Unleashed FS01–08, SX01–18, MC06–08; Untamed FS_A–D, SX_A–L, MT_A:
+  46 mods) now carries `"category": "stadium"`, and the FMX arenas `"shootoff": false` too.
+  `track_mods::check` ignores both, and every track mod is listed and ridden as a free ride, so build.sh
+  leaves these 46 out of the install (and removes them from `mods/tracks/`) instead. Ask: the pick (MD11,
+  P70) lists `category: "stadium"` mods under a Stadiums heading of their own, not with free ride, and a
+  `shootoff: false` track gets no shootoff band at its edge. Once both are read, build.sh can install them.
