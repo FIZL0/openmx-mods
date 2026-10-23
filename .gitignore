@@ -1,6 +1,6 @@
-extracted/
-iso/
-out/
+/extracted
+/iso
+/out
 target/
 __pycache__/
 .runner/
