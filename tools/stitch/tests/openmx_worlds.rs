@@ -661,3 +661,200 @@ fn rides_in_openmx() {
     }
     assert!(lines.iter().all(|l| !l.contains("FAIL")));
 }
+
+/// **M23 on the disc.** world_mxu_free built from its spec off the MX Unleashed disc: every tile cut at
+/// its ring's ridge on all four sides (keep `[88, 87, 681, 680]`), no origin below 0, every tile and
+/// join openmx's ground to the bit, no foot of the world owned by nothing, and across every join one
+/// ridge: on lines 50 ft apart (300 ft clear of the ring's corners) from 300 ft inside one tile to
+/// 300 ft inside the next, the ground between
+/// the highest point on either side dips at most [`RIDGE_DIP`] under the lower (the plateau the joins
+/// crossed before was about 55 ft under the ridges). With an openmx binary, rides on the gas across
+/// every join both ways (never thrown) and off every outer side (thrown, and only within the margin of
+/// the world's edge). Writes `<root>/mxu_free.txt`; `$OPENMX_WORLDS` set, the world is copied to
+/// `$OPENMX_WORLDS/tracks/world_mxu_free` for openmx's own `world_joins` test (MD27).
+#[test]
+#[ignore = "needs the MX Unleashed disc in iso/ or $DISCX_ISO (and the other two for the import C11_ROOT reuses); about 2 minutes with an openmx binary"]
+fn world_mxu_free_meets_ridge_to_ridge() {
+    const RIDGE_DIP: f32 = 30.0;
+    let iso = std::env::var_os("DISCX_ISO").map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../iso"));
+    let root = std::env::var_os("C11_ROOT").map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_TARGET_TMPDIR")).join("stitch-openmx-real"));
+    let tracks = imported(&root, &iso);
+    let j = spec("world_mxu_free");
+    let p = params(&j);
+    let names: Vec<String> = j.get("tiles").and_then(modcheck::json::Json::arr).unwrap().iter().filter_map(modcheck::json::Json::str).map(str::to_owned).collect();
+    let dirs: Vec<PathBuf> = names.iter().map(|t| tracks.join(t)).collect();
+    for d in &dirs {
+        let t = stitch::Tile::load(d).unwrap();
+        assert_eq!(t.find_cut(), ([88, 87, 681, 680], [true; 4]), "{}", t.id);
+    }
+    let out = root.join("out-mxu-free");
+    let built = build(&dirs, &out, &p).unwrap();
+    for pl in &built.plan.placed {
+        assert!(pl.at[0] >= 0.0 && pl.at[1] >= 0.0, "a tile at {:?}", pl.at);
+    }
+    let tiles: Vec<stitch::Tile> = dirs.iter().map(|d| stitch::Tile::load(d).unwrap()).collect();
+    let terrains: Vec<_> = tiles.iter().map(stitch::Tile::terrain).collect();
+    let plan = &built.plan;
+    let field = |x: f64, z: f64| plan.at(&tiles, &terrains, &plan.candidates([x, z, x, z]), x, z).h;
+    let w = openmx::load(&built.dir).unwrap();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let s = openmx::check_world(&w, &|t: &str| tracks.join(t), Some(&field), 24, 8, threads).unwrap();
+    let tiled = w.tiled().unwrap();
+    let st = openmx::strips(&w, &tiled, 1.0);
+    let mut report = vec![line("world_mxu_free", &w, &s, st.clone())];
+    assert_clean("world_mxu_free", &s, true);
+    assert_eq!(st.1, 0, "{:?}", st.2);
+    assert_no_strips(&w);
+
+    // One ridge across every join.
+    let y = |x: f32, z: f32| tiled.at(ps2_float::F(x), ps2_float::F(z)).unwrap().y.0;
+    let r: Vec<[f32; 4]> = (0..w.tile_count).map(|i| owned(&w.pieces[i].tile)).collect();
+    let pairs = neighbours(&w);
+    assert_eq!(pairs.len(), 5, "world_mxu_free's 3 × 2 layout has 5 joins between two tiles");
+    for &(a, b, _, deg, _) in &pairs {
+        let axis = usize::from(deg == 0.0);
+        let (lo, hi) = (r[a][1 - axis].max(r[b][1 - axis]), r[a][3 - axis].min(r[b][3 - axis]));
+        let (e0, e1) = (r[a][axis + 2], r[b][axis]);
+        let mut worst = (f32::MIN, 0.0f32);
+        // Clear of the ring's corners, where the ridge turns and a cut along one side runs along it.
+        let mut c = lo + 300.0;
+        while c < hi - 300.0 {
+            let h: Vec<f32> = (0..=((e1 - e0 + 600.0) as usize)).map(|k| e0 - 300.0 + k as f32).map(|u| if axis == 0 { y(u, c) } else { y(c, u) }).collect();
+            let mid = h.len() / 2;
+            let top = |s: &[f32]| s.iter().enumerate().fold((0, f32::MIN), |m, (i, v)| if *v > m.1 { (i, *v) } else { m });
+            let (i0, t0) = top(&h[..mid]);
+            let (i1, t1) = top(&h[mid..]);
+            let low = h[i0..=mid + i1].iter().copied().fold(f32::MAX, f32::min);
+            let dip = t0.min(t1) - low;
+            if dip > worst.0 {
+                worst = (dip, c);
+            }
+            c += 50.0;
+        }
+        let (na, nb) = (&w.pieces[a].tile.name, &w.pieces[b].tile.name);
+        report.push(format!(
+            "{}world_mxu_free: {na} -> {nb}: a {:.0} ft join; between the ridges it dips at most {:.1} ft under the lower (at {:.0} across)",
+            if worst.0 > RIDGE_DIP { "FAIL " } else { "" },
+            e1 - e0,
+            worst.0,
+            worst.1
+        ));
+    }
+
+    if let Some(world) = std::env::var_os("OPENMX_WORLDS") {
+        let to = Path::new(&world).join("tracks").join("world_mxu_free");
+        let _ = std::fs::remove_dir_all(&to);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        assert!(std::process::Command::new("cp").arg("-r").arg(&built.dir).arg(&to).status().unwrap().success());
+        report.push(format!("copied to {}", to.display()));
+    }
+    match openmx_bin() {
+        Some(bin) => {
+            let mods = root.join("run-mxu-free");
+            let _ = std::fs::remove_dir_all(&mods);
+            std::fs::create_dir_all(mods.join("tracks")).unwrap();
+            std::os::unix::fs::symlink(&built.dir, mods.join("tracks").join("world_mxu_free")).unwrap();
+            // Each join both ways: (from, to, start, degrees, frames, outer).
+            let mut jobs = Vec::new();
+            for &(a, b, start, deg, dist) in &pairs {
+                // Time to climb the ridge's inner face on the way.
+                let frames = ((dist / 3.0) as u32 + 600).min(3000);
+                jobs.push((a, Some(b), start, deg, frames));
+                let axis = usize::from(deg == 0.0);
+                let mut back = start;
+                back[axis] = r[b][axis] + 150.0;
+                jobs.push((b, Some(a), back, deg + 180.0, frames));
+            }
+            // Every outer side: from 150 ft inside its middle, straight out.
+            let (wd, dp) = (tiled.area.width.0, tiled.area.depth.0);
+            for (i, t) in r.iter().enumerate() {
+                for e in 0..4 {
+                    let axis = e % 2;
+                    let dir = if e < 2 { -1.0f32 } else { 1.0 };
+                    let beyond = |c: &[f32; 4]| {
+                        let across = c[3 - axis].min(t[3 - axis]) - c[1 - axis].max(t[1 - axis]);
+                        across > 0.0 && if dir < 0.0 { c[axis + 2] <= t[axis] } else { c[axis] >= t[axis + 2] }
+                    };
+                    if r.iter().enumerate().any(|(k, c)| k != i && beyond(c)) {
+                        continue;
+                    }
+                    let mid = (t[1 - axis] + t[3 - axis]) / 2.0;
+                    let edge = t[axis + if dir > 0.0 { 2 } else { 0 }] - 150.0 * dir;
+                    let start = if axis == 0 { [edge, mid] } else { [mid, edge] };
+                    let deg = match e {
+                        0 => 270.0,
+                        1 => 180.0,
+                        2 => 90.0,
+                        _ => 0.0,
+                    };
+                    let far = if dir < 0.0 { edge } else { [wd, dp][axis] - edge };
+                    jobs.push((i, None, start, deg, ((far / 3.0) as u32 + 300).min(3000)));
+                }
+            }
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let done = std::sync::Mutex::new(Vec::new());
+            std::thread::scope(|sc| {
+                for _ in 0..threads.min(12) {
+                    sc.spawn(|| loop {
+                        let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&(_, _, start, deg, frames)) = jobs.get(k) else { break };
+                        let t = ride(&bin, &mods, "world_mxu_free", start, deg, frames, true);
+                        done.lock().unwrap().push((k, t));
+                    });
+                }
+            });
+            let mut done = done.into_inner().unwrap();
+            done.sort_by_key(|d| d.0);
+            for (k, t) in &done {
+                let (a, b, start, deg, _) = jobs[*k];
+                let na = &w.pieces[a].tile.name;
+                match b {
+                    Some(b) => {
+                        let (reached, throws, wrecks, owners, _) = crossing(&w, &tiled, t, b);
+                        let nb = &w.pieces[b].tile.name;
+                        // Where each wreck began, and on whose ground.
+                        let at: Vec<String> = (0..t.len())
+                            .filter(|&i| t[i].wreck && (i == 0 || !t[i - 1].wreck))
+                            .map(|i| {
+                                let own = tiled.owner(ps2_float::F(t[i].x), ps2_float::F(t[i].z)).map_or("none".to_string(), |o| w.pieces[o.0].tile.name.clone());
+                                format!(" ({:.0}, {:.0}) on {own} at {:.0}", t[i].x, t[i].z, t[i].speed)
+                            })
+                            .collect();
+                        report.push(format!(
+                            "{}ride {na} -> {nb} from ({:.0}, {:.0}) at {deg}: {}{} wrecks{}; crossed {}",
+                            if throws.is_empty() { "" } else { "FAIL " },
+                            start[0],
+                            start[1],
+                            if !throws.is_empty() { format!("thrown back inside the world: {}; ", throws.join("; ")) } else if reached { "reached; ".into() } else { "did not reach; ".into() },
+                            wrecks,
+                            at.join(","),
+                            owners.join(" > ")
+                        ));
+                    }
+                    None => {
+                        let throw = t.iter().position(|k| k.wreck && k.speed > THROW_SPEED);
+                        let line = match throw {
+                            Some(i) => {
+                                let k = &t[i.saturating_sub(1)];
+                                let to_edge = k.x.min(k.z).min(wd - k.x).min(dp - k.z);
+                                let ok = to_edge <= 160.0;
+                                format!("{}ride {na} outward from ({:.0}, {:.0}) at {deg}: thrown at tick {i} at ({:.0}, {:.0}), {to_edge:.0} ft from the world's edge", if ok { "" } else { "FAIL " }, start[0], start[1], k.x, k.z)
+                            }
+                            None => {
+                                let k = t.last().unwrap();
+                                format!("ride {na} outward from ({:.0}, {:.0}) at {deg}: not thrown in {} ticks, ended at ({:.0}, {:.0}) going {:.0}", start[0], start[1], t.len(), k.x, k.z, k.speed)
+                            }
+                        };
+                        report.push(line);
+                    }
+                }
+            }
+        }
+        None => report.push("rides: skipped, no openmx binary ($OPENMX_BIN, extracted/openmx-target, openmx/target)".into()),
+    }
+    std::fs::write(root.join("mxu_free.txt"), report.join("\n") + "\n").unwrap();
+    for l in &report {
+        println!("{l}");
+    }
+    assert!(report.iter().all(|l| !l.contains("FAIL")));
+}

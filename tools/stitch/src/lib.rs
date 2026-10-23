@@ -40,6 +40,18 @@ pub const MAX_BERM: f64 = 400.0;
 pub const BERM_FALL: f64 = 0.02;
 /// The profile is compared over this many samples.
 const BERM_WINDOW: usize = 4;
+/// How far past the berm a ridge is looked for, at most (M23): MX Unleashed's freeride maps ring their
+/// ground with a mountain ridge whose peak stands about 640 ft inside the berm.
+pub const RIDGE_REACH: f64 = 1200.0;
+/// A ridge stands this much over the berm's height, and falls this much again inward of its peak.
+pub const RIDGE_RISE: f64 = 10.0;
+/// A ridge is cut only behind a plateau: the profile within [`RIDGE_FLAT`] of the berm's height for at
+/// least this far inward of it (MX Unleashed's freeride maps: 477 ft of flat 189.9 ft shootoff ground on
+/// every side). No other map of the three discs that a world joins has one; without it the rule would cut
+/// into a track wherever its ground climbs inward of the edge.
+pub const RIDGE_PLATEAU: f64 = 2.0 * SHOOTOFF;
+/// How far from the berm's height the plateau may stray, feet.
+pub const RIDGE_FLAT: f64 = 1.0;
 
 /// One track mod folder read for joining.
 pub struct Tile {
@@ -256,10 +268,20 @@ impl Tile {
     /// keeps falling inward faster than [`BERM_FALL`]: that is the berm's inner slope. At most
     /// [`MAX_BERM`] feet past the shootoff band, and at most a quarter of the map.
     ///
+    /// Past the berm, a side whose profile then climbs to a ridge ([`Tile::ridge`]) is cut at the
+    /// ridge's peak instead (M23): the ground between is the map's own ring of mountains and the flat
+    /// shootoff plateau outside them, which in a world would leave every join a plateau with a ridge
+    /// either side. Cut at the peaks, two maps meet ridge to ridge.
+    ///
     /// The sides are the [`Tile::ground`]'s: where cells are missing at an edge, the side is the hole's
     /// edge, and the shootoff band is only what is left of it past the hole (the game has no shootoff
     /// there, only no ground). The berm is looked for from the hole's edge all the same.
     pub fn find_keep(&self) -> [u32; 4] {
+        self.find_cut().0
+    }
+
+    /// [`Tile::find_keep`]'s interior, and which sides (x0, z0, x1, z1) it cut at a ridge.
+    pub fn find_cut(&self) -> ([u32; 4], [bool; 4]) {
         let t = self.terrain();
         let s = self.spacing;
         let g = self.ground;
@@ -267,18 +289,40 @@ impl Tile {
         let m0 = (SHOOTOFF.max(border) / s).ceil() as usize;
         let hole = [g[0], g[1], self.n.0 - g[2], self.n.1 - g[3]];
         let mut band = [0u32; 4];
+        let mut ridged = [false; 4];
         for (side, b) in band.iter_mut().enumerate() {
             // side 0: x = d, 1: z = d, 2: x = n − d, 3: z = n − d (n and 0 the ground's sides)
             let across = if side % 2 == 0 { g[2] - g[0] } else { g[3] - g[1] };
             let dmax = (m0 + (MAX_BERM / s).ceil() as usize).min(across as usize / 4);
-            let profile = self.profile(&t, side, dmax + BERM_WINDOW, m0 as u32);
+            let reach = (dmax + (RIDGE_REACH / s).ceil() as usize).min(across as usize / 4);
+            let profile = self.profile(&t, side, reach.max(dmax + BERM_WINDOW), m0 as u32);
             let mut d = m0.saturating_sub(hole[side] as usize).min(dmax);
             while d < dmax && profile[d] - profile[d + BERM_WINDOW] > BERM_FALL * BERM_WINDOW as f64 * s {
                 d += 1;
             }
-            *b = d as u32;
+            let ridge = Tile::ridge(&profile[..=reach.max(d)], d, s);
+            ridged[side] = ridge.is_some();
+            *b = ridge.unwrap_or(d) as u32;
         }
-        [g[0] + band[0], g[1] + band[1], g[2] - band[2], g[3] - band[3]]
+        ([g[0] + band[0], g[1] + band[1], g[2] - band[2], g[3] - band[3]], ridged)
+    }
+
+    /// The peak of a ridge in a side's `profile` (samples `spacing` feet apart) past the berm at `berm`,
+    /// if there is one: behind a [`RIDGE_PLATEAU`] of flat ground, the highest point within the profile
+    /// (the caller's [`RIDGE_REACH`]) that stands [`RIDGE_RISE`] over the berm, and that the profile falls
+    /// [`RIDGE_RISE`] below again inward of it (so ground that keeps rising inward is not cut into). The
+    /// first of equal heights.
+    pub fn ridge(profile: &[f64], berm: usize, spacing: f64) -> Option<usize> {
+        let base = *profile.get(berm)?;
+        let flat = profile[berm..].iter().take_while(|h| (*h - base).abs() <= RIDGE_FLAT).count();
+        if (flat as f64) * spacing < RIDGE_PLATEAU {
+            return None;
+        }
+        let (peak, top) = profile.iter().enumerate().skip(berm).fold((berm, base), |a, (d, &h)| if h > a.1 { (d, h) } else { a });
+        if top - base <= RIDGE_RISE {
+            return None;
+        }
+        profile[peak + 1..].iter().any(|&h| h < top - RIDGE_RISE).then_some(peak)
     }
 
     /// One side's edge profile: for each distance `d` in samples from the side of the [`Tile::ground`]

@@ -304,15 +304,22 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
         let members = |l: usize| -> Vec<usize> {
             if axis == 0 { grid.iter().filter_map(|row| row[l]).collect() } else { grid[l].iter().flatten().copied().collect() }
         };
-        let mut cursor = pad;
+        let width = |t: usize| f64::from(cuts[t][axis + 2] - cuts[t][axis]) * tiles[t].spacing;
+        let wmax_of = |m: &[usize]| m.iter().map(|&t| width(t)).fold(0.0, f64::max);
+        // The first line starts far enough out that no tile's origin is below 0 (openmx refuses a
+        // negative `at`): a tile cut deep, at its ridge (M23), has its interior far from its origin.
+        let first = members(0);
+        let mut cursor = first
+            .iter()
+            .map(|&t| f64::from(cuts[t][axis]) * tiles[t].spacing - (wmax_of(&first) - width(t)) / 2.0)
+            .fold(pad, f64::max);
         for l in 0..lines {
             let m = members(l);
-            let width = |t: usize| f64::from(cuts[t][axis + 2] - cuts[t][axis]) * tiles[t].spacing;
-            let wmax = m.iter().map(|&t| width(t)).fold(0.0, f64::max);
+            let wmax = wmax_of(&m);
             let mut far = cursor;
             for &t in &m {
                 let s = tiles[t].spacing;
-                let want = cursor + (wmax - width(t)) / 2.0;
+                let want = (cursor + (wmax - width(t)) / 2.0).max(f64::from(cuts[t][axis]) * s);
                 let (origin, lo, hi) = place_axis(want, s, cuts[t][axis], cuts[t][axis + 2], ratios[t]);
                 at[t][axis] = origin;
                 keep[t][axis] = lo;
@@ -973,7 +980,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             return Err(format!("{} is given twice", t.id));
         }
     }
-    let cuts: Vec<[u32; 4]> = tiles.iter().map(Tile::find_keep).collect();
+    let (cuts, ridged): (Vec<[u32; 4]>, Vec<[bool; 4]>) = tiles.iter().map(Tile::find_cut).unzip();
     for (t, k) in tiles.iter().zip(&cuts) {
         let ring = t.ring(*k);
         let steep = ring.edges.iter().flatten().map(|e| e.gx.hypot(e.gz)).fold(0.0, f64::max);
@@ -1086,7 +1093,10 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 } else if hole {
                     format!("over the terrain's missing cells at ({:.1}, {:.1}) ft, ground {:?}", pos[0], pos[2], t.ground)
                 } else {
-                    format!("in the cut berm band at ({:.1}, {:.1}) ft, keep {:?}", pos[0], pos[2], k)
+                    // The side it is past: a ring cut at its ridge (M23), or the berm.
+                    let past = [fx < f64::from(k[0]), fz < f64::from(k[1]), fx >= f64::from(k[2]), fz >= f64::from(k[3])];
+                    let band = if (0..4).any(|e| past[e] && ridged[i][e]) { "the ring past the ridge it is cut at" } else { "the cut berm band" };
+                    format!("in {band} at ({:.1}, {:.1}) ft, keep {:?}", pos[0], pos[2], k)
                 };
                 drops.push(o(vec![("tile", s(&t.id)), ("section", s(section)), ("why", s(why))]));
             }
@@ -1135,6 +1145,18 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 "{}: its terrain has no cells outside samples {}..{} × {}..{} of its {}×{} (as on its disc): its \
                  interior is cut inside the cells that are there, so the ground past the hole is not in the world",
                 t.id, g[0], g[2], g[1], g[3], t.n.0, t.n.1
+            )));
+        }
+    }
+    for (i, t) in tiles.iter().enumerate() {
+        if ridged[i].iter().any(|r| *r) {
+            let sides: Vec<&str> = ["x0", "z0", "x1", "z1"].iter().zip(&ridged[i]).filter(|(_, r)| **r).map(|(n, _)| *n).collect();
+            todo.push(s(format!(
+                "{}: cut at its ring's ridge on {} (M23), keep {:?}: the mountains' outer slopes and the flat shootoff \
+                 plateau past them are not in the world, and the tile's neighbours meet it ridge to ridge over a join",
+                t.id,
+                sides.join(" "),
+                plan.placed[i].keep
             )));
         }
     }
