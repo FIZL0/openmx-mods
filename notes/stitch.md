@@ -32,11 +32,17 @@ up in `--mods`/tracks/. A spec whose tiles are not all built is skipped with a l
    shootoff band past the hole is cut there, since the game has no shootoff at a hole, only no ground.
    Then the berm test runs as on any side. So no cell outside the ground is ever read, and the world's
    `todo` names the tile and its ground.
+   **A ring is cut at its ridge** (M23, `Tile::ridge`): where the profile past the berm is a plateau
+   (within 1 ft of the berm's height for 300 ft or more) and then climbs to a peak within 1200 ft that
+   stands over 10 ft above the berm and falls over 10 ft again inward of it, the side is cut at the peak
+   instead. Of the 123 maps of the three discs only MX Unleashed's five freeride maps have such a side
+   (all four of theirs). The world's `todo` names the tile and the sides.
 2. **The layout** (`build::plan`). Tiles are sorted by the mean height of their interior's edge and
    laid in a near-square grid, filled snake-wise, so neighbours are close in height. Each gap is
    `max(min_gap, 1.6 |Δh| / max_slope + room_a + room_b)`, where Δh is between the two facing edges and
    an edge's room is `lattice + fade` plus however far its seam gate (step 6) is past `2 lattice + 3 fade`.
-   Each tile is centred in its cell. Its `at` is a whole leaf (16 samples). Where its spacing is a small
+   Each tile is centred in its cell. Its `at` is a whole leaf (16 samples), and never below 0 (openmx
+   refuses a negative `at`): the first row and column start far enough out for the deepest cut among them. Where its spacing is a small
    fraction p/q of the lattice's, its interior's edges are moved onto lattice lines, by cutting at most
    q − 1 more samples per side.
 3. **The ground** (`build::Plan::at`), on one lattice for the whole world, at the commonest tile spacing:
@@ -314,3 +320,42 @@ or texture edge where a join meets a tile. One sky over each world. **Fails: on 
 world_untamed's tiles are drawn in dirt colour, not their pages** (untamed_sm_hs's grass is plain sand
 there; openmx says "72 of 77 tiles painted"). `WorldPaint::pack` puts every tile's pages into one GPU
 texture array, in tile order, and drops a tile past the device's limits (notes/openmx-asks.md).
+
+## Ridge to ridge (M23)
+
+MX Unleashed's freeride maps (free06, 07, 09, 10, 11) share one ring: from each edge a flat plateau at
+189.9 ft runs 630 ft in (the shootoff ground), then a ridge rises to its peak at 87 or 88 samples
+(783–792 ft, 239–251 ft high by the side's median) and falls to a valley floor near 110 ft by 112
+samples. The berm test stopped at the shootoff band (keep `[17, 17, 751, 751]`), so each join of
+world_mxu_free ran over two plateaus with a ridge on either side, about 675 ft of flat 190 ft ground.
+They are now cut at the peak: keep `[88, 87, 681, 680]` on all five.
+
+- **No other map is cut.** Without the plateau condition the same peak rule cut 70 of the 123 maps,
+  up to a quarter of the map into the track (mxvatv_nat07 `[250, 250, 1030, 1030]`). With it, the keeps
+  of every other map (MX Unleashed nat, MX vs. ATV, Untamed) are as before, and world_mxvatv and
+  world_untamed build to the same piece counts, drops and slopes as before (638 and 847 pieces).
+- **Origins.** Cut 792 ft in, the first column's tiles wanted `at` −432; the layout now starts the first
+  row and column far enough out (world_mxu_free: `at` 0, an outer band of 792 ft on the near sides and
+  210 ft on the far ones). The joins cover the whole rectangle from 0: no foot owned by nothing at 1 ft.
+- **A narrow ridge-top join.** `world_mxu_free.json` sets `min_gap` 120 (the blend's own rooms are
+  2 × (9 + 48) = 114 ft). With each `at` on a whole leaf (144 ft) the gaps come to 135 ft, against 423 ft
+  at the default 300. On lines 300 ft clear of the ring's corners, the ground between the two ridges dips
+  at most 6.7 ft under the lower of them; at the corners, where the ridge turns, up to 39 ft.
+- **Near the seams the join reaches slope 2.27** (0.356 away from them). That is the ridge line's own
+  relief carried out: the extension continues each edge sample's slope, and the cut runs along a rough
+  crest, so neighbouring samples' slopes part over the fade. The tiles' own cells within 200 ft of the
+  cut reach 3.29.
+- **45 placements are dropped** (models on the ring past the ridge; `why` says so), against 1 before.
+  openmx's MD27 leaves out a tile's shapes and models outside its keep in the same way.
+
+world_mxu (all 27 MX Unleashed maps) takes the free maps' new keeps too: 799 pieces (780 before),
+47 drops (3), `stitch check` ok; its 46.3 near-seam slope is unchanged from before (another tile's).
+
+**In openmx** (`tests/openmx_worlds.rs`, ignored `world_mxu_free_meets_ridge_to_ridge`, 70 s with the
+binary): every tile and join bit for bit (4,800 and 23,996 points, 0 differ), 0 of 373,272 edge points
+owned by nothing; rides on the gas across all 5 joins both ways, 10 of 10 reach the far tile, none
+thrown (5 have one slow wreck at about 60 ft/s, each on the far tile's own ground, 75–230 ft past the seam,
+coming down that map's ridge); from 150 ft inside every outer side, straight out, 10 of 10 are thrown,
+each 151–153 ft from the world's edge. A shot from 580 ft inside mxu_free06 towards mxu_free10 shows
+one ridge with the next map beyond it. `OPENMX_WORLDS` set, the test copies the world to
+`$OPENMX_WORLDS/tracks/world_mxu_free` for openmx's own `world_joins` test.
