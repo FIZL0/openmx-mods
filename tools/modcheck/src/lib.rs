@@ -10,6 +10,7 @@
 //! - **world** (§3): every tile as a track, every join's terrain, every `.blend` summing to 255, every
 //!   `drop` naming a section that exists.
 //! - **music** (§4): every song's file is there.
+//! - **tricks** (§6): every table, `.mcf`, `.MLB` and `.phy` its `mod.json` names is there.
 //!
 //! A mod copied off a disc is also compared, byte for byte, with the members its `source.members`
 //! names, read off the disc with that `source.boot` through `game_sim::archive::{Psr, Res}` (discx).
@@ -177,6 +178,10 @@ fn check_into(dir: &Path, discs: &mut Discs, as_tile: bool, r: &mut Report) {
         "world" => world(dir, &meta, discs, r),
         "music" => {
             music(dir, &meta, r);
+            copies(dir, &files, &meta, discs, r);
+        }
+        "tricks" => {
+            tricks(dir, &meta, r);
             copies(dir, &files, &meta, discs, r);
         }
         // §1: any other kind is skipped quietly by the loader, so it is not this check's to fail.
@@ -734,6 +739,43 @@ fn music(dir: &Path, meta: &Meta, r: &mut Report) {
         "Adpcm::vig not run: it is in openmx's shell crate (wgpu, iroh), which this repo does not build against"
             .into(),
     );
+}
+
+/// §6, what can be checked without the tables' reader: every file `mod.json` names is in the pack.
+/// The tables and clips are read back by `import-tricks check` (Table::parse, openmx's
+/// `Stunts::parse` and `skin::Clip::parse`).
+fn tricks(dir: &Path, meta: &Meta, r: &mut Report) {
+    let j = &meta.json;
+    let tables = j.get("tables").and_then(Json::arr).unwrap_or_default();
+    if tables.is_empty() {
+        r.fail.push("a trick pack has no tables".into());
+    }
+    let mut named: Vec<String> = Vec::new();
+    for t in tables {
+        match t.get("file").and_then(Json::str) {
+            Some(f) => named.push(f.to_owned()),
+            None => r.fail.push("tables[]: no file".into()),
+        }
+    }
+    for rd in j.get("riders").and_then(Json::arr).unwrap_or_default() {
+        for k in ["table", "mcf", "mlb"] {
+            if let Some(f) = rd.get(k).and_then(Json::str) {
+                named.push(f.to_owned());
+            }
+        }
+    }
+    named.extend(j.get("phy").and_then(Json::arr).unwrap_or_default().iter().filter_map(|v| v.str().map(str::to_owned)));
+    for n in j.get("new").and_then(Json::arr).unwrap_or_default() {
+        if n.get("name").and_then(Json::str).is_none_or(|v| v.trim().is_empty()) {
+            r.fail.push("new[]: no name".into());
+        }
+    }
+    for f in named {
+        if !dir.join(&f).is_file() {
+            r.fail.push(format!("{f}: named in mod.json, not in the pack"));
+        }
+    }
+    r.note.push("tables and clips not read here: `import-tricks check` reads them back".into());
 }
 
 /// Every mod folder under `root`: `root` itself if it has a `mod.json`, else its children, else
