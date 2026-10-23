@@ -35,7 +35,7 @@ fn base(path: &str) -> String {
 }
 
 /// `read_suffix`, and, where the member it answered with is not the file asked for but one whose
-/// name merely ends the same (the port's lookup has no path boundary), what that is.
+/// name merely ends the same (since openmx c66d022, only when no member matches the name whole), what that is.
 fn read(res: &Res, name: &str) -> Option<(Vec<u8>, Option<String>)> {
     let e = res.find_suffix(name)?;
     let other = (base(&e.name) != base(name)).then(|| {

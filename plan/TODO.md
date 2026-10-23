@@ -10,7 +10,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 ### Tooling
 
 - [ ] **M20** Untamed's 360 and backflip in PCSX2 (M19 follow-up): which PS2 button is MAPKEY_STUNT_MOD (SLUS_217.01 0x4fd630 reads the key set's +0x18), and a capture of each on a lip with the bike's attitude per frame, as M19 did for MX vs. ATV Unleashed (notes/tricks.md, extracted/mxvatv/watch/air.toml); also a clean landing of a 360 on a jump long enough for one, and the wreck reason a landing mid-clip gives (0xb or 0xf)
-- [ ] **M22** import-mxvatv's find_suffix todo after openmx c66d022 (found in M21): openmx's Res::find_suffix now prefers a member the name matches whole and falls back to a plain suffix only when none does. suffix_picks (tools/import-mxvatv/src/lib.rs) still says 'a plain suffix, no path boundary', and notes/openmx-asks.md's 'MD2, lookups on a segment boundary' (T11) is half answered: the wrong-file case (thq.psm → BaleTHQ.psm) is gone, but the stand-in case (treebb.psm → BigTreeBB.psm when the map has no TreeBB.psm) remains. M21 only changed the two tests to expect the new lookup. Fix the comment, rewrite the ask to the stand-in case, and re-import the maps whose todo named a wrong file → tools/import-mxvatv/src/lib.rs · notes/openmx-asks.md | t: cargo test -p import-mxvatv | j: suffix-after-c66d022
 ### MX vs. ATV Unleashed
 
 

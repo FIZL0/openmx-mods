@@ -807,7 +807,7 @@ impl Todo {
 }
 
 /// Lookups the way §2 has them: the end of the path, case and slash folded, on a `/` boundary. A name
-/// that finds two files is an error (the port's plain suffix would take the first; modcheck fails it).
+/// that finds two files is an error (the port's lookup would take the first; modcheck fails it).
 struct Look<'a> {
     files: &'a [File],
     /// Every name looked up, for [`suffix_picks`].
@@ -1193,11 +1193,13 @@ fn material(
 }
 
 /// Every name the readers above looked up, asked again of the written folder the way openmx asks it
-/// (T11): `disc::Res::folder` and `find_suffix`, a plain suffix in path order with no `/` boundary. A
-/// name it answers with another file than §2's lookup found (`thq.psm` with `Tex\BaleTHQ.psm` where
-/// `Tex\thq.psm` is the file), or with some file where the map has none (`seating_blue.pst` with
-/// `Anaheim_seating_blue.pst`), is drawn with the wrong picture: one todo entry each way (openmx ask:
-/// MD2, lookups on a segment boundary).
+/// (T11): `disc::Res::folder` and `find_suffix`, which since openmx c66d022 takes a member the name
+/// matches whole (on a `/` boundary) and falls back to a plain suffix, in path order, only when none
+/// does. A name the map has no file for is then answered with some file whose name only ends the same
+/// (`seating_blue.pst` with `Anaheim_seating_blue.pst`, `treebb.psm` with `BigTreeBB.psm`), a stand-in
+/// the game's own lookup was not checked to make (openmx ask: MD2, a missing name falls back to a
+/// suffix). A name answered with another file than §2's lookup found (before c66d022 `thq.psm` with
+/// `Tex\BaleTHQ.psm` where `Tex\thq.psm` is the file) should no longer happen; it is still a todo entry.
 fn suffix_picks(dir: &Path, look: &Look, todo: &mut Todo) {
     let res = match game_render::disc::Res::folder(dir) {
         Ok(r) => r,
@@ -1219,8 +1221,8 @@ fn suffix_picks(dir: &Path, look: &Look, todo: &mut Todo) {
     }
     if !wrong.is_empty() {
         todo.push(format!(
-            "{} names game-render's Res::find_suffix (a plain suffix, no path boundary) answers with another file of the mod, so the port reads that one \
-             (openmx ask: MD2, lookups on a segment boundary): {}",
+            "{} names game-render's Res::find_suffix answers with another file of the mod than the one the name matches whole, so the port reads \
+             that one: {}",
             wrong.len(),
             wrong.join(", ")
         ));
@@ -1228,7 +1230,7 @@ fn suffix_picks(dir: &Path, look: &Look, todo: &mut Todo) {
     if !stand_in.is_empty() {
         todo.push(format!(
             "{} names the map has no file for, which game-render's Res::find_suffix answers with a file whose name only ends the same, so the port \
-             reads that one where the game's own lookup was not checked: {}",
+             reads that one where the game's own lookup was not checked (openmx ask: MD2, a missing name falls back to a suffix): {}",
             stand_in.len(),
             stand_in.join(", ")
         ));

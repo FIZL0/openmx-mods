@@ -86,10 +86,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   `nat07\anim\mill`, `nat11\anim\gondola`) and five under `col\`: `watertower`, `mainhouse` (nat01),
   `cemeterygate` (nat02), `utilityshack1` (free09, nat06), `nat08smallshanty`. Whether nat01's scene
   places those was not checked.
-- **MD2, lookups on a segment boundary** (T4, `tools/modcheck`): `game-render::disc::Res::find_suffix`
-  matches a plain string suffix, so `RockA.col` would also find `Col/xRockA.col` if that came first. On
-  the disc's own `.res` the order hides it; a mod folder has no member order. `modcheck` matches on a
-  `/` boundary and fails a name that finds two files. Fix: the same in the mod loader's lookup.
+- **MD2, lookups on a segment boundary** (T4, `tools/modcheck`): answered in openmx c66d022.
+  `game-render::disc::Res::find_suffix` now takes a member the name matches whole (on a `/` boundary)
+  first, so `RockA.col` finds `Col/RockA.col` even when `Col/xRockA.col` comes first. It still falls back
+  to a plain suffix when no member matches whole: see *MD2, a missing name falls back to a suffix* below.
 - **MX vs. ATV scene keys the port does not read** (M2, `notes/mxvatv.md`, *The importer*). On the 27
   big maps, `[Model<n>]` and `[Object<n>]` carry `Activity`, `Hide`, `HasCol`, `Invisible`, `IsTrigger` and
   `Waypoint`. `Env\Nat03\nat03.res:Env\nat03\Nat03.scn` `[Model224]` is `SLT=Type_National`, `Type=StartZone`,
@@ -283,23 +283,19 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   loses nothing), not in world feet. The ride also needs the draw, collision and props of only the
   nearby tiles and joins, not all 2,212 at once. Nothing in openmx fails on it yet, because nothing loads
   a world (MD8 open). This is a size to design MD8 for.
-- **MD2, lookups on a segment boundary: what it draws wrong** (T11, `tools/import-mxvatv/tests/textures.rs`).
-  Every track mod and world tile in `out/` (127), opened with `disc::Res::folder` and resolved with
-  `world::Assets::resolve` over `read_suffix`, as the shell does. In 45 of them `Res::find_suffix` answers
-  a model or material with another file whose name only ends the same, because a mod folder's members
-  are in path order: `thq.psm` with `Tex\BaleTHQ.psm` (all 18 MX vs. ATV `sx*`; Untamed's 12 `sx_*` with
-  `Banner_Stadium_THQ.psm`, `startgatethq.psm` or `Stadium_Backlit_THQ.psm`), `TripleBale01.psg` with
-  `Geo\downtriplebale01.psg`, `concretefloor.psm` with `BlueConcreteFloor.psm`, `tarp.psm` with
-  `StandsTarp.PSM`, `brick.psm` with `big_brick.psm` (Nat02), `screen.psm` with `StadiumSunScreen.PSM`
-  (Untamed FS_B, SX_B), `chain_link_fence.psm` with `AM_JY_Chain_Link_Fence.psm` (SM_MB); and on MXU's
-  own tracks as tiles `stake.psm` with `redstake.psm` (nat04, nat06), `cactusb.psg` with
-  `barrelcactusb.psg` (nat13, nat19), `log.psg` with `big_log.psg` (nat14), `trucktire.psm` with
-  `nat01_trucktire.psm`. The same lookup answers `cpresets.ini` with `biplanecpresets.ini` on the five MXU
-  freeride tiles, so `--track mxu_free06` stops with `--camera: the track has no preset called "Race
-  Cam 1"`. Each mod's `todo` lists its own (import-mxvatv `suffix_picks`). Fix as above: match on a `\`
-  or `/` boundary (or the whole name). Two are stand-ins rather than wrong picks: MX vs. ATV FS05 and
-  SX09 name `seating_blue.pst`, which the map lacks, and the suffix finds `Anaheim_seating_blue.pst`;
-  what the game draws there was not looked up.
+- **MD2, a missing name falls back to a suffix** (T11, M22, `tools/import-mxvatv` `suffix_picks`). Since
+  openmx c66d022 `Res::find_suffix` prefers a whole-name match, and the wrong-file case T11 found (45 mods:
+  `thq.psm` read as `Tex\BaleTHQ.psm` where `Tex\thq.psm` is there, `brick.psm` as `big_brick.psm`,
+  `cpresets.ini` as `biplanecpresets.ini`, …) is gone: re-importing all 123 maps of the three discs
+  (2026-10-23) gives no such entry. What remains is a name the map has no file for, which the fallback
+  answers with any file whose name only ends the same, so the port draws or collides that file where the
+  game may draw nothing or something else. Three maps: MX vs. ATV FS05 and SX09 name `seating_blue.pst`
+  and get `Tex\Anaheim_seating_blue.pst`; MXU nat06 (as a tile) names `STAKE.col` and gets
+  `col\redstake.col`. In the fixture of `tools/import-mxvatv/tests/disc.rs`, an ecosystem billboard
+  `treebb.psm` with no `TreeBB.psm` gets `Tex\BigTreeBB.psm`. What each game's own lookup does with a
+  missing name (SLUS_211.04, SLUS_207.67) was not looked up. Fix, unless the game is found to do the
+  same: no plain-suffix fallback in the mod loader's lookup (a name that matches nothing whole finds
+  nothing). Each mod's `todo` lists its own.
 - **New: a material with no `.psm`** (T11). `world::Assets::resolve` gives no texture when
   `<material>.psm` is missing. MX vs. ATV Unleashed's loader gives such a material its own name as its
   one texture (SLUS_211.04 `0x00167f10`, then `.pst`, `.pss`, `.tga`, `.atm` by `0x00170500`;
