@@ -381,3 +381,9 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   `GasGyroTorque` (175 on the Pro 250), subtracted from the pitch lane as `BrakeGyroTorque` is added
   (`0x4e6720`); `air::Params` has no such field. With MX vs. ATV's lower `UnrollGain`/`UnyawGain` (1.9 /
   2.3 against 3.5) this is all a "whip" is; no new step.
+- **New: Untamed's 360 and backflip arm on a mapped modifier** (M20, `notes/tricks.md` "Untamed in
+  PCSX2"). For the Untamed ruleset the arm is "`MAPKEY_STUNT_MOD` held" (R1 on the first PS2 preset,
+  `UI\PSXController_S1_P1.ini`), not MX vs. ATV's "R1 alone": captured, R1 + Circle arms and fires the
+  same 360. The decay is "none of STUNT1/2/3/MOD held". Otherwise the same steps; captured clean
+  landings of both (a 360 landed 1.6° off its take-off heading after a 355° turn about a diagonal
+  axis, a backflip after −360°) and the mid-clip wreck as reason 0xb, for openmx's tests of the 35° rule.

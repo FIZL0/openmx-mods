@@ -138,7 +138,13 @@ The pitch torque is the same sign as the backflip's, so a 360 tips the nose up w
 **Untamed** (`0x4fd630`, the same step at other offsets): the arm test reads the key set's "stunt
 modifier" (`+0x14f4`, byte +0x18: `MAPKEY_STUNT_MOD`) instead of R1-alone, and a second path for a mapped
 motion axis (`MAPAXIS_STUNT_360`, the Wii) fires straight away with fixed torques (`0x53d3e8`, `0x53d3f0`).
-Which PS2 button is the modifier was not traced (Classic "mirrors the PS2", so R1 is expected).
+The modifier is **R1** on the PS2 (M20): the ELF loads `UI\PSXController_S%i_P%i.ini` (format string
+`%s%sController_S%i_P%i.ini`; the disc has style 1, presets 1–6), and the first preset binds
+`MAPKEY_STUNT_MOD = BUTTONID_R1` (presets 2 R1, 3 L1, 4–6 Square; preset 1 moves `MAPKEY_STUNT3` to
+Select). Live, R1 alone sets byte +0x18 of the key set and nothing else (Circle sets +0x12, Triangle
++0x14), and the motion-axis flag the step tests first is 0 on the PS2, so the stick path runs. Unlike
+MX vs. ATV the arm reads that one byte, not "R1 alone": R1 + Circle held arms and fires the same 360.
+See "Untamed in PCSX2" below.
 
 ## The backflip (SLUS_211.04 `0x4e4f20`; MX Unleashed boot `0x256b50`, openmx `air::BACKFLIP`)
 
@@ -216,8 +222,61 @@ of the quaternion summed (x pitch, y yaw, z roll). CSVs in `extracted/mxvatv/cap
 What they prove: the arm needs R1 alone and the lip (the first try pushed the stick before the climb and
 nothing armed; arming came only once the body rose); the fire takes the flick: the fast flick gave the
 maxima, the stepped one the minima; the torque holds through the air with R1 held; the reversed backflip
-does nothing; a whip is the stick alone and springs back. Not captured: a clean landing of either (the jump is too short for a full 360, and both
-wrecks were not scored or traced), Untamed (its steps are read from the ELF only; M20).
+does nothing; a whip is the stick alone and springs back. Not captured on MX vs. ATV: a clean landing of either (the jump is too short for a full 360, and both
+wrecks were not scored or traced). Untamed: next section (M20).
+
+## Untamed in PCSX2 (M20)
+
+Kit copy 9, Untamed's state 5 (the Free Ride list), Rocksbury (the first row, a supercross stadium),
+saved at the gate as scratch state 8. Its first big jump comes ~4.7 s from the gate at full gas
+(~92–100 mph) and gives 1.8–2.3 s of air, enough for a full turn. The player's bike object is at
+0x1be47f0 in that state (one of six objects holding `[Three Sixty]` 600, 1100, 200, 1100, 480, 1960; the
+one whose speed moved). Its fields as the two steps use them: ground +0x354, speed +0xc28, body +0xe8
+(the quaternion at body +0x170, rising speed body +0x84), node +0x114 (up row +0xb0, forward +0xc0),
+key set +0x14f4, stick x +0x12bc and y +0x12c4, the flicks +0x12b8 (x) and +0x12c0 (y), the decay's stick
++0x1298/+0x129c; backflip applied/ramp/active/armed +0x1184..+0x1190, grace +0x119c, torque +0x11b0,
+clip state +0x1794; 360 applied/ramp/active/armed +0x11c0..+0x11cc, grace +0x11d8, torque x/y
++0x1200/+0x1204, take-off heading +0x1210, direction +0x1214, clip state +0x1798; the wreck call
+(`vtable+0x368` → `0x4fa390` → `0x4cbc60`) stores its reason at +0xc70 and counts wrecks at +0x708.
+Spec `extracted/untamed/watch/air.toml` (`kit record`, every other vsync, the integer vsync counter is
+0x410318) with pad scripts there; and `extracted/untamed/watch/air360.py`, a closed-loop driver (ps2kit's
+PINE client and the pad FIFO) that pushes the stick on the frame the game's own fields show the lip,
+flicks it once the step reports armed and centres it once it fires, because wall-clock pad scripts
+missed the lip by a frame or two from one run to the next. CSVs in `extracted/untamed/capture/`
+(not in git). Rotations as above (body-frame, summed over the air).
+
+| capture | input | fired | torque | air | what happened |
+|---|---|---|---|---|---|
+| `drive1` | gas only | – | – | 2.6 s | the first jump, heading steady |
+| `clean360` (driver) | R1, left, right on the lip | frame 284 | X −1100, Y +1100 | 1.87 s | **x −249°, y +253°, z 1° (355° about a diagonal)**; clip state 2 at frame 322, stopped at 404 (back within 35°), landed at 416 **1.6° off the take-off heading**, upright (up.y 0.99), **no wreck**, rode on |
+| `backflip` (driver) | R1, stick up, stick down on the lip | frame 284 | X −1400 | 1.83 s | **x −360°** at touchdown, y 0°, z 0°; clip 1 at 334 (bike over), 2 at 364, stopped at 408, landed at 412 upright, **no wreck** |
+| `spin2` | R1, left, right (fast) | lip, 4.70 s | X −1100, Y +1100 | 2.27 s | heading back within 35° (clip stopped) at 6.63 s, past 35° again at 7.17 s; landed at 7.30 s with the clip in state 2: **wreck, reason 0xb** |
+| `mid120` | the same with the stick 120 ms at centre | lip, 4.80 s | X −725, Y +426 | 2.63 s | landed mid-clip (state 2): **wreck 0xb** |
+| `step30`, `step60` | the stick left to right in 5 steps of 30/60 ms | lip | X −600, Y +200 | ~2.5 s | mostly pitch: over on its back, the move ended on touching (no wheel down, up.y −0.85) with the clip in state 2: **wreck 0xb** |
+| `spin1` | stick left 0.6 s before the lip | lip, 4.77 s | X −1100, Y +1100 | – | the stick steered the bike ~50° on the ground; a wheel touched 0.03 s after take-off and ended the move (clip still 0, no wreck); later hit something (reason 1) |
+| `r1circle` (driver) | R1 **and** Circle held, left, right | frame 284 | X −1100, Y +1100 | – | armed and fired as `clean360`: the arm reads only the STUNT_MOD byte |
+| `nomod` (driver) | no R1, left, right | never armed | – | – | the stick alone steers on the lip; nothing arms |
+
+What they prove:
+
+- **MAPKEY_STUNT_MOD is R1** (the disc's first PS2 preset, and live: R1 sets key-set byte +0x18 and
+  nothing else); with it held, other buttons do not stop the arm (MX vs. ATV wants R1 alone).
+- The arm and fire are MX vs. ATV's: the stick's sign on the first lip frame picks the direction (one run
+  with the stick already right on that frame armed direction −1 and then never fired); the flick on the
+  fire frame scales the torque between the `[Three Sixty]` minima and maxima (a jump from −1 to +1 gave
+  the maxima, a stepped crossing the minima, a pause at centre between).
+- The torque is constant while R1 is held, and both lanes are always on: at the full flick a 360 is a
+  turn about an axis ~45° back from vertical (pitch and yaw about equal), not a flat spin; at the minima
+  it is mostly a backflip.
+- **A 360 lands when the bike comes back within 35° of its take-off heading before it touches**: the
+  clip then stops (state 0) and the landing is clean. Untamed's Rocksbury first jump at full gas gives
+  one full turn at the full flick with ~0.2 s to spare.
+- **Landing mid-clip wrecks with reason 0xb** (four captures: `spin2`, `mid120`, `step30`, `step60`),
+  the moment the move ends (a wheel down, or anything touched). Reason 0xf (`0x500880`: the contact's
+  surface carries a flag and the bike's contact angles +0x1240/+0x1248 are past its limits +0x13f8..+0x1400,
+  or +0xdd0 is set) never came up here.
+- The backflip lands clean after a full −360° and the same clip rules; its −1400 came with a y flick
+  of 662 on the fire frame (the fast end, as MX vs. ATV's `flip1`).
 
 ## What openmx needs, per trick
 
