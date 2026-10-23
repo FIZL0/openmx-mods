@@ -75,9 +75,13 @@ up in `--mods`/tracks/. A spec whose tiles are not all built is skipped with a l
    tiles that have a share anywhere in the piece. A piece that only one tile reaches lists the nearest
    other tile with 0 everywhere, because modcheck wants two or more. The surface byte is the nearest
    tile's edge sample's id, with the top bit 0.
-5. **Pieces.** The lattice is cut into chunks of `--chunk` cells. A chunk wholly inside one interior is
-   skipped. Each piece is written with trnwrite's `build`/`write`, with normals taken from the field
-   across the piece's edges.
+5. **Pieces.** The lattice is cut into chunks of `--chunk` cells (`build::cuts`, C11): every piece is
+   whole 16-cell leaves of real ground (no padding), at most 256 cells, starting 16 cells before the
+   one before it ends, and the last on each axis ends on the world's (or the collar's) edge, moved back
+   over the one before. So openmx owns ground at every point (it drops each terrain's last row and
+   column, and owns a partial leaf's padding), and where two pieces overlap both hold the field. A chunk
+   wholly inside one interior is skipped. Each piece is written with trnwrite's `build`/`write`, with
+   normals taken from the field across the piece's edges.
 6. **Rideable.** A coarse pass (every 4th sample) and then the full pass measure the steepest join cell
    past every tile's seam gate. Past `max_slope`, every gap is widened by 1.25 and the build runs again.
    A seam gate is per edge (C9, `Source::edge_gates`): `2 lattice + 3 fade` (C1's), or farther where the
@@ -232,3 +236,81 @@ have it. Its tiles and joins are copied unchanged and moved. New pieces `u…` f
 outside every world. `stitch check` then also holds the world seams (height and slope across, to the
 quantum) and compares each copied join with the world's own. The method, the layout and the numbers
 on the real map are in `notes/ultra-map.md`.
+
+## In openmx (C11)
+
+openmx (daf98721: MD8 worlds, MD9 look and World sky, MD17 streaming) loading world_mxu, world_mxvatv,
+world_untamed and world_ultra. `tools/stitch/src/openmx.rs` reads a world as openmx's `worlds::find`
+does (its steps repeated on the same readers, since the shell is a binary) into game-sim's own `Tiled`.
+`tests/openmx_worlds.rs` holds it to the maps: two generated worlds in the gate, and ignored tests on the
+discs (`every_world_of_the_three_discs_in_openmx`, which builds the four from their specs, checks the
+ground and rides them in the openmx binary, 2.5 min; `rides_in_openmx`; `shots_at_every_gate`, 8 min).
+
+**Two failures found and fixed in stitch.** Both left ground that openmx gives to no piece, or to the
+wrong one:
+
+- **Strips with no ground at every join boundary.** A terrain leaf holds 17 × 17 samples, so a
+  257-sample join has 256 cells, but game-sim's `Tile::samples()` counts 256 and `Tile::local` drops
+  the last cell. Where the next join started at sample 256, x 1147.5–1152 (and every 1152 ft, both
+  axes) was nobody's: 3.6 M of 1.3 G one-foot points on world_mxu, 3.4 M on world_mxvatv, 4.2 M on
+  world_untamed, plus the ultra map's top edge. `Tiled::off_world` probes ±150 ft for holes, so a ride
+  was thrown back 150 ft before each strip: ridden from (5600, 3000) at 90° on world_untamed, thrown
+  at x 6760.7, the strip at 6907.5. This is the "shoot the rider off inside them" in openmx's MD9 note.
+- **Partial pieces were clamped padding.** A piece of 213 samples is 14 leaves to the reader; trnwrite
+  fills the last leaf by repeating the edge, and openmx owns all 224 cells ahead of later joins
+  (precedence). On a generated world a collar's padding stood over lattice ground 0.07–0.13 ft off
+  the field; the ultra map's new pieces of 17, 83 and 99 samples did the same.
+
+Fixed by step 5's cutting, and in the ultra map by new pieces that start a whole foot inside the
+rectangle before them and run past its end (`End::Over`, `Back` on the map's own far edge). Where such
+a piece reaches into a world it holds the world's own ground (`ultra::World::ground`, off the world's
+joins) and the look of its rectangle's nearest point. `stitch check` compares overlapping joins'
+border samples to the sum of their quanta: a new piece holds a world's edge as one of its joins has
+it, rounded again. Pieces: world_mxu 626 → 780, world_mxvatv 554 → 638, world_untamed 674 → 847, the
+ultra map 2135 → 2644. `stitch check` with the discs: all four ok (ultra 728,216 seam points, worst
+0.0106 ft).
+
+**The ground, as openmx answers it** (after the fix; 24 × 24 points and the four edges of every tile,
+the same and every 8th sample of every join):
+
+| world | tiles, joins | tile points (differ) | join points (differ) | join samples against stitch's field | edge points owned by nothing |
+|---|---|---|---|---|---|
+| world_mxu | 27, 780 | 25,920 (0) | 679,961 (0) | 369,838, none past the quantum | 0 of 1,922,880 |
+| world_mxvatv | 27, 638 | 25,920 (0) | 593,593 (0) | 328,095, none past | 0 of 1,663,778 |
+| world_untamed | 23, 847 | 22,080 (0) | 768,953 (0) | 406,356, none past | 0 of 1,931,464 |
+| world_ultra | 77, 2644 | 73,920 (0) | 1,150,609 (0) | not compared (the field is private to `ultra`) | 0 of 6,308,987 |
+
+"Differ" is any bit of `Tiled::at` (height, surface, normal) or `contact_search::ground` against the
+imported map ridden alone (a separate import of each disc) or the join's file alone. A world point
+moved into a piece's own feet rounds by at most 0.0039 ft in the worlds and 0.0078 ft on the ultra
+map (1/128 ft past 65,536). That is the point's own float, not a ground difference.
+
+**Rides** (openmx headless, `--trace-gas` from 150 ft inside a tile's edge to its neighbour across a
+join, every such pair; across worlds only on the ultra map). **0 thrown back in 135 rides.**
+
+| world | rides | reached the far tile | wrecked on the way | most off `Tiled::at` on the ground |
+|---|---|---|---|---|
+| world_mxu | 43 | 36 | 7 | 2.63 ft |
+| world_mxvatv | 43 | 33 | 5 | 6.87 ft |
+| world_untamed | 36 | 33 | 5 | 2.86 ft |
+| world_ultra (between worlds) | 13 | 9 | 4 | 3.51 ft |
+
+The others crashed on a tile's own track, veered off with no steering, or ran out of frames on a long
+gap (`$C11_ROOT/report.txt` names each).
+
+**Far from the origin.** world_untamed sits at the ultra map's origin: a 400-tick ride from
+untamed_sm_of is the same tick for tick alone and in the ultra map. world_mxu sits 76,032 ft out:
+from mxu_free06 the two rides part on tick 0, 1.93 ft apart at tick 100, 11.4 ft by tick 400. On the
+gas a ride moves as evenly far out as alone (largest second difference 0.0208 ft both, at world_mxu's
+far corner, x 115,668). **Fails: on the brakes a stopped bike creeps two ulps a tick**, 0.0012 ft a
+tick at x 2,634 (untamed_nat_or), 0.0078 at x 37,008 alone and 0.0156 (0.47 ft/s) at x 113,040 in the
+ultra map. That is openmx's (notes/openmx-asks.md, *MD8, a stopped bike creeps far from the origin*).
+
+**The look** (MD9, Global sky). 206 `--shot-pose` pairs at every C9 gate past C1's (41 world_mxu, 46
+world_mxvatv, 16 world_untamed, 103 world_ultra), 60 ft inside the tile looking out and at the gate
+looking back, the rider under the eye (`--trace-at`). openmx streams ground round the rider (MD17), so
+from the spawn a far pose has no ground at all. 10 of the 27 sheets of 16 were read: no seam, colour step
+or texture edge where a join meets a tile. One sky over each world. **Fails: on the ultra map,
+world_untamed's tiles are drawn in dirt colour, not their pages** (untamed_sm_hs's grass is plain sand
+there; openmx says "72 of 77 tiles painted"). `WorldPaint::pack` puts every tile's pages into one GPU
+texture array, in tile order, and drops a tile past the device's limits (notes/openmx-asks.md).

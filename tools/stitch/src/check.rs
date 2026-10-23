@@ -494,8 +494,10 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
                     let wz = j.at[1] + f64::from(z) * j.spacing;
                     let key = ((wx * 100.0).round() as i64, (wz * 100.0).round() as i64);
                     let v = h[(x + z * w) as usize];
+                    // To both joins' quanta: where pieces overlap (C11), an ultra map's new piece holds a
+                    // world's edge as one of its joins has it, rounded again to its own quantum.
                     match shared.get(&key) {
-                        Some(&(other, ov)) if (ov - v).abs() > j.quantum.max(joins[other].quantum) + 1e-4 => {
+                        Some(&(other, ov)) if (ov - v).abs() > j.quantum + joins[other].quantum + 1e-4 => {
                             r.fail.push(format!("joins {} and {} differ at lattice {key:?}: {ov:.4} and {v:.4}", joins[other].name, j.name));
                         }
                         Some(_) => {}
