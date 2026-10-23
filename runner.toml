@@ -7,6 +7,7 @@ journal = "journal"
 test = "./check.sh"
 rules = "AGENTS.md"
 slots = 3
+weekly_max = 97  # % of 7-day usage past which no new task starts (default 90)
 notes = ".runner"
 # The discs, what was taken off them, and the openmx checkout the tools build against: all git-ignored.
 links = ["iso", "extracted", "out", "openmx"]
