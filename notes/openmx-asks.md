@@ -351,3 +351,33 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   mill without its wheel, Nat04's Ferris wheel is its stand alone (toy shots in this slot's
   `out/accuracy/<id>/`, not in git). That is openmx's own V43 (animated toys, open), and their `.mot`
   are still refused (M2's `skin::Clip::parse` entry above). Nothing to file here beyond V43.
+- **New: MX vs. ATV's stunt tables** (M19, `notes/tricks.md`, packs in `out/mods/tricks/`).
+  `trick::Stunts::parse` refuses all four later tables: MX vs. ATV's `Rider\Anim\MX_Rider_Stunts.ini`
+  (and MXF_, ATV_): `stunts.ini has no [stunt47]` (they have 46); Untamed's
+  `Rider\Anim\MX_Rider_Stunts.ini.bpb` (54, BPB): `stunts.ini has no [stunt01]` (BPB titles `Stunt1`).
+  Needs: the count as the source game's loader has it (MXU 57, MX vs. ATV 46, Untamed 54), both title
+  forms, the keys `PointValue`, `HoldPointValue` (both default 1000), `LinkModTime`, `HasAnimation`, and a
+  per-row default gesture (`DefaultKeyMapping`, Untamed `DefaultKeyMappingClassic`: `C T 1 2` buttons
+  plus `U D L R`, the bits of SLUS_211.04 `0x267da0`) in place of the identity map (rows 25–41 have none).
+- **New: the 360** (M19). A real `air::Rotation` for MX vs. ATV's `threesixtyL`/`threesixtyR`
+  (SLUS_211.04 `0x4e53d0`), replacing the invented `FLAT_SPIN`: armed on a lip with **R1 alone** held and
+  the stick x past 0.7 one way, fired past 0.7 the other way; two lanes at once, yaw = dir × lerp(flick,
+  `MinThreeSixtyTorqueY`, `Max…Y`) and pitch = −lerp(flick, `Min…X`, `Max…X`) from the bike's `.phy`
+  `[Three Sixty]`; 0.9 s grace; decays only with no trick button held and the stick against the spin; the
+  rider's clip from 35° off the take-off heading, and a landing with the clip not stopped is a wreck
+  (reason 0xb or 0xf). Today `air::Params` has no `[Three Sixty]` fields. Captured in PCSX2 (fast flick
+  1100/1100, slow 600/200).
+- **New: the backflip, MX vs. ATV's rules** (M19, `0x4e4f20`). The same step as MXU's `bike_backflip`
+  plus: arms only with **R1 alone** (`buttons & 0xf == 4`; MXU needs none), plays the rider's backflip clip
+  while the bike is over, and landing mid-clip is a wreck. A ruleset switch (MXU / MX vs. ATV), since
+  MXU's own backflip must stay bit-exact.
+- **New: `skin::Clip::parse` and `.mot` versions 6 and 7** (M19). Every MX vs. ATV rider stunt clip and
+  the bike clips of the stunts MXU lacks are refused, e.g. `Rider\Anim\MX_ThreeSixtyL.mot`: `not a .mot:
+  a name of 1281844556 bytes at 38`, `Veh\Anim\Bike_ThreeSixtyL.mot`: `… 184575339 bytes at 26` (123 of
+  the 171 clips a pack holds; the other 48 are version 3, MXU's, and read). The header is `-7` (or `-6`),
+  then a word `1`, then the frame count and the names; dropping that word is not enough, the channel
+  records differ too (the reader then runs off the end).
+- **New: the air control's gas gyro** (M19). MX vs. ATV's `.phy` `[Airborne Control]` adds
+  `GasGyroTorque` (175 on the Pro 250), subtracted from the pitch lane as `BrakeGyroTorque` is added
+  (`0x4e6720`); `air::Params` has no such field. With MX vs. ATV's lower `UnrollGain`/`UnyawGain` (1.9 /
+  2.3 against 3.5) this is all a "whip" is; no new step.
