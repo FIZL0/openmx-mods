@@ -166,9 +166,13 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             }
         };
         let keep = [keep[0] as u32, keep[1] as u32, keep[2] as u32, keep[3] as u32];
+        // A whole foot (openmx's own rule) on a whole leaf: to the bit where the spacing makes the leaf
+        // whole, and within a thousandth of a foot where it is a float only near a whole (4.499999).
         let leaf = 16.0 * tile.spacing;
         for a in at.iter() {
-            if (a / leaf - (a / leaf).round()).abs() > 1e-9 {
+            if a.fract() != 0.0 {
+                r.fail.push(format!("tiles[{name}]: at {a} is not a whole number of feet"));
+            } else if (a / leaf - (a / leaf).round()).abs() * leaf > 1e-3 {
                 r.fail.push(format!("tiles[{name}]: at {a} is not a whole leaf ({leaf} ft)"));
             }
         }
@@ -228,6 +232,9 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         if at.len() != 2 || samples.len() != 2 {
             r.fail.push(format!("joins[{name}]: at or samples malformed"));
             continue;
+        }
+        if at.iter().any(|a| a.fract() != 0.0) {
+            r.fail.push(format!("joins[{name}]: at {at:?} is not a whole number of feet"));
         }
         let t = match Terrain::parse(&bytes) {
             Ok(t) => t,
