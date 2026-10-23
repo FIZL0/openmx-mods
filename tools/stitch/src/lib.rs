@@ -24,7 +24,7 @@ pub mod check;
 pub mod jsonw;
 pub mod ultra;
 
-use game_sim::track::{Scene, Terrain};
+use game_sim::track::{ActivityModel, Scene, Terrain, switch};
 use modcheck::json::Json;
 use ps2_float::F;
 use std::path::{Path, PathBuf};
@@ -306,39 +306,62 @@ impl Tile {
     }
 
     /// Every placement the scene's readers take, with its section name and position, in file order.
-    /// The rule is `track::Scene::parse`'s: a numbered `[Model<n>]` or `[Object<n>]` with a file.
+    /// The rule is `track::Scene::parse`'s: a numbered `[Model<n>]` or `[Object<n>]` with a file, less
+    /// what a free ride leaves out (openmx MD13): an activity model that hides, and each collision object
+    /// whose name holds an activity model's with `HasCOL` on, unless a start zone's puts it back.
     pub fn placements(&self) -> Result<Vec<(String, [f64; 3])>, String> {
-        let mut names: [Vec<String>; 2] = [Vec::new(), Vec::new()];
-        let mut current: Option<(String, usize, bool)> = None;
-        let flush = |c: &mut Option<(String, usize, bool)>, names: &mut [Vec<String>; 2]| {
-            if let Some((name, kind, true)) = c.take() {
-                names[kind].push(name);
-            }
-        };
+        // (name, kind, file, Type, Hide, HasCOL) of each numbered section.
+        type Section = (String, usize, String, Option<String>, Option<String>, Option<String>);
+        let mut sections: Vec<Section> = Vec::new();
         for raw in self.scene_text.lines() {
             let line = raw.trim();
             if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-                flush(&mut current, &mut names);
                 let low = name.to_ascii_lowercase();
                 let numbered = |p: &str| {
                     low.strip_prefix(p).is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
                 };
-                current = if numbered("model") {
-                    Some((name.to_owned(), 0, false))
+                let kind = if numbered("model") {
+                    0
                 } else if numbered("object") {
-                    Some((name.to_owned(), 1, false))
+                    1
                 } else {
-                    None
+                    2
                 };
+                sections.push((name.to_owned(), kind, String::new(), None, None, None));
                 continue;
             }
-            if let (Some(c), Some((k, v))) = (current.as_mut(), line.split_once('='))
-                && matches!(k.trim().to_ascii_lowercase().as_str(), "col" | "slt")
-            {
-                c.2 = !v.trim().is_empty();
+            if let (Some(c), Some((k, v))) = (sections.last_mut(), line.split_once('=')) {
+                let v = v.trim().to_owned();
+                match k.trim().to_ascii_lowercase().as_str() {
+                    "col" | "slt" => c.2 = v,
+                    "type" => c.3 = Some(v),
+                    "hide" => c.4 = Some(v),
+                    "hascol" => c.5 = Some(v),
+                    _ => {}
+                }
             }
         }
-        flush(&mut current, &mut names);
+        sections.retain(|c| c.1 < 2 && !c.2.is_empty());
+        let squeezed = |n: &str| n.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
+        let (mut off, mut on) = (Vec::new(), Vec::new());
+        for (_, kind, file, ty, _, has_col) in &sections {
+            let Some(class) = (*kind == 0).then(|| ActivityModel::of(ty.as_deref())).flatten() else { continue };
+            if has_col.as_deref().is_none_or(switch) && !squeezed(file).is_empty() {
+                if class == ActivityModel::StartZone { &mut on } else { &mut off }.push(squeezed(file));
+            }
+        }
+        let named = |names: &[String], file: &str| names.iter().any(|n| squeezed(file).contains(n.as_str()));
+        let mut names: [Vec<String>; 2] = [Vec::new(), Vec::new()];
+        for (name, kind, file, ty, hide, _) in sections {
+            let kept = if kind == 0 {
+                !ActivityModel::free_ride_hides(ty.as_deref(), hide.as_deref())
+            } else {
+                !named(&off, &file) || named(&on, &file)
+            };
+            if kept {
+                names[kind].push(name);
+            }
+        }
         let lists = [&self.scene.models, &self.scene.collision];
         let mut out = Vec::new();
         for kind in 0..2 {

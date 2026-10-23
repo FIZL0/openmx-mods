@@ -261,14 +261,16 @@ mods/tracks/world_mxvatv/
 - `tiles[].tile` is the folder under `tiles/`, and its `mod.json` is the track mod it was copied from,
   unchanged. `at` is where the tile's origin (sample 0, 0) sits in the world, `[x, z]` in feet. There is
   no vertical offset: heights stay the tile's own, and the joins take up the difference. Choose the
-  layout so neighbours' base heights are close. `at` must be a whole multiple of the tile's leaf size
-  (16 × its spacing), so the tile starts on a whole leaf and world − `at` loses nothing to the offset
-  itself. MD8 checks what single floats do far from the origin.
+  layout so neighbours' base heights are close. `at` must be a whole number of feet, so world − `at`
+  loses nothing to the offset itself, and a whole multiple of the tile's leaf size (16 × its spacing), so
+  the tile starts on a whole leaf. A spacing a float holds only nearly (Untamed's Nat_OR, 4.499999 ft)
+  has no whole leaf multiple on a whole foot: its `at` is the whole foot nearest one. MD8 checks what
+  single floats do far from the origin.
 - `keep` is `[x0, z0, x1, z1]` in the tile's own samples, half-open: the interior left after the edge berm
   is cut (C1 finds the band from the terrain and the scene's border and shootoff values). Inside `keep`
   the tile owns the ground. Outside it, the tile is not used.
 - `joins[].join` is the folder under `joins/`. Its `<join>.ps2.trn` is a PLN v7 terrain (T2's writer) at
-  `at`, and its scale is one of the world's tile spacings. C1 puts every join on one lattice for the whole
+  `at`, a whole number of feet like a tile's, and its scale is one of the world's tile spacings. C1 puts every join on one lattice for the whole
   world, at the commonest tile spacing (the finer on a tie), so joins agree where they meet and each
   interior's edges lie on lattice lines; `joins[].samples` (C1's own field) gives a join's samples a side.
   Round a tile whose spacing is not the lattice's, the joins next to it are at that tile's spacing

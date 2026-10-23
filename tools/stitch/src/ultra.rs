@@ -390,7 +390,7 @@ pub fn plan(worlds: &[World], gates: &[[f64; 4]], p: &Params, widen: f64) -> Res
             cursor = end + gap;
         }
     }
-    let size = far.map(|f| (f / step).round() as u32);
+    let size = far.map(|f| crate::build::whole_samples((f / step).round() as u32, step));
     let sources: Vec<Source> = worlds.iter().enumerate().map(|(i, w)| w.source(i, at[i], gates[i])).collect();
     let radii = crate::build::radii(&sources, size, step);
     Ok(UltraPlan { spacing: step, size, at, cell, sources, radii, fade: p.fade, widen })
