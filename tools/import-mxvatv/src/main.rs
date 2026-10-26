@@ -20,7 +20,11 @@ national (Tracks\\<track>.res and <track>_2.res; not sx*, not the _ss split-scre
 only ever a world's tiles (§1: modcheck reads them back as one); --map takes any other track. Each mod holds the archives' members at their own paths, the loose PSR members the
 game opens for the map, and a mod.json. Each mod is then read back with modcheck against the same
 disc (the image's folder is searched for it by boot ELF); --no-check skips that. A map that fails is
-removed from STAGE and named; the exit is 1 if any did. Any other disc is skipped with a line.";
+removed from STAGE and named; the exit is 1 if any did. Any other disc is skipped with a line.
+
+IMAGE may be MX vs. ATV Unleashed's PC install instead (its data/*.pak: the directory, the install
+above it, or the paks joined with `:`). The paks hold no map archives and the PC's own render files,
+so every map there is named and refused with the reason (notes/mxvatv.md, The PC install).";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,6 +54,11 @@ fn main() -> ExitCode {
         eprintln!("import-mxvatv: --disc and --out are both needed (--help)");
         return ExitCode::from(2);
     };
+    // MX vs. ATV Unleashed's PC paks in place of its disc (T12): every map is named and refused,
+    // since the paks lack the archives a mod is made of (import_mxvatv::pc_refusal).
+    if discx::pak::is_paks(&disc_path) {
+        return pc_maps(&disc_path, only.as_deref());
+    }
     // The boot ELF first: another game's disc has no MXVSATV.PSR to open.
     let iso_dir = disc_path.parent().map(|p| if p.as_os_str().is_empty() { PathBuf::from(".") } else { p.to_path_buf() });
     let boot = iso_dir
@@ -160,6 +169,25 @@ fn main() -> ExitCode {
     }
     println!("import-mxvatv: {ok} maps imported, {failed} failed");
     if failed > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+fn pc_maps(path: &std::path::Path, only: Option<&[String]>) -> ExitCode {
+    let disc = match Disc::open_paks(path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("import-mxvatv: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut folders = map_folders(&disc);
+    if let Some(only) = only {
+        folders.retain(|f| only.contains(&f.to_ascii_lowercase()));
+    }
+    for f in &folders {
+        println!("FAIL {f}: {}", import_mxvatv::pc_refusal(f, &import_mxvatv::MXVATV));
+    }
+    println!("import-mxvatv: 0 maps imported, {} failed (PC paks)", folders.len());
+    ExitCode::FAILURE
 }
 
 fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {

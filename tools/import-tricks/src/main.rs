@@ -11,7 +11,9 @@ import-tricks: MX vs. ATV Unleashed's and Untamed's tricks as trick packs (stand
   import-tricks check DIR              read a built pack's tables and clips back
 
 GAME is mxvatv or untamed (or the pack's id); its disc, and MX Unleashed's for the comparison, are
-looked for in iso/ ($DISCX_ISO overrides), or GAME=path/to/image.iso picks the image.";
+looked for in iso/ ($DISCX_ISO overrides), or GAME=path/to/image.iso picks the image. MX vs. ATV
+Unleashed's PC install may stand in for its disc, here and as --disc: mxvatv=path/to/data (its
+data/*.pak; a .pak, or several joined with `:`), or mxvatv=pc for $DISCX_PC (discx's pc_install).";
 
 fn iso_dir() -> PathBuf {
     std::env::var_os("DISCX_ISO").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("iso"))
@@ -44,7 +46,7 @@ fn table(pack: &Pack, image: Option<&Path>) -> Result<(), String> {
         Some(p) => p.to_path_buf(),
         None => discx::resolve_image(pack.game, &iso_dir())?,
     };
-    let mut disc = discx::Disc::open(&image)?;
+    let mut disc = discx::Disc::open_any(&image)?;
     for &t in pack.tables {
         let e = disc.find(t).cloned().ok_or_else(|| format!("{t}: not on the disc"))?;
         let bytes = disc.read(&e)?;
@@ -75,7 +77,7 @@ fn table(pack: &Pack, image: Option<&Path>) -> Result<(), String> {
 fn run(args: &[String]) -> Result<(), String> {
     let pick = |game: &str| -> Result<(&'static Pack, Option<PathBuf>), String> {
         let (name, image) = match game.split_once('=') {
-            Some((g, p)) => (g, Some(PathBuf::from(p))),
+            Some((g, p)) => (g, Some(discx::resolve_source(p, &iso_dir())?)),
             None => (game, None),
         };
         let pack = Pack::by_game(name).ok_or_else(|| format!("{name}: not mxvatv or untamed"))?;
@@ -83,7 +85,7 @@ fn run(args: &[String]) -> Result<(), String> {
     };
     match args {
         [a, image, b, out] if a == "--disc" && b == "--out" => {
-            let disc = discx::Disc::open(Path::new(image))?;
+            let disc = discx::Disc::open_any(Path::new(image))?;
             let key = disc.game.map(|g| g.key).unwrap_or_default();
             let pack = Pack::by_game(key)
                 .ok_or_else(|| format!("{image}: {} has no trick pack here", disc.boot.as_deref().unwrap_or("no boot ELF")))?;
