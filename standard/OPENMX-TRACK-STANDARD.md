@@ -62,6 +62,7 @@ Each mod's folder has a `mod.json` (UTF-8 JSON):
 | `permission` | required | `own-disc`: copied from the user's own disc, never shared. `public-domain`: may ship whole (USGS, SRTM). Otherwise a sentence naming who gave permission and where. |
 | `todo` | required | Every known gap between the mod and its source, one string each, naming the file and the reason. Use `[]` only when T7 has found none. |
 | `checked` | optional | The T7 accuracy result, e.g. `"T7 2026-11-02: heights exact at 1000/1000, 5 poses"`. Leave it out until the check has run. |
+| `upscale` | optional | Default `true`. `false` for a mod whose textures are already high-res: openmx's `tools/upscale_mods.py` makes no `textures/upscaled/` for it (§1a). |
 
 | `source.game` | `id` prefix |
 |---|---|
@@ -83,7 +84,28 @@ whose required file (§2) is missing or refused by openmx's reader. A broken mod
 mod and the reason, and the pick leaves it out. The port never crashes on one (MD2).
 
 The **identity** used online (MD6) is the `id` plus a hash, taken over every file in the folder (paths
-lowercased and sorted, with `mod.json` included and `previews/` left out). MD6 chooses the hash function.
+lowercased and sorted, with `mod.json` included and `previews/` and `textures/upscaled/` left out). MD6
+chooses the hash function.
+
+### 1a. Upscaled textures (optional)
+
+Any mod that carries textures (`.pst`, `.atm`, a `.trn`'s ground pages) may have upscales of
+them beside its own files, as opentennis's mods have (openmx V84):
+
+```
+textures/upscaled/<path in the mod>-<key>.png   e.g. tex/rock_wall-0123456789abcdef.png for tex/rock_wall.pst
+textures/upscaled/sources.json                 upscaled path -> SHA-1 of the PNG it was made from
+```
+
+Each PNG is a decoded texture (an `.atm`'s first frame, a terrain's page as
+`<terrain>/page_NN-<key>.png`) made larger, any size, 8-bit RGBA with straight alpha, named as
+`openmx --dump-textures OUT --from MOD` names its source. Only the key counts: 16 lowercase hex digits,
+FNV-1a 64 of the texture's width and height (u32 LE) and its RGBA. The port draws it in place of every
+texture with that key when Settings → Graphics → Upscaled Textures is
+on, at the member's own UVs and tiling. A missing PNG falls back to the mod's own. These are not the mod's
+files: they are made on the user's machine by openmx's `tools/upscale_mods.py` (chaiNNer), never committed
+or shipped, never checked by T7, and left out of the identity hash, so two peers with and without them
+still match online. `sources.json` holds the SHA-1s the script uses to skip what is already done.
 
 ## 2. Track mod
 
