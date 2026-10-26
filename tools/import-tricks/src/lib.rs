@@ -777,9 +777,11 @@ fn mod_json(
     )
 }
 
-/// Build a pack off a disc image; MX Unleashed's names are read off its disc in `iso` if it is there.
+/// Build a pack off a disc image, or off MX vs. ATV Unleashed's PC paks when `image` is those
+/// (`discx::Disc::open_any`; `source.psr` then says `data\*.pak`); MX Unleashed's names are read off
+/// its disc in `iso` if it is there.
 pub fn import(image: &Path, pack: &Pack, iso: &Path, root: &Path) -> Result<Built, String> {
-    let mut disc = discx::Disc::open(image)?;
+    let mut disc = discx::Disc::open_any(image)?;
     let game = disc.game.ok_or_else(|| format!("{}: not a disc this repo knows", image.display()))?;
     if game.key != pack.game {
         return Err(format!("{}: is {} ({}), not {}", image.display(), game.title, game.boot, pack.name));

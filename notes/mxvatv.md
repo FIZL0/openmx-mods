@@ -793,6 +793,79 @@ in the port, and each map's Free Ride start is its tile's own (the world's `spaw
 | Env\Nat12\Anim\PackCamel.col | collision class 1 is not understood |
 | Env\Nat12\Anim\SaddleCamel.col | collision class 1 is not understood |
 
+## The PC install (T12)
+
+MX vs. ATV Unleashed's Steam install (openmx's `context/mxvatv-pc/`, research/mxvatv-pc.md; never in
+git) read beside SLUS-21104's disc, 2026-10-26. `discx` opens its `data/*.pak` as it opens the disc
+(`discx::pak`, the layout of openmx's `tools/mxvatv_pak.py`): `discx info pc`, `discx ls pc 'Veh\*.phy'`,
+`discx cmp [--res] mxvatv pc` (the same names in both, byte for byte). A path is taken as the PC install
+when it is a `.pak`, a directory with paks in it, or one whose `data/` has them (several paks joined with
+`:`); anything else is a disc image, as before. Members are named as the PSR names the same file:
+the paks' leading `Data\` is taken off.
+
+**70 paks, 20,415 members** (research/mxvatv-pc.md says 63 paks; `data/` holds 70), no name in two paks,
+every pak's last member ending at its end. No compression and **no `.res`**: what the disc packs in a
+map's three archives the paks hold loose (`Col\Nat01_WatchTower.col`, `Env\Nat01\Nat01.scn`), at the
+archive member's own path.
+
+### What each tool gets from it
+
+- **import-tricks: the pack off the paks is the disc's.** `import-tricks mxvatv=pc` (or
+  `--disc <data>`) reads all 3 tables, the `.mcf`s and `.MLB`s, every clip and every `.phy` byte for
+  byte as the disc has them. The pack differs in two places only, both said here rather than evened
+  out: `source.psr` is `data\*.pak`, and the ATV bike's NinjaNac clip is in it. The disc has that clip
+  at `Rider\Anim\ATV_bike_NinjaNac.mot`, where the build (and, by the other 45 clips' layout, the game)
+  does not look for a bike clip; the paks have the same 7,753 bytes at `Veh\Anim\ATV_bike_NinjaNac.mot`.
+  `tests/pc.rs` (ignored) builds both and holds them to that.
+- **import-mxvatv: no map is imported off the paks.** A mod holds the map's archives' members as the
+  disc has them (§2), and the paks have no archives; of the files the disc's 56 imports read, 13,676 are
+  not in the paks at all and 342 differ. Rebuilding the archives from the loose files would be a guess
+  at the disc, so `import-mxvatv --disc <data>` names every map folder (64: the disc's 56 and FS09–FS13,
+  Nat19, SX19, SX20, which the disc does not have) and refuses each with the reason
+  (`import_mxvatv::pc_refusal`), writing nothing. Import the maps off the disc.
+- **discx**: everything, as above.
+
+### What the paks lack or hold differently
+
+Every file the disc's 56 map imports read (each archive member, the `.atyList`, the pulled loose
+members; counted once per map that reads it), looked for in the paks at the same path
+(`import-mxvatv/tests/pc.rs`, ignored): **15,799 identical, 342 different, 13,676 absent**.
+
+| kind | identical | different | absent |
+|---|---|---|---|
+| `.col` | 14,296 | 19 | 16 |
+| `.mst` | 889 | 231 | 0 |
+| `.pco`, `.prt`, `.toy`, `.atyList`, `.scn`, `.mot`, `.dat`, `.mcf`, `.esb`, `.aud`, `.vut`, `.emt` | 611 | 53 | 0 |
+| `.psm` / `.pst` / `.psg` / `.ps2.trn` / `.cub` / `.atm` | 0 / 0 / 2 / 1 / 0 / 0 | 0 / 39 / 0 / 0 / 0 / 0 | 6,045 / 4,529 / 2,780 / 55 / 56 / 195 |
+
+- **Absent: the PS2's render files.** The PC has its own DirectX ones in their place: `.dx.trn`
+  (`Env\Nat01\Nat01.dx.trn`, 7,560,603 bytes; the disc's `Nat01.ps2.trn` is 5,491,717), `.dxg`
+  models, `.dxm` materials, `.dxt` textures, and no `.cub`/`.atm` under the PS2's names. Left behind and
+  identical: `Env\nat12\Nat12.ps2.trn`, `Env\nat10\anim\nat10_millwheel.psg`, `rusticwindmill.psg`.
+  Also absent: `Col\banner_75f.col` … `banner_78f.col` (each read by 4 maps). Whether a `.dx.trn`'s
+  heights are the `.ps2.trn`'s was not compared.
+- **Different, 84 distinct files.** Scenes: `Nat01`, `Nat02`, `Nat03`, `Nat05`, `Nat07`, `Nat15`,
+  `MC02`, `FS03`, `SM01`, `SM02`, `SM03`, `SX01`, `SX06` `.scn`, placements moved (Nat01: the watch
+  tower's Y, 430.66 on the disc, 418.91 on the PC), turned, added or dropped (Nat15: one model fewer
+  on the PC, about 225 others with a new `LookVector` and an `UpVector`; MC02: two models and two collision
+  objects fewer; SM01: one collision object more). Collision:
+  `Col\Nat03_TelephonePole.col`, `Col\StretchBanner_01` … `_06.col`,
+  `Col\Billboard_{Factory909,Renthal,Works}_Stretch.col`, same sizes, other bytes. `Env\Nat12\Nat12.toy`,
+  `Env\Nat04\Nat04.esb`, `Env\Nat08\Nat08.esb`; the `.atyList` of FS01–FS08; the `.aud` of FS01–08,
+  MC06–08, SX01–18; the material tables `MST\Machine`, `Rider`, `UI_InGame`, `Vehicle.mst` and
+  `MST\Env\{FS01,FS02,FS04,FS05,FS07,FS08,Nat04}.mst`; and ten PS2 textures the PC also has under the
+  PS2 name (`Tex\BaleKTM.pst`, `BaleSuzuki`, `BalesYamaha`, `FS02_Podiumcloth`, `FS_DropRamp`,
+  `FS_JudgeCloth`, `KTMBanner`, `SM_TireBalloon`, `SuzukiBanner`, `YamahaBanner`).
+- **The whole PSR** (`discx cmp mxvatv pc`, `discx/tests/pc.rs`, ignored): by PSR member, 6,239
+  identical, 256 different, 13,896 only on the disc, 13,920 only in the paks; reaching into every `.res`
+  (`--res`), 24,011 identical, 761 different, 29,263 only on the disc. Beyond the maps the differences
+  include `Veh\Vehicles.dat`, `Rider\Riders.dat`, two ATV chassis `.col`s and the UI layouts
+  (`.lyt`/`.lyr`); none of them is a file the tools read.
+
+So research/mxvatv-pc.md's *the paks hold the disc's sim data byte for byte* holds for the vehicles'
+`.phy` and the riders' stunts and clips, not for the maps: the PC's scenes and some collision are a
+later edit. The disc stays the source of every map (AGENTS.md: the source game's map as its disc has it).
+
 ## Not verified
 
 - Render side (M9): readers accepting a file is all that was checked. Nothing was drawn and compared with
@@ -812,3 +885,6 @@ in the port, and each map's Free Ride start is its tile's own (the world's `spaw
   Ecosystem density, `[DistanceFade]` and the lights' shadow keys were not read from RAM.
 - C2's world (*The giant map*): no seam was ridden in openmx (no MD2/MD8), and the world was not seen
   in PCSX2 (it is not a map the game has).
+- The PC install (T12, *The PC install*): only byte equality was checked. What the PC's different
+  scenes, collision, `.esb` and `.aud` do in the PC game, and whether a `.dx.trn` holds the `.ps2.trn`'s
+  heights, were not looked at; nothing off the paks was run in openmx or the PC game.

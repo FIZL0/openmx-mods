@@ -418,3 +418,10 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   at a pose over mxu_nat09 in world_mxu draws the far tiles but leaves the near ground blank (the sky
   colour), where the default (`near`, rider under the pose) draws it. Probably `GROUND_BYTES` keeping
   chunks in build order, not by distance. Low: nothing uses it but a test.
+- **research/mxvatv-pc.md, two corrections** (T12, notes/mxvatv.md *The PC install*). Not a reader
+  change. `data/` holds 70 paks, not 63 (20,415 members is right). *Sim data is the PS2 disc's, byte for
+  byte* holds for the `.phy`s and the riders' stunts and clips, not for the maps: of what an import of
+  the disc's 56 maps reads, 342 files differ in the paks (13 scenes with placements moved, added or
+  dropped, 10 `.col`s, `Nat12.toy`, two `.esb`s, `.aud`s, `.atyList`s, `.mst`s), and the paks have no
+  `.res`. The "clip not found on the PS2 side" is `ATV_bike_NinjaNac.mot`: on the disc under
+  `Rider\Anim\`, in the paks under `Veh\Anim\`, the same bytes.

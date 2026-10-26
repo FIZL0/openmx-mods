@@ -92,13 +92,15 @@ pub struct Pulled {
     pub why: String,
 }
 
-/// The maps on the disc: every folder `Env\<MAP>\` with a `<map>.res`, in PSR order.
+/// The maps on the disc: every folder `Env\<MAP>\` with a `<map>.res`, in PSR order. On the PC
+/// paks, which hold no `.res`, every folder with a `<MAP>.scn` ([`pc_refusal`] says why none imports).
 pub fn map_folders(disc: &Disc) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for e in disc.matching(r"Env\*\*.res") {
+    let ext = if disc.source == discx::Source::Paks { "scn" } else { "res" };
+    for e in disc.matching(&format!(r"Env\*\*.{ext}")) {
         let parts: Vec<&str> = e.name.split(['\\', '/']).collect();
         let (folder, file) = (parts[1], parts[2]);
-        if file.eq_ignore_ascii_case(&format!("{folder}.res")) && !out.iter().any(|f| f.eq_ignore_ascii_case(folder)) {
+        if file.eq_ignore_ascii_case(&format!("{folder}.{ext}")) && !out.iter().any(|f| f.eq_ignore_ascii_case(folder)) {
             out.push(folder.to_string());
         }
     }
@@ -115,6 +117,9 @@ pub fn load_map(disc: &mut Disc, folder: &str) -> Result<Map, String> {
 /// A map's archives (`<archives>\<MAP>\<MAP>.res`, `_mat`, `_mst`), the PSR members under
 /// `Env\<MAP>\` and its `.atyList` there, if any. Nothing is pulled yet.
 pub fn load(disc: &mut Disc, folder: &str, origin: &'static Origin) -> Result<Map, String> {
+    if disc.source == discx::Source::Paks {
+        return Err(pc_refusal(folder, origin));
+    }
     let under: Vec<_> = disc.matching(&format!(r"Env\{folder}\**")).into_iter().cloned().collect();
     let mut archives = Vec::new();
     for suffix in ["", "_mat", "_mst"] {
@@ -146,6 +151,20 @@ pub fn load(disc: &mut Disc, folder: &str, origin: &'static Origin) -> Result<Ma
         }
     }
     Ok(Map { origin, folder: folder.to_string(), archives, atylist, loose, elsewhere, pulled: Vec::new(), ride: None })
+}
+
+/// Why a map is not imported off MX vs. ATV Unleashed's PC paks (T12; notes/mxvatv.md, *The PC
+/// install*): a mod holds the map's archives' members as the disc has them (§2), and the paks have no
+/// archives. Their loose files are not the same set: the render ones are the PC's DirectX formats,
+/// and some scenes, collision and audio tables differ. Rebuilding the disc's archives out of them
+/// would be a guess, so the map is imported off SLUS-21104's disc and nothing is written.
+pub fn pc_refusal(folder: &str, origin: &Origin) -> String {
+    format!(
+        "{}\\{folder}\\{folder}.res: the PC paks hold no .res; the map's files are loose there, its terrain, models, \
+         materials and textures the PC's (.dx.trn, .dxg, .dxm, .dxt for the disc's .ps2.trn, .psg, .psm, .pst) and some \
+         scenes, collision and audio tables different (notes/mxvatv.md, The PC install); import it off {}'s disc",
+        origin.archives, origin.boot
+    )
 }
 
 impl Map {

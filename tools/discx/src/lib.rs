@@ -14,6 +14,8 @@
 //!
 //! Names are matched as the game does: `\` and `/` are the same separator and case does not matter.
 
+pub mod pak;
+
 use game_sim::archive::{Entry, Psr, Res};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -79,9 +81,17 @@ pub struct IsoFile {
 }
 
 /// An opened image: its root directory, which game it is, and the directory of one PSR.
+///
+/// Or MX vs. ATV Unleashed's PC paks in its place ([`Disc::open_paks`], [`pak`]): every pak member
+/// is then an entry of `psr`, named as the PSR names the same file, and the rest of the crate and the
+/// tools read it as they read the disc.
 pub struct Disc {
-    file: File,
+    /// The files entries are read from, each with where it starts in the space `Entry::at` (plus
+    /// `psr_at`) counts in: the image alone, or every pak back to back.
+    parts: Vec<Part>,
     pub path: PathBuf,
+    /// Which of the two this is.
+    pub source: Source,
     pub root: Vec<IsoFile>,
     /// The boot ELF from SYSTEM.CNF, if the disc has one.
     pub boot: Option<String>,
@@ -94,7 +104,81 @@ pub struct Disc {
     pub psr: Psr,
 }
 
+/// Where a [`Disc`]'s members come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// A PS2 disc image and a PSR on it.
+    Iso,
+    /// MX vs. ATV Unleashed's PC install, `data/*.pak` ([`pak`]).
+    Paks,
+}
+
+/// What [`Disc::psr_name`] says for the PC paks, where there is no PSR.
+pub const PAKS_NAME: &str = "data\\*.pak";
+
+struct Part {
+    file: File,
+    base: u64,
+    len: u64,
+}
+
 impl Disc {
+    /// A disc image or the PC paks, by what the path is ([`pak::is_paks`]): a `.pak`, or a directory
+    /// that holds paks (or whose `data/` does), is the PC install; anything else is opened as an image.
+    pub fn open_any(path: &Path) -> Result<Disc, String> {
+        if pak::is_paks(path) { Disc::open_paks(path) } else { Disc::open(path) }
+    }
+
+    /// MX vs. ATV Unleashed's PC paks, as [`pak::pak_files`] finds them under `path`, opened as one
+    /// directory in pak-name order. `game` is MX vs. ATV Unleashed's, the one game whose paks these
+    /// are; `boot` is `None` (there is no SYSTEM.CNF), `root` lists the paks and `psr_name` is
+    /// [`PAKS_NAME`]. A name two paks both hold is refused rather than one of them picked.
+    pub fn open_paks(path: &Path) -> Result<Disc, String> {
+        let files = pak::pak_files(path)?;
+        if files.is_empty() {
+            return Err(format!("{}: no .pak files", path.display()));
+        }
+        let mut parts = Vec::new();
+        let mut root = Vec::new();
+        let mut entries = Vec::new();
+        let mut seen = std::collections::HashMap::new();
+        let (mut base, mut dir_bytes) = (0u64, 0u64);
+        for f in &files {
+            let p = pak::Pak::open(f)?;
+            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            for e in &p.entries {
+                if let Some(other) = seen.insert(normalise(&e.name), name.clone()) {
+                    return Err(format!("{}: {} is in both {other} and {name}", path.display(), e.name));
+                }
+                entries.push(Entry { name: e.name.clone(), at: base + e.at, size: e.size });
+            }
+            dir_bytes += 4 + (p.entries.len() * pak::ENTRY) as u64;
+            root.push(IsoFile { name, at: base, size: p.size.min(u32::MAX as u64) as u32 });
+            let file = File::open(f).map_err(|e| format!("{}: {e}", f.display()))?;
+            parts.push(Part { file, base, len: p.size });
+            base += p.size;
+        }
+        Ok(Disc {
+            parts,
+            path: path.to_path_buf(),
+            source: Source::Paks,
+            root,
+            boot: None,
+            game: Game::by_name("mxvatv"),
+            psr_name: PAKS_NAME.to_string(),
+            psr_at: 0,
+            psr_size: base,
+            psr: Psr { entries, dir_bytes: dir_bytes.min(u32::MAX as u64) as u32 },
+        })
+    }
+
+    /// The file and the offset in it of a member starting at `at` in this disc's space.
+    fn part(&mut self, at: u64) -> (&mut File, u64) {
+        let k = self.parts.partition_point(|p| p.base + p.len <= at).min(self.parts.len() - 1);
+        let p = &mut self.parts[k];
+        (&mut p.file, at - p.base)
+    }
+
     /// Open an image and the game's main PSR (the first in [`Game::psrs`]). A disc this crate does not
     /// know is opened if its root holds exactly one `.PSR`; otherwise the error names its boot ELF.
     pub fn open(path: &Path) -> Result<Disc, String> {
@@ -155,9 +239,11 @@ impl Disc {
                 return Err(at(format!("{psr_name}: {} runs past the end", e.name)));
             }
         }
+        let len = file.metadata().map_err(|e| at(e.to_string()))?.len();
         Ok(Disc {
-            file,
+            parts: vec![Part { file, base: 0, len }],
             path: path.to_path_buf(),
+            source: Source::Iso,
             root,
             boot,
             game,
@@ -195,18 +281,17 @@ impl Disc {
 
     /// One member's bytes.
     pub fn read(&mut self, e: &Entry) -> Result<Vec<u8>, String> {
-        read_exact_at(&mut self.file, self.psr_at + e.at, e.size as usize)
-            .map_err(|why| format!("{}: {why}", e.name))
+        let (file, at) = self.part(self.psr_at + e.at);
+        read_exact_at(file, at, e.size as usize).map_err(|why| format!("{}: {why}", e.name))
     }
 
     /// One member, copied to `out` without holding it in memory (MX Unleashed's `Aud\audio.res` is
     /// 164 MB).
     pub fn copy(&mut self, e: &Entry, out: &mut impl Write) -> Result<(), String> {
         let why = |x: std::io::Error| format!("{}: {x}", e.name);
-        self.file
-            .seek(SeekFrom::Start(self.psr_at + e.at))
-            .map_err(why)?;
-        let got = std::io::copy(&mut (&mut self.file).take(e.size as u64), out).map_err(why)?;
+        let (file, at) = self.part(self.psr_at + e.at);
+        file.seek(SeekFrom::Start(at)).map_err(why)?;
+        let got = std::io::copy(&mut file.take(e.size as u64), out).map_err(why)?;
         if got != e.size as u64 {
             return Err(format!("{}: {got} of {} bytes", e.name, e.size));
         }
@@ -220,6 +305,63 @@ impl Disc {
         let bytes = self.read(e)?;
         ResFile::unpadded(bytes).map_err(|why| format!("{}: {why}", e.name))
     }
+}
+
+/// How two sources' files compare ([`compare`]): each list holds names as the first source spells
+/// them (the second's for `only_b`), `res:member` for a `.res` member.
+#[derive(Debug, Default)]
+pub struct Comparison {
+    pub same: Vec<String>,
+    /// (name, size in the first, size in the second).
+    pub differ: Vec<(String, u64, u64)>,
+    pub only_a: Vec<String>,
+    pub only_b: Vec<String>,
+}
+
+/// Every member of `a` a glob matches against the member of `b` of the same name (case and slash
+/// aside), byte for byte. With `res`, a `.res` of `a` is not compared itself: each of its members is,
+/// against `b`'s member at the member's own path (the paks hold loose what the disc archives). Only
+/// `b`'s members no compared name reached are `only_b`.
+pub fn compare(a: &mut Disc, b: &mut Disc, glob: &str, res: bool) -> Result<Comparison, String> {
+    let index: std::collections::HashMap<String, usize> =
+        b.entries().iter().enumerate().map(|(i, e)| (normalise(&e.name), i)).collect();
+    let mut reached = vec![false; b.entries().len()];
+    let mut c = Comparison::default();
+    let mut one = |name: String, bytes: &[u8], c: &mut Comparison, b: &mut Disc| -> Result<(), String> {
+        let key = normalise(name.rsplit_once(':').map_or(name.as_str(), |(_, m)| m));
+        let Some(&i) = index.get(&key) else {
+            c.only_a.push(name);
+            return Ok(());
+        };
+        reached[i] = true;
+        let e = b.entries()[i].clone();
+        let theirs = b.read(&e)?;
+        if theirs == bytes {
+            c.same.push(name);
+        } else {
+            c.differ.push((name, bytes.len() as u64, theirs.len() as u64));
+        }
+        Ok(())
+    };
+    let mine: Vec<Entry> = a.matching(glob).into_iter().cloned().collect();
+    for e in &mine {
+        if res && e.name.to_ascii_lowercase().ends_with(".res") {
+            let r = a.res(e)?;
+            for m in r.entries() {
+                let bytes = r.read(m).map_err(|why| format!("{}:{}: {why}", e.name, m.name))?;
+                one(format!("{}:{}", e.name, m.name), &bytes, &mut c, b)?;
+            }
+        } else {
+            let bytes = a.read(e)?;
+            one(e.name.clone(), &bytes, &mut c, b)?;
+        }
+    }
+    for (i, e) in b.entries().iter().enumerate() {
+        if !reached[i] && glob_match(glob, &e.name) {
+            c.only_b.push(e.name.clone());
+        }
+    }
+    Ok(c)
 }
 
 /// A `.res` archive in memory, with its directory parsed by openmx's reader.
@@ -468,6 +610,28 @@ pub fn resolve_image(arg: &str, iso_dir: &Path) -> Result<PathBuf, String> {
         .find(|(_, boot)| boot.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(game.boot)))
         .map(|(p, _)| p)
         .ok_or_else(|| format!("no disc with boot ELF {} in {}", game.boot, iso_dir.display()))
+}
+
+/// MX vs. ATV Unleashed's PC install's `data/`, when it is here: `$DISCX_PC`, else openmx's
+/// `context/mxvatv-pc/data` (research/mxvatv-pc.md says where it is kept; it is never in git).
+pub fn pc_install() -> Option<PathBuf> {
+    let p = match std::env::var_os("DISCX_PC") {
+        Some(p) => PathBuf::from(p),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../openmx/context/mxvatv-pc/data"),
+    };
+    pak::is_paks(&p).then_some(p)
+}
+
+/// [`resolve_image`], or a path to PC paks ([`pak::is_paks`]) as it is, or `pc` for [`pc_install`]:
+/// what the tools take wherever they take a disc. Open the result with [`Disc::open_any`].
+pub fn resolve_source(arg: &str, iso_dir: &Path) -> Result<PathBuf, String> {
+    if arg.eq_ignore_ascii_case("pc") {
+        return pc_install().ok_or_else(|| "pc: no MX vs. ATV Unleashed PC install ($DISCX_PC, or openmx/context/mxvatv-pc/data)".into());
+    }
+    if pak::is_paks(Path::new(arg)) {
+        return Ok(PathBuf::from(arg));
+    }
+    resolve_image(arg, iso_dir)
 }
 
 fn le32(b: &[u8]) -> u32 {

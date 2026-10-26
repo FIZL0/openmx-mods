@@ -1,6 +1,6 @@
 //! `discx`: list and extract PSR and `.res` members off a disc image. `discx help` for usage.
 
-use discx::{Disc, Pattern, ResFile, res_member_path, resolve_image};
+use discx::{Disc, Pattern, ResFile, res_member_path, resolve_source};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -11,9 +11,14 @@ const USAGE: &str = r#"discx: PSR and .res members off a PS2 disc image (MX Unle
   discx ls    DISC [PATTERN]          members and sizes
   discx x     DISC PATTERN OUTDIR     extract, keeping paths (\ becomes /)
   discx res   FILE.res [GLOB [OUTDIR]]  a loose .res: list its members, or extract them
+  discx cmp   DISC DISC2 [PATTERN]    the same names in both, byte for byte (--res: the first's .res
+                                      members against the second's loose files of the same path)
 
 DISC is an image path, or a game (mxu, mxvatv, untamed, or its boot ELF) looked for in iso/
 ($DISCX_ISO overrides). --psr NAME opens another PSR on the disc (Untamed's MX08AUD.PSR).
+DISC may also be MX vs. ATV Unleashed's PC install instead: its data/ directory, the install above it,
+one .pak, or several joined with `:`; or `pc` for $DISCX_PC (default openmx/context/mxvatv-pc/data).
+Its members are named as the PSR names them, without the paks' leading Data\.
 
 PATTERN: `*` stays within a path segment, `**` crosses them, `?` is one character; `\` and `/` are
 both separators and case is ignored. `OUTER:INNER` reaches into .res members:
@@ -25,7 +30,8 @@ A .res member is extracted to OUTDIR/<res path>.d/<member path>."#;
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let psr = take_flag(&mut args, "--psr");
-    match run(&args, psr.as_deref()) {
+    let res = args.iter().position(|a| a == "--res").map(|k| args.remove(k)).is_some();
+    match run(&args, psr.as_deref(), res) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("discx: {e}");
@@ -60,10 +66,17 @@ fn iso_dir() -> PathBuf {
 }
 
 fn open(arg: &str, psr: Option<&str>) -> Result<Disc, String> {
-    Disc::open_psr(&resolve_image(arg, &iso_dir())?, psr)
+    let path = resolve_source(arg, &iso_dir())?;
+    if discx::pak::is_paks(&path) {
+        if let Some(name) = psr {
+            return Err(format!("--psr {name}: {} is PC paks, which have no PSR", path.display()));
+        }
+        return Disc::open_paks(&path);
+    }
+    Disc::open_psr(&path, psr)
 }
 
-fn run(args: &[String], psr: Option<&str>) -> Result<(), String> {
+fn run(args: &[String], psr: Option<&str>, res_members: bool) -> Result<(), String> {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     match a.as_slice() {
         ["discs"] | ["discs", _] => {
@@ -77,7 +90,7 @@ fn run(args: &[String], psr: Option<&str>) -> Result<(), String> {
         }
         ["info", disc] => {
             let d = open(disc, psr)?;
-            out!("image\t{}", d.path.display());
+            out!("{}\t{}", if d.source == discx::Source::Paks { "paks" } else { "image" }, d.path.display());
             out!("boot\t{}", d.boot.as_deref().unwrap_or("-"));
             out!("game\t{}", d.game.map_or("(not one of ours)", |g| g.title));
             out!("psr\t{} at {:#x}, {} bytes", d.psr_name, d.psr_at, d.psr_size());
@@ -96,6 +109,8 @@ fn run(args: &[String], psr: Option<&str>) -> Result<(), String> {
         ["ls", disc] => ls(&mut open(disc, psr)?, "**"),
         ["ls", disc, pattern] => ls(&mut open(disc, psr)?, pattern),
         ["x", disc, pattern, out] => extract(&mut open(disc, psr)?, pattern, Path::new(out)),
+        ["cmp", x, y] => cmp(x, y, "**", psr, res_members),
+        ["cmp", x, y, pattern] => cmp(x, y, pattern, psr, res_members),
         ["res", file] => res(file, "**", None),
         ["res", file, glob] => res(file, glob, None),
         ["res", file, glob, out] => res(file, glob, Some(Path::new(out))),
@@ -160,6 +175,22 @@ fn extract(d: &mut Disc, pattern: &str, out: &Path) -> Result<(), String> {
         return Err(format!("nothing in {} matches {pattern}", d.psr_name));
     }
     eprintln!("discx: {n} files, {bytes} bytes, into {}", out.display());
+    Ok(())
+}
+
+fn cmp(x: &str, y: &str, pattern: &str, psr: Option<&str>, res: bool) -> Result<(), String> {
+    let (mut a, mut b) = (open(x, psr)?, open(y, None)?);
+    let c = discx::compare(&mut a, &mut b, pattern, res)?;
+    for (name, sa, sb) in &c.differ {
+        out!("differ\t{sa}\t{sb}\t{name}");
+    }
+    for name in &c.only_a {
+        out!("only-a\t{name}");
+    }
+    for name in &c.only_b {
+        out!("only-b\t{name}");
+    }
+    out!("same {}, differ {}, only in {} {}, only in {} {}", c.same.len(), c.differ.len(), a.psr_name, c.only_a.len(), b.psr_name, c.only_b.len());
     Ok(())
 }
 
