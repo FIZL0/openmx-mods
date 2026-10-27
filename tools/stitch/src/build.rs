@@ -1122,6 +1122,15 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
         })
         .map(|(_, t)| t.id.clone())
         .ok_or("no tile's spawn is inside its interior")?;
+    // A wrapped world starts on its middle tile, as far from the seams as it can (openmx MD50).
+    let spawn_tile = match &p.wrap {
+        Some(_) => {
+            let each: Vec<_> = tiles.iter().zip(&plan.placed).map(|(t, pl)| (pl.at, pl.keep, t.spacing, t.spawn())).collect();
+            let extent = plan.size.map(|n| f64::from(n) * plan.spacing);
+            crate::middle_tile(&each, extent).map_or(spawn_tile, |i| tiles[i].id.clone())
+        }
+        None => spawn_tile,
+    };
 
     let mut games: Vec<String> = Vec::new();
     for t in &tiles {

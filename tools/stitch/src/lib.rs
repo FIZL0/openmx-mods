@@ -114,6 +114,27 @@ pub fn whole_cells(t: &Terrain, n: (u32, u32)) -> [u32; 4] {
     best
 }
 
+/// A wrapped world's `spawn` tile (openmx MD50): of the tiles whose own start (`[x, y, z]` in their
+/// own feet) stands inside their kept rectangle, the one whose kept rectangle's middle is nearest the
+/// middle of the world's `extent`, so the ride starts as far from the seams as it can. Each tile is
+/// `(at, keep, spacing, start)`; the first on a tie, `None` where no start is kept. openmx picks
+/// the same on load (its `WorldMod::middle_tile`, over the extent with its seam joins).
+pub fn middle_tile(tiles: &[([f64; 2], [u32; 4], f64, [f64; 3])], extent: [f64; 2]) -> Option<usize> {
+    let mut best: Option<(f64, usize)> = None;
+    for (i, &(at, keep, spacing, start)) in tiles.iter().enumerate() {
+        let kept = keep.map(|k| f64::from(k) * spacing);
+        if !(start[0] >= kept[0] && start[2] >= kept[1] && start[0] < kept[2] && start[2] < kept[3]) {
+            continue;
+        }
+        let mid = [at[0] + (kept[0] + kept[2]) / 2.0, at[1] + (kept[1] + kept[3]) / 2.0];
+        let d = (mid[0] - extent[0] / 2.0).powi(2) + (mid[1] - extent[1] / 2.0).powi(2);
+        if best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, i));
+        }
+    }
+    best.map(|(_, i)| i)
+}
+
 /// Every file under a folder, relative and `/`-separated, in sorted order.
 pub fn files(dir: &Path) -> Result<Vec<String>, String> {
     fn walk(root: &Path, at: &Path, out: &mut Vec<String>) -> Result<(), String> {

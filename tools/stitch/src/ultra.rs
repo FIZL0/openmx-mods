@@ -957,9 +957,28 @@ pub fn build(world_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, St
         Some(sk) => return Err(format!("sky {sk} is not a tile of any of the worlds")),
         None => first.get("sky").and_then(Json::str).unwrap_or(names[0]).to_owned(),
     };
-    let spawn = to_j(first.get("spawn").ok_or_else(|| format!("{}: no spawn", worlds[0].id))?);
+    let mut spawn = to_j(first.get("spawn").ok_or_else(|| format!("{}: no spawn", worlds[0].id))?);
     if !matches!(&spawn, J::O(kv) if kv.iter().any(|(k, _)| k == "tile")) {
         return Err(format!("{}: its spawn is not a tile's (a position would need moving)", worlds[0].id));
+    }
+    // A wrapped ultra map starts on its middle tile, as far from the seams as it can (openmx MD50):
+    // each tile's spacing and start read from its own folder, its place moved by its world's.
+    if p.wrap.is_some() {
+        let mut each = Vec::new();
+        let mut named = Vec::new();
+        for (wi, w) in worlds.iter().enumerate() {
+            for t in w.meta.get("tiles").and_then(Json::arr).unwrap_or_default() {
+                let name = t.get("tile").and_then(Json::str).unwrap_or_default();
+                let (a, k) = (nums(t.get("at")), nums(t.get("keep")));
+                let tile = crate::Tile::load(&w.dir.join("tiles").join(name))?;
+                let keep = [k[0], k[1], k[2], k[3]].map(|v| v as u32);
+                each.push(([a[0] + plan.at[wi][0], a[1] + plan.at[wi][1]], keep, tile.spacing, tile.spawn()));
+                named.push(name.to_owned());
+            }
+        }
+        if let Some(i) = crate::middle_tile(&each, plan.size.map(|n| f64::from(n) * step)) {
+            spawn = o(vec![("tile", s(&named[i]))]);
+        }
     }
     let permission = if perms.iter().all(|x| *x == perms[0]) { perms[0].clone() } else { "own-disc".into() };
     let far_slope = results.iter().map(|r| r.far).fold(0.0, f64::max);
