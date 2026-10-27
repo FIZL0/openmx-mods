@@ -1,6 +1,7 @@
 {
   "id": "world_mxvatv",
   "name": "MX vs. ATV Unleashed: every open map",
+  "wrap": "xz",
   "tiles": [
     "mxvatv_mc02", "mxvatv_mc01", "mxvatv_mc03", "mxvatv_mc04", "mxvatv_mc05", "mxvatv_mc09",
     "mxvatv_mc10", "mxvatv_nat05", "mxvatv_nat06", "mxvatv_nat03", "mxvatv_nat10", "mxvatv_nat02",

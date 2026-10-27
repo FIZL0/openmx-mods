@@ -1,6 +1,7 @@
 {
   "id": "world_untamed",
   "name": "MX vs. ATV Untamed: every open map",
+  "wrap": "xz",
   "tiles": [
     "untamed_sm_of", "untamed_sm_mb", "untamed_sm_hs", "untamed_sm_cf", "untamed_sm_s1", "untamed_sm_as",
     "untamed_nat_ut", "untamed_nat_sdca", "untamed_nat_pa", "untamed_nat_or", "untamed_nat_ny",

@@ -12,7 +12,7 @@
 //! ```
 //!
 //! A world spec (`worlds/<id>.json`): `{"id": "world_x", "name": "...", "tiles": ["mxvatv_nat05", ...]}`
-//! with optional `sky`, `max_slope`, `min_gap`, `chunk`, `fade`, and `todo` (lines the world's mod.json todo
+//! with optional `sky`, `wrap`, `max_slope`, `min_gap`, `chunk`, `fade`, and `todo` (lines the world's mod.json todo
 //! carries, e.g. why the spec raises `max_slope`). Its tiles are looked up in
 //! `--mods`/tracks/. An `mxu_` tile is never there (MX Unleashed's tracks are only a world's tiles,
 //! §1, so no step packages them): it is imported off the MX Unleashed disc in `$DISCX_ISO` (or `iso/`)
@@ -246,6 +246,7 @@ fn cmd_specs(args: &[String]) -> ExitCode {
             let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
             let mut p = Params::new(&g("id").ok_or("no id")?, &g("name").ok_or("no name")?);
             p.sky = g("sky");
+            p.wrap = g("wrap");
             p.todo = j.get("todo").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
             if let Some(v) = j.get("max_slope").and_then(Json::num) {
                 p.max_slope = v;
@@ -290,7 +291,7 @@ fn cmd_specs(args: &[String]) -> ExitCode {
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
-/// An ultra map's spec (C5): `{"id", "name", "worlds": [...]}` with optional `sky`, `max_slope`, `min_gap`,
+/// An ultra map's spec (C5): `{"id", "name", "worlds": [...]}` with optional `sky`, `wrap`, `max_slope`, `min_gap`,
 /// `fade`, `chunk` and `todo`. Each world is looked for in the stage first (built in this run), then in
 /// `--mods`/tracks/; a world missing from both skips the map with a line, as a missing tile skips a world.
 fn ultra_spec(spec: &Path, mods: &Path, out: &Path) -> Result<Option<stitch::ultra::Built>, String> {
@@ -298,6 +299,7 @@ fn ultra_spec(spec: &Path, mods: &Path, out: &Path) -> Result<Option<stitch::ult
     let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
     let mut p = Params::new(&g("id").ok_or("no id")?, &g("name").ok_or("no name")?);
     p.sky = g("sky");
+    p.wrap = g("wrap");
     p.todo = j.get("todo").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
     for (k, v) in [("max_slope", &mut p.max_slope), ("min_gap", &mut p.min_gap), ("fade", &mut p.fade)] {
         if let Some(n) = j.get(k).and_then(Json::num) {

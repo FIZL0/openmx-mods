@@ -31,6 +31,8 @@ One giant map per game out of its non-racing maps (no stadium with crowd seats: 
 maps), their edge berms removed and the maps joined smoothly; then one ultra map out of every game's giant
 map and MX Unleashed's. Inside each source map the ground stays the original's; only the joins change.
 
+- [ ] **C12** no holes in a stitched world's ground (user, 2026-10-27). The worlds have gaps between tiles at the world's edges, about every 1152 ft: openmx's 'world holes:' counts 2189 on world_mxu without wrapping and ~5000 with `"wrap": "xz"` (every spec carries it now), likely because wrapping makes the old outer edge a join, which stitch never builds. Near one a rider drops in or is thrown. Find what each hole is (a missing join piece, a cut that stops short of a leaf, the outer band), make stitch cover it, and with wrap build the joins across the wrapped edge (the last column/row of tiles meets the first) like any other. Rebuild out/mods and the five installed worlds (C11 journal, M23) → tools/stitch/ | t: tools/stitch tests — a wrapped 2×2 world has ground at every point of the wrap seam; openmx's 'world holes:' 0 on all five worlds | j: stitch-world-holes
+
 ### Stretch
 
 Waiting on a disc in `iso/` or on a map author's permission; nothing here runs unattended.

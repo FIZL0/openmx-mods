@@ -1,6 +1,7 @@
 {
   "id": "world_mxu",
   "name": "MX Unleashed: every freeride and national",
+  "wrap": "xz",
   "tiles": [
     "mxu_free06", "mxu_free07", "mxu_free09", "mxu_free10", "mxu_free11",
     "mxu_nat01", "mxu_nat02", "mxu_nat03", "mxu_nat04", "mxu_nat05", "mxu_nat06", "mxu_nat07",

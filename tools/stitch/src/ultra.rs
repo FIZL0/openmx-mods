@@ -980,7 +980,7 @@ pub fn build(world_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, St
             ])
         })
         .collect();
-    let meta = o(vec![
+    let mut meta = o(vec![
         ("standard", J::N(1.0)),
         ("kind", s("world")),
         ("id", s(&p.id)),
@@ -1013,6 +1013,11 @@ pub fn build(world_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, St
             ]),
         ),
     ]);
+    // The world's wrapped axes (openmx MD29), after `spawn`; a world with edges has no `wrap`.
+    if let (Some(w), J::O(kv)) = (&p.wrap, &mut meta) {
+        let at = kv.iter().position(|(k, _)| k == "spawn").map_or(kv.len(), |i| i + 1);
+        kv.insert(at, ("wrap".into(), s(w)));
+    }
     std::fs::write(dir.join("mod.json"), meta.pretty()).map_err(|e| format!("{}: {e}", dir.display()))?;
     eprintln!("stitch: {} tiles and {copied} joins of the worlds put in place in {:.1} s", tiles.len(), t0.elapsed().as_secs_f64());
     Ok(Built {

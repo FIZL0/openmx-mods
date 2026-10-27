@@ -11,6 +11,7 @@ publish.workspace = true
 # game-render's INI reader also reads the playlists, as openmx's own DiscMusic does.
 game-render = { path = "../../openmx/crates/game-render", default-features = false }
 ps2-float = { path = "../../openmx/crates/ps2-float" }
+game-sim = { path = "../../openmx/crates/game-sim" }
 # The disc by its boot ELF and its PSR members; Untamed's playlist is BPB.
 discx = { path = "../discx" }
 bpb = { path = "../bpb" }

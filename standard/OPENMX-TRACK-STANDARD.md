@@ -317,6 +317,9 @@ mods/tracks/world_mxvatv/
 - `spawn`: `{"tile": "<tile>"}` uses that tile's spawn (§2b) moved by its `at`, or
   `{"position": [x, y, z], "direction": [x, y, z], "from": "…"}` in world feet. It defaults to the first
   tile's.
+- `wrap` (optional): the axes the world wraps round, `"x"`, `"z"` or `"xz"` (openmx MD29). Riding off a
+  wrapped edge comes in at the far one. The port closes each wrapped axis itself with a seam join from the
+  last tile back to the first; a world with no `wrap` has edges, and the shootoff is at them.
 - A world may hold another world's tiles (the ultra map, C5). It copies the tiles and joins it keeps. It
   does not point at another mod.
 - `source.games` lists every game a tile came from. The pick shows worlds under their own heading (MD11).

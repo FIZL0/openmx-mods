@@ -27,6 +27,9 @@ pub struct Params {
     pub fade: f64,
     /// The tile that lights the world under Settings → World sky: Global (MD9). Default: the first.
     pub sky: Option<String>,
+    /// Which axes the world wraps round (`"x"`, `"z"` or `"xz"`), written as mod.json's `wrap` (§3,
+    /// openmx MD29). None, the world has edges.
+    pub wrap: Option<String>,
     /// Lines the world spec adds to the world's todo (a gap the spec chose, e.g. a raised `max_slope`).
     pub todo: Vec<String>,
     /// Threads for the join ground (0: as many as the machine has).
@@ -47,6 +50,7 @@ impl Params {
             chunk: 256,
             fade: 48.0,
             sky: None,
+            wrap: None,
             todo: Vec::new(),
             threads: 0,
             prune: true,
@@ -1228,7 +1232,7 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
         })
         .collect();
     let drops_n = drops.len();
-    let meta = o(vec![
+    let mut meta = o(vec![
         ("standard", J::N(1.0)),
         ("kind", s("world")),
         ("id", s(&p.id)),
@@ -1284,6 +1288,11 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
             ]),
         ),
     ]);
+    // The world's wrapped axes (openmx MD29), after `spawn`; a world with edges has no `wrap`.
+    if let (Some(w), J::O(kv)) = (&p.wrap, &mut meta) {
+        let at = kv.iter().position(|(k, _)| k == "spawn").map_or(kv.len(), |i| i + 1);
+        kv.insert(at, ("wrap".into(), s(w)));
+    }
     std::fs::write(dir.join("mod.json"), meta.pretty()).map_err(|e| format!("{}: {e}", dir.display()))?;
     Ok(Built { dir, pieces: results.len(), drops: drops_n, far_slope, near_slope, plan })
 }

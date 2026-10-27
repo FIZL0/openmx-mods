@@ -1,6 +1,7 @@
 {
   "id": "world_ultra",
   "name": "Every game: one world",
+  "wrap": "xz",
   "worlds": ["world_mxu", "world_mxvatv", "world_untamed"],
   "sky": "mxu_free06"
 }
