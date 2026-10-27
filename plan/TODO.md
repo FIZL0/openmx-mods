@@ -9,7 +9,6 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
-- [ ] **M24** Untamed's trick gestures on the PS2 (M20 follow-up): Untamed's first PS2 preset (UI\PSXController_S1_P1.ini) binds R1 to MAPKEY_STUNT_MOD and STUNT3 to Select, and live R1 sets only key-set byte +0x18; find which key the Classic mapping's '1' (MX vs. ATV's R1 bit, SLUS_211.04 0x267da0) reads in SLUS_217.01's decoder, so the R1+Circle/Triangle rows of notes/tricks.md's gesture grid are right for Untamed, and capture one R1 gesture in PCSX2
 ### MX vs. ATV Unleashed
 
 

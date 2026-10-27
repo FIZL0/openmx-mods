@@ -431,3 +431,9 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   same 360. The decay is "none of STUNT1/2/3/MOD held". Otherwise the same steps; captured clean
   landings of both (a 360 landed 1.6° off its take-off heading after a 355° turn about a diagonal
   axis, a backflip after −360°) and the mid-clip wreck as reason 0xb, for openmx's tests of the 35° rule.
+- **New: Untamed's gestures read the stunt modifier, not R1** (M24, `notes/tricks.md` "The gesture map"
+  and "Untamed's pose tricks in PCSX2"). For the Untamed ruleset a row's `DefaultKeyMappingClassic`
+  `1` is `MAPKEY_STUNT_MOD` (SLUS_217.01 `0x3a3220`; R1 on the first PS2 preset), and the match
+  (`0x3a37d0`) is exact on direction, STUNT1, STUNT2 and the modifier, with STUNT3 not compared.
+  Captured: R1 + Circle + up plays KOD (row 13) and lands clean after its 2 s; R1 + Triangle + left plays
+  Shaolin; Circle + up plays Taunt; landing before a pose's clock runs out wrecks with reason 0xc.

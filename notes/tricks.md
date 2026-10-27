@@ -94,6 +94,18 @@ R1 on the shipped preset). **R1 alone is in no gesture** — on MX Unleashed it 
 on MX vs. ATV it is the button the backflip and the 360 arm with. Only the first 41 rows get a default
 map entry (`0x2688e0`: `index < 0x29`); rows 25–41 have no key and are reached by remapping.
 
+**Untamed** keeps the grid but not the byte: `DefaultKeyMappingClassic` is decoded by SLUS_217.01
+`0x3a3220` into flags of the row's gesture (cleared by `0x3a2f20`; the Wii styles by `0x3a3370`,
+`0x3a3530`, `0x3a3680`): `C` → +0xe (STUNT1), `T` → +0xf (STUNT2), **`1` → +0x11, the STUNT_MOD flag**
+(`0x3a3160`, the mapped-key decoder, names them `1 2 3 M` → +0xe..+0x11), and one of `H U D L R`
+(`0x3d45f8`, 0–4) → word +0; any other letter is an assert. The match (`0x3a37d0`, Classic case 3; rows
+tried in order by `0x252590`, 54 rows of stride 0x58, from the air step `0x4fcad0`) needs a stick
+direction (`0x3a2ca0`), then the direction and three key-set bytes **equal** to the row's: STUNT1
+(+0x12), STUNT2 (+0x14) and STUNT_MOD (+0x18). STUNT3 (+0x16) is not compared. So `1` is whatever button
+the preset maps to MAPKEY_STUNT_MOD (R1 on the first PS2 preset, presets 2 R1, 3 L1, 4–6 Square), and the
+R1+Circle, R1+Triangle and R1+Circle+Triangle rows above are Untamed's on that preset. Captured: see
+"Untamed's pose tricks in PCSX2 (M24)".
+
 ## The 360 (SLUS_211.04 `0x4e53d0`; Untamed `0x4fd630`)
 
 Tuning, per bike, `.phy` `[Three Sixty]` (read by `0x4df740` into the bike object): `MaxThreeSixtyTorqueX`
@@ -277,6 +289,37 @@ What they prove:
   or +0xdd0 is set) never came up here.
 - The backflip lands clean after a full −360° and the same clip rules; its −1400 came with a y flick
   of 662 on the fire frame (the fast end, as MX vs. ATV's `flip1`).
+
+## Untamed's pose tricks in PCSX2 (M24)
+
+The same copy and state as M20 (Rocksbury, state 8, bike 0x1be47f0).
+`watch/gesture.py` (slot s2's `extracted/u24/`, a copy of M20's `extracted/untamed/` set; not in git,
+with the CSVs in `capture/`) holds gas, waits
+until the bike has been off the ground 8 frames past the first big lip (nothing held on the lip, so
+neither the 360 nor the backflip can arm), then presses the buttons and the stick together, holds
+them ~1 s and lets go. Each frame it logs M20's fields plus the key set (+0x14f4: word +0 the style,
+3 = Classic; word +4 the direction, `HUDLR` 0–4; the flag bytes) and +0x1548, the row playing:
+255 on the ground, 54 (the row count) in the air with no stunt, otherwise the 0-based stunt row.
++0x14e0 is the stunt's clock in seconds; it runs on after the buttons go up.
+
+| capture | input (after take-off) | key set while held | +0x1548 | air | what happened |
+|---|---|---|---|---|---|
+| `kod`, `kod2` | R1 + Circle + stick up | dir 1 (U), +0x12 = 1, +0x18 = 1 | **12 = Stunt13 `kod` (`1CU`)** | frames 304–466 | clock 2.03 s at landing (Duration 2.0): landed upright (up.y 0.93), **no wreck**; both runs alike frame for frame |
+| `shaolin` | R1 + Triangle + stick left | dir 3 (L), +0x14 = 1, +0x18 = 1 | **18 = Stunt19 `shoalin` (`1TL`)** | 300–400 | landed at clock 1.20 s (SafeTime 1.5, Duration 2.0): **wreck, reason 0xc** |
+| `taunt` | Circle + stick up, no R1 | dir 1, +0x12 = 1 | 0 = Stunt1 `Taunt` (`CU`) | 300–400 | landed at clock 1.30 s (SafeTime 1.5, Duration 1.67): **wreck 0xc** |
+
+(The `taunt` and `shaolin` runs left the lip four frames earlier than the `kod` runs and had 100 frames
+of air, not 162: Untamed's runs from one state are not always alike, as in M21.)
+
+What they prove:
+
+- **The Classic `1` is MAPKEY_STUNT_MOD, R1 on the first PS2 preset.** R1 + Circle + up plays KOD and
+  R1 + Triangle + left plays Shaolin, the grid's R1 rows; Circle + up without R1 plays Taunt, so R1 is
+  not ignored either. The match is exact on STUNT1, STUNT2 and the modifier: R1 held turns Taunt into
+  KOD, not Taunt plus something.
+- A pose trick runs out its own clock after the buttons go up, and landing before that wrecks with
+  **reason 0xc** (MX vs. ATV's 360/backflip landing wreck is 0xb). Whether the limit is SafeTime or
+  Duration was not told apart (both landings were short of both, the clean one past both).
 
 ## What openmx needs, per trick
 
