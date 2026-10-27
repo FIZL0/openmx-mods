@@ -425,3 +425,9 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   dropped, 10 `.col`s, `Nat12.toy`, two `.esb`s, `.aud`s, `.atyList`s, `.mst`s), and the paks have no
   `.res`. The "clip not found on the PS2 side" is `ATV_bike_NinjaNac.mot`: on the disc under
   `Rider\Anim\`, in the paks under `Veh\Anim\`, the same bytes.
+- **New: Untamed's 360 and backflip arm on a mapped modifier** (M20, `notes/tricks.md` "Untamed in
+  PCSX2"). For the Untamed ruleset the arm is "`MAPKEY_STUNT_MOD` held" (R1 on the first PS2 preset,
+  `UI\PSXController_S1_P1.ini`), not MX vs. ATV's "R1 alone": captured, R1 + Circle arms and fires the
+  same 360. The decay is "none of STUNT1/2/3/MOD held". Otherwise the same steps; captured clean
+  landings of both (a 360 landed 1.6° off its take-off heading after a 355° turn about a diagonal
+  axis, a backflip after −360°) and the mid-clip wreck as reason 0xb, for openmx's tests of the 35° rule.
