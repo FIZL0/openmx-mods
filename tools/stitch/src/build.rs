@@ -56,6 +56,12 @@ impl Params {
             prune: true,
         }
     }
+
+    /// The axes [`Params::wrap`] names, `[x, z]`.
+    pub fn wraps(&self) -> [bool; 2] {
+        let w = self.wrap.as_deref().unwrap_or("");
+        [w.contains('x'), w.contains('z')]
+    }
 }
 
 /// One tile's place.
@@ -92,6 +98,28 @@ pub struct Plan {
     pub collars: Vec<Collar>,
     /// Tiles off the lattice that have no collar, and why.
     pub uncollared: Vec<(usize, String)>,
+    /// On each axis the world wraps round, the lattice's length (`size × spacing`), else 0 (C12). The
+    /// field is the same a period on: every source is also seen a period either way ([`Plan::images`]),
+    /// so the ground at the far edge is the near edge's and the last line of tiles meets the first
+    /// across it as any two lines do.
+    pub period: [f64; 2],
+}
+
+/// The shifts a source is seen at on a world with these periods (0: not wrapped): itself first, then a
+/// period either way on each wrapped axis.
+pub fn images(period: [f64; 2]) -> Vec<[f64; 2]> {
+    let along = |p: f64| if p > 0.0 { vec![0.0, -p, p] } else { vec![0.0] };
+    along(period[1]).into_iter().flat_map(|dz| along(period[0]).into_iter().map(move |dx| [dx, dz])).collect()
+}
+
+/// A rectangle moved by a shift.
+fn shifted(r: [f64; 4], by: [f64; 2]) -> [f64; 4] {
+    [r[0] + by[0], r[1] + by[1], r[2] + by[0], r[3] + by[1]]
+}
+
+/// The distance between two closed rectangles on a world with these periods: the nearest of `b`'s images.
+fn wrapped_gap(a: [f64; 4], b: [f64; 4], period: [f64; 2]) -> f64 {
+    images(period).into_iter().map(|sh| rect_gap(a, shifted(b, sh))).fold(f64::INFINITY, f64::min)
 }
 
 /// A band of join ground at one tile's own spacing round its interior, for a tile whose spacing is not
@@ -300,8 +328,12 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
         cell[t] = (c, r);
     }
     let pad = crate::SHOOTOFF + p.min_gap / 2.0;
+    let wraps = p.wraps();
     let mut at = vec![[0.0; 2]; tiles.len()];
     let mut keep = cuts.to_vec();
+    // On a wrapped axis, the facing pairs across the wrap (the last tile of each row or column and the
+    // first) and the gap each needs, as between any two lines (C12).
+    let mut across: [Vec<(usize, usize, f64)>; 2] = [Vec::new(), Vec::new()];
     // axis 0: columns along x (keep[0], keep[2]; edges 0 and 2); axis 1: rows along z.
     for axis in 0..2 {
         let lines = if axis == 0 { cols } else { rows };
@@ -332,6 +364,8 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
             }
             // The gap to the next line: the widest any facing pair needs.
             let mut gap = p.min_gap * widen;
+            let room = |t: usize, e: usize| gates[t][e] - (step + 2.0 * p.fade);
+            let need = |a: usize, b: usize| gap_for(rings[a].edge_mean(axis + 2) - rings[b].edge_mean(axis), p, room(a, axis + 2) + room(b, axis), widen);
             if l + 1 < lines {
                 let pairs: Vec<(Option<usize>, Option<usize>)> = if axis == 0 {
                     grid.iter().map(|row| (row[l], row[l + 1])).collect()
@@ -340,9 +374,20 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
                 };
                 for (a, b) in pairs {
                     if let (Some(a), Some(b)) = (a, b) {
-                        let dh = rings[a].edge_mean(axis + 2) - rings[b].edge_mean(axis);
-                        let room = |t: usize, e: usize| gates[t][e] - (step + 2.0 * p.fade);
-                        gap = gap.max(gap_for(dh, p, room(a, axis + 2) + room(b, axis), widen));
+                        gap = gap.max(need(a, b));
+                    }
+                }
+            } else if wraps[axis] {
+                // The last line meets the first across the wrap: in each row (column) its last tile
+                // and its first.
+                let runs: Vec<Vec<usize>> = if axis == 0 {
+                    grid.iter().map(|row| row.iter().flatten().copied().collect()).collect()
+                } else {
+                    (0..cols).map(|c| (0..rows).filter_map(|r| grid[r][c]).collect()).collect()
+                };
+                for run in runs {
+                    if let (Some(&b), Some(&a)) = (run.first(), run.last()) {
+                        across[axis].push((a, b, need(a, b)));
                     }
                 }
             }
@@ -365,13 +410,19 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
             Source { tile: t, rect, at: at[t], spacing: s, keep: k, ring: tiles[t].ring(k), gates: gates[t] }
         })
         .collect();
-    let size = [0, 1].map(|a| whole_samples(((far[a] + pad) / step).ceil() as u32, step));
-    let radii = radii(&sources, size, step);
+    // A wrapped axis ends far enough out that each pair across the wrap has its gap: the band past the
+    // last tile and the band before the first together.
+    let end = [0, 1].map(|a| {
+        across[a].iter().map(|&(t, u, g)| sources[t].rect[a + 2] + g - sources[u].rect[a]).fold(far[a] + pad, f64::max)
+    });
+    let size = [0, 1].map(|a| whole_samples((end[a] / step).ceil() as u32, step));
+    let period = [0, 1].map(|a| if wraps[a] { f64::from(size[a]) * step } else { 0.0 });
+    let radii = radii(&sources, size, step, period);
     let radius = radii.iter().copied().fold(0.0, f64::max);
-    let bins = Bins::new(&sources, &radii, size, step);
+    let bins = Bins::new(&sources, &radii, size, step, period);
     let placed = (0..tiles.len()).map(|t| Placed { at: at[t], keep: keep[t], cell: cell[t] }).collect();
     let (collars, uncollared) = collars(&sources, &ratios, step, size, p.fade);
-    Ok(Plan { spacing: step, size, placed, sources, radius, radii, bins, prune: p.prune, fade: p.fade, ratio: ratios, widen, collars, uncollared })
+    Ok(Plan { spacing: step, size, placed, sources, radius, radii, bins, prune: p.prune, fade: p.fade, ratio: ratios, widen, collars, uncollared, period })
 }
 
 /// The share of `max_slope` a tile's extension alone may take past its seam gate: the rest is left for
@@ -406,7 +457,8 @@ pub fn cut_source(t: &Tile, k: [u32; 4], step: f64, p: &Params) -> Source {
 /// as the point is from either, so each point near the middle of a gap has two tiles' say, as C1's one
 /// radius (twice the farthest point of the whole world) gave. A gap made wide by one tall neighbour no
 /// longer widens every tile's reach across the world.
-pub fn radii(sources: &[Source], size: [u32; 2], step: f64) -> Vec<f64> {
+pub fn radii(sources: &[Source], size: [u32; 2], step: f64, period: [f64; 2]) -> Vec<f64> {
+    let shifts = images(period);
     let stride = 8;
     let cell = step * stride as f64;
     let slack = cell * std::f64::consts::SQRT_2;
@@ -416,7 +468,7 @@ pub fn radii(sources: &[Source], size: [u32; 2], step: f64) -> Vec<f64> {
         for kx in (0..=size[0]).step_by(stride) {
             let (x, z) = (f64::from(kx) * step, f64::from(kz) * step);
             for (di, s) in d.iter_mut().zip(sources) {
-                *di = s.distance(x, z);
+                *di = shifts.iter().map(|sh| s.distance(x - sh[0], z - sh[1])).fold(f64::INFINITY, f64::min);
             }
             let d1 = d.iter().copied().fold(f64::INFINITY, f64::min);
             for (f, di) in far.iter_mut().zip(&d) {
@@ -444,14 +496,14 @@ pub struct Bins {
 pub const BIN: u32 = 32;
 
 impl Bins {
-    pub fn new(sources: &[Source], radii: &[f64], size: [u32; 2], step: f64) -> Bins {
+    pub fn new(sources: &[Source], radii: &[f64], size: [u32; 2], step: f64, period: [f64; 2]) -> Bins {
         let side = f64::from(BIN) * step;
         let n = [size[0].div_ceil(BIN).max(1) as usize, size[1].div_ceil(BIN).max(1) as usize];
         let mut cells = Vec::with_capacity(n[0] * n[1]);
         for bz in 0..n[1] {
             for bx in 0..n[0] {
                 let r = [bx as f64 * side, bz as f64 * side, (bx + 1) as f64 * side, (bz + 1) as f64 * side];
-                cells.push((0..sources.len()).filter(|&c| rect_gap(r, sources[c].rect) <= radii[c] + 2.0 * step).collect());
+                cells.push((0..sources.len()).filter(|&c| wrapped_gap(r, sources[c].rect, period) <= radii[c] + 2.0 * step).collect());
             }
         }
         Bins { side, n, cells }
@@ -585,56 +637,67 @@ impl Plan {
         out
     }
 
-    /// The closed-form blend at a world point (no collar pull).
+    /// The closed-form blend at a world point (no collar pull). On a world that wraps, each candidate is
+    /// heard from each of its images ([`images`]), its weight there the sum of theirs.
     fn blend(&self, tiles: &[Tile], terrains: &[Terrain], cands: &[usize], x: f64, z: f64) -> Point {
         let step = self.spacing;
+        let shifts = images(self.period);
         let mut w = vec![0.0; cands.len()];
         for (i, &c) in cands.iter().enumerate() {
             let src = &self.sources[c];
-            if src.contains(x, z) {
-                let t = src.tile;
-                let (fx, fz) = ((x - src.at[0]) / src.spacing, (z - src.at[1]) / src.spacing);
-                let (h, surface) = tiles[t].ground_in(&terrains[t], src.keep, fx, fz).unwrap_or((0.0, 0));
-                w[i] = 1.0;
-                return Point { h, surface, w, near: 0.0 };
+            for sh in &shifts {
+                let (x, z) = (x - sh[0], z - sh[1]);
+                if src.contains(x, z) {
+                    let t = src.tile;
+                    let (fx, fz) = ((x - src.at[0]) / src.spacing, (z - src.at[1]) / src.spacing);
+                    let (h, surface) = tiles[t].ground_in(&terrains[t], src.keep, fx, fz).unwrap_or((0.0, 0));
+                    w[i] = 1.0;
+                    return Point { h, surface, w, near: 0.0 };
+                }
             }
         }
+        // Each (candidate, image) a term, candidates in order and each one's images in [`images`]' order.
+        let terms: Vec<(usize, f64, f64)> =
+            (0..cands.len()).flat_map(|i| shifts.iter().map(move |sh| (i, x - sh[0], z - sh[1]))).collect();
         // The distances first (cheap), then a tile's extension only where its weight is not 0: the
         // nearest, and the ones within their radius. Pruned or not, the sums see the same terms in the
         // same order (a weight of 0 adds nothing), so the ground is the same to the bit.
-        let ds: Vec<f64> = cands.iter().map(|&c| self.sources[c].extend_distance(x, z)).collect();
+        let ds: Vec<f64> = terms.iter().map(|&(i, x, z)| self.sources[cands[i]].extend_distance(x, z)).collect();
         let ni = (0..ds.len()).min_by(|a, b| ds[*a].total_cmp(&ds[*b])).expect("a point has a candidate");
-        let say = |i: usize| !self.prune || i == ni || ds[i] - step < self.radii[cands[i]];
-        let reach: Vec<Option<crate::Reach>> = (0..cands.len())
-            .map(|i| {
-                say(i).then(|| {
+        let say = |e: usize| !self.prune || e == ni || ds[e] - step < self.radii[cands[terms[e].0]];
+        let reach: Vec<Option<crate::Reach>> = (0..terms.len())
+            .map(|e| {
+                say(e).then(|| {
+                    let (i, x, z) = terms[e];
                     let r = self.sources[cands[i]].extend(x, z, step, self.fade);
-                    debug_assert_eq!(r.d.to_bits(), ds[i].to_bits(), "extend_distance is extend's d");
+                    debug_assert_eq!(r.d.to_bits(), ds[e].to_bits(), "extend_distance is extend's d");
                     r
                 })
             })
             .collect();
         let nearest = reach[ni].expect("the nearest is always extended");
         if nearest.d <= step * (1.0 + 1e-9) {
-            w[ni] = 1.0;
+            w[terms[ni].0] = 1.0;
             return Point { h: nearest.h, surface: nearest.surface, w, near: nearest.d };
         }
+        let mut we = vec![0.0; terms.len()];
         let mut sum = 0.0;
-        for (i, r) in reach.iter().enumerate() {
+        for (e, r) in reach.iter().enumerate() {
             if let Some(r) = r {
-                w[i] = shepard(r.d - step, self.radii[cands[i]]);
-                sum += w[i];
+                we[e] = shepard(r.d - step, self.radii[cands[terms[e].0]]);
+                sum += we[e];
             }
         }
         if sum == 0.0 {
-            w[ni] = 1.0;
+            we[ni] = 1.0;
             sum = 1.0;
         }
         let mut h = 0.0;
-        for (i, r) in reach.iter().enumerate() {
+        for (e, r) in reach.iter().enumerate() {
             if let Some(r) = r {
-                w[i] /= sum;
-                h += w[i] * r.h;
+                let share = we[e] / sum;
+                w[terms[e].0] += share;
+                h += share * r.h;
             }
         }
         Point { h, surface: nearest.surface, w, near: nearest.d }
@@ -644,7 +707,11 @@ impl Plan {
     /// the interior less that source's gate there. The rideable gate holds a cell to `max_slope` where
     /// this is above 0 at its corners. `srcs` are the sources that can be nearer than their gate.
     pub fn clear(&self, srcs: &[usize], x: f64, z: f64) -> f64 {
-        srcs.iter().map(|&c| self.sources[c].distance(x, z) - self.sources[c].gate_at(x, z)).fold(f64::INFINITY, f64::min)
+        let shifts = images(self.period);
+        srcs.iter()
+            .flat_map(|&c| shifts.iter().map(move |sh| (c, x - sh[0], z - sh[1])))
+            .map(|(c, x, z)| self.sources[c].distance(x, z) - self.sources[c].gate_at(x, z))
+            .fold(f64::INFINITY, f64::min)
     }
 
     /// The sources whose seam gate reaches into a world rectangle grown by `margin`.
@@ -652,7 +719,7 @@ impl Plan {
         (0..self.sources.len())
             .filter(|&c| {
                 let g = self.sources[c].gates.iter().copied().fold(0.0, f64::max);
-                rect_gap(rect, self.sources[c].rect) < g + margin
+                wrapped_gap(rect, self.sources[c].rect, self.period) < g + margin
             })
             .collect()
     }
@@ -667,7 +734,7 @@ impl Plan {
         self.bins
             .over([rect[0] - step, rect[1] - step, rect[2] + step, rect[3] + step])
             .into_iter()
-            .filter(|&c| rect_gap(rect, self.sources[c].rect) <= self.radii[c] + 2.0 * step)
+            .filter(|&c| wrapped_gap(rect, self.sources[c].rect, self.period) <= self.radii[c] + 2.0 * step)
             .collect()
     }
 

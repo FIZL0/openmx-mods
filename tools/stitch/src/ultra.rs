@@ -306,6 +306,9 @@ pub struct UltraPlan {
     pub radii: Vec<f64>,
     pub fade: f64,
     pub widen: f64,
+    /// On each axis the map wraps round, its length (`size × spacing`), else 0 (C12, build's
+    /// `Plan::period`): every world is also seen a period either way.
+    pub period: [f64; 2],
 }
 
 /// The ground at one lattice point outside every world's interior (or on its edge, or one step in).
@@ -385,6 +388,9 @@ pub fn plan(worlds: &[World], gates: &[[f64; 4]], p: &Params, widen: f64) -> Res
     let rows = g.len();
     let mut at = vec![[0.0; 2]; worlds.len()];
     let mut far = [0.0f64; 2];
+    let wraps = p.wraps();
+    // On a wrapped axis, each row's (column's) last world and its first, and the gap they need (C12).
+    let mut across: [Vec<(usize, usize, f64)>; 2] = [Vec::new(), Vec::new()];
     for axis in 0..2 {
         let lines = if axis == 0 { cols } else { rows };
         let members = |l: usize| -> Vec<usize> { if axis == 0 { g.iter().filter_map(|r| r[l]).collect() } else { g[l].iter().flatten().copied().collect() } };
@@ -401,24 +407,38 @@ pub fn plan(worlds: &[World], gates: &[[f64; 4]], p: &Params, widen: f64) -> Res
             }
             far[axis] = far[axis].max(end);
             let mut gap = p.min_gap * widen;
+            let room = |w: usize, e: usize| gates[w][e] - (step + 2.0 * p.fade);
+            let need = |a: usize, b: usize| gap_for(worlds[a].ring.edge_mean(axis + 2) - worlds[b].ring.edge_mean(axis), p, room(a, axis + 2) + room(b, axis), widen);
             if l + 1 < lines {
                 let pairs: Vec<(Option<usize>, Option<usize>)> =
                     if axis == 0 { g.iter().map(|r| (r[l], r[l + 1])).collect() } else { (0..cols).map(|c| (g[l][c], g[l + 1][c])).collect() };
                 for (a, b) in pairs {
                     if let (Some(a), Some(b)) = (a, b) {
-                        let dh = worlds[a].ring.edge_mean(axis + 2) - worlds[b].ring.edge_mean(axis);
-                        let room = |w: usize, e: usize| gates[w][e] - (step + 2.0 * p.fade);
-                        gap = gap.max(gap_for(dh, p, room(a, axis + 2) + room(b, axis), widen));
+                        gap = gap.max(need(a, b));
+                    }
+                }
+            } else if wraps[axis] {
+                let runs: Vec<Vec<usize>> =
+                    if axis == 0 { g.iter().map(|r| r.iter().flatten().copied().collect()).collect() } else { (0..cols).map(|c| (0..rows).filter_map(|r| g[r][c]).collect()).collect() };
+                for run in runs {
+                    if let (Some(&b), Some(&a)) = (run.first(), run.last()) {
+                        across[axis].push((a, b, need(a, b)));
                     }
                 }
             }
             cursor = end + gap;
         }
     }
-    let size = far.map(|f| crate::build::whole_samples((f / step).round() as u32, step));
     let sources: Vec<Source> = worlds.iter().enumerate().map(|(i, w)| w.source(i, at[i], gates[i])).collect();
-    let radii = crate::build::radii(&sources, size, step);
-    Ok(UltraPlan { spacing: step, size, at, cell, sources, radii, fade: p.fade, widen })
+    // A wrapped axis runs on past the last world until each pair across the wrap has its gap.
+    let size = [0, 1].map(|a| {
+        let end = across[a].iter().map(|&(t, u, g)| sources[t].rect[a + 2] + g - sources[u].rect[a]).fold(far[a], f64::max);
+        let n = if end > far[a] { (end / step).ceil() } else { (far[a] / step).round() };
+        crate::build::whole_samples(n as u32, step)
+    });
+    let period = [0, 1].map(|a| if wraps[a] { f64::from(size[a]) * step } else { 0.0 });
+    let radii = crate::build::radii(&sources, size, step, period);
+    Ok(UltraPlan { spacing: step, size, at, cell, sources, radii, fade: p.fade, widen, period })
 }
 
 /// One new join piece to compute: lattice origin and cells a side.
@@ -436,15 +456,35 @@ pub struct UPiece {
 impl UltraPlan {
     /// The world whose closed rectangle holds a world point.
     fn inside(&self, x: f64, z: f64) -> Option<usize> {
-        self.sources.iter().position(|s| s.contains(x, z))
+        self.inside_image(x, z).map(|(i, _)| i)
+    }
+
+    /// The world whose closed rectangle, or one of its images on a map that wraps, holds a world point,
+    /// and the image's shift.
+    fn inside_image(&self, x: f64, z: f64) -> Option<(usize, [f64; 2])> {
+        let shifts = crate::build::images(self.period);
+        self.sources.iter().enumerate().find_map(|(i, s)| shifts.iter().find(|sh| s.contains(x - sh[0], z - sh[1])).map(|sh| (i, *sh)))
+    }
+
+    /// The point as seen from world `i`'s nearest image (itself on a map that does not wrap).
+    fn near_image(&self, i: usize, x: f64, z: f64) -> (f64, f64) {
+        let s = &self.sources[i];
+        crate::build::images(self.period)
+            .into_iter()
+            .map(|sh| (x - sh[0], z - sh[1]))
+            .min_by(|a, b| s.distance(a.0, a.1).total_cmp(&s.distance(b.0, b.1)))
+            .expect("one image")
     }
 
     /// The ground at a lattice point: a world's own on its edge or one step in, else the blend of the
-    /// worlds' extensions (build's `Plan::blend`, every world a candidate). `None` deeper in a world.
+    /// worlds' extensions (build's `Plan::blend`, every world a candidate, from each of its images on a
+    /// map that wraps). `None` deeper in a world. A world's foot (its look) is its nearest image's.
     fn at(&self, worlds: &[World], x: f64, z: f64) -> Option<Pt> {
         let n = self.sources.len();
         let step = self.spacing;
-        let foot = |src: &Source| -> (usize, usize) {
+        let foot = |i: usize| -> (usize, usize) {
+            let src = &self.sources[i];
+            let (x, z) = self.near_image(i, x, z);
             let [x0, z0, x1, z1] = src.keep.map(f64::from);
             let qx = ((x - src.at[0]) / src.spacing).clamp(x0, x1);
             let qz = ((z - src.at[1]) / src.spacing).clamp(z0, z1);
@@ -459,44 +499,54 @@ impl UltraPlan {
                 (3, qx.round() as usize)
             }
         };
-        if let Some(i) = self.inside(x, z) {
+        if let Some((i, sh)) = self.inside_image(x, z) {
             let src = &self.sources[i];
+            let (x, z) = (x - sh[0], z - sh[1]);
             let (ix, iz) = (((x - src.at[0]) / step).round() as u32, ((z - src.at[1]) / step).round() as u32);
             let h = worlds[i].band_height(ix, iz)?;
-            let f = foot(src);
+            let f = foot(i);
             let mut w = vec![0.0; n];
             w[i] = 1.0;
             let surface = src.ring.edges[f.0][f.1].surface;
-            return Some(Pt { h, surface, w, foot: self.sources.iter().map(foot).collect(), near: 0.0 });
+            return Some(Pt { h, surface, w, foot: (0..n).map(foot).collect(), near: 0.0 });
         }
-        let ds: Vec<f64> = self.sources.iter().map(|s| s.extend_distance(x, z)).collect();
-        let ni = (0..n).min_by(|a, b| ds[*a].total_cmp(&ds[*b])).expect("a world");
-        let feet: Vec<(usize, usize)> = self.sources.iter().map(foot).collect();
+        let shifts = crate::build::images(self.period);
+        let terms: Vec<(usize, f64, f64)> = (0..n).flat_map(|i| shifts.iter().map(move |sh| (i, x - sh[0], z - sh[1]))).collect();
+        let ds: Vec<f64> = terms.iter().map(|&(i, x, z)| self.sources[i].extend_distance(x, z)).collect();
+        let ne = (0..ds.len()).min_by(|a, b| ds[*a].total_cmp(&ds[*b])).expect("a world");
+        let ni = terms[ne].0;
+        let feet: Vec<(usize, usize)> = (0..n).map(foot).collect();
         let surface = self.sources[ni].ring.edges[feet[ni].0][feet[ni].1].surface;
-        let reach: Vec<Option<crate::Reach>> =
-            (0..n).map(|i| (i == ni || ds[i] - step < self.radii[i]).then(|| self.sources[i].extend(x, z, step, self.fade))).collect();
-        let nearest = reach[ni].expect("the nearest is always extended");
+        let reach: Vec<Option<crate::Reach>> = (0..terms.len())
+            .map(|e| {
+                let (i, x, z) = terms[e];
+                (e == ne || ds[e] - step < self.radii[i]).then(|| self.sources[i].extend(x, z, step, self.fade))
+            })
+            .collect();
+        let nearest = reach[ne].expect("the nearest is always extended");
         let mut w = vec![0.0; n];
         if nearest.d <= step * (1.0 + 1e-9) {
             w[ni] = 1.0;
             return Some(Pt { h: nearest.h, surface, w, foot: feet, near: nearest.d });
         }
+        let mut we = vec![0.0; terms.len()];
         let mut sum = 0.0;
-        for (i, r) in reach.iter().enumerate() {
+        for (e, r) in reach.iter().enumerate() {
             if let Some(r) = r {
-                w[i] = shepard(r.d - step, self.radii[i]);
-                sum += w[i];
+                we[e] = shepard(r.d - step, self.radii[terms[e].0]);
+                sum += we[e];
             }
         }
         if sum == 0.0 {
-            w[ni] = 1.0;
+            we[ne] = 1.0;
             sum = 1.0;
         }
         let mut h = 0.0;
-        for (i, r) in reach.iter().enumerate() {
+        for (e, r) in reach.iter().enumerate() {
             if let Some(r) = r {
-                w[i] /= sum;
-                h += w[i] * r.h;
+                let share = we[e] / sum;
+                w[terms[e].0] += share;
+                h += share * r.h;
             }
         }
         Some(Pt { h, surface, w, foot: feet, near: nearest.d })
@@ -504,7 +554,11 @@ impl UltraPlan {
 
     /// How far a point is past every world's seam gate (build's `Plan::clear`).
     fn clear(&self, x: f64, z: f64) -> f64 {
-        self.sources.iter().map(|s| s.distance(x, z) - s.gate_at(x, z)).fold(f64::INFINITY, f64::min)
+        let shifts = crate::build::images(self.period);
+        self.sources
+            .iter()
+            .flat_map(|s| shifts.iter().map(move |sh| s.distance(x - sh[0], z - sh[1]) - s.gate_at(x - sh[0], z - sh[1])))
+            .fold(f64::INFINITY, f64::min)
     }
 
     /// The new join pieces: the ground outside every world, cut along every world's edges into
@@ -621,11 +675,11 @@ fn piece(plan: &UltraPlan, worlds: &[World], tile_of: &[Vec<usize>], n_tiles: us
             // world's edge is the right one.
             let r = spec.inner.map(|v| f64::from(v) * step);
             let edge = || plan.at(worlds, x.clamp(r[0], r[2]), z.clamp(r[1], r[3]));
-            let deep = |wi: usize| worlds[wi].ground(x - plan.at[wi][0], z - plan.at[wi][1], &mut files.borrow_mut());
-            let pt = match (plan.inside(x, z), plan.at(worlds, x, z)) {
+            let deep = |wi: usize, sh: [f64; 2]| worlds[wi].ground(x - sh[0] - plan.at[wi][0], z - sh[1] - plan.at[wi][1], &mut files.borrow_mut());
+            let pt = match (plan.inside_image(x, z), plan.at(worlds, x, z)) {
                 (None, Some(pt)) => Some(pt),
                 (Some(_), Some(pt)) => edge().map(|e| Pt { h: pt.h, ..e }),
-                (Some(wi), None) => edge().map(|e| Pt { h: deep(wi).unwrap_or(e.h), ..e }),
+                (Some((wi, sh)), None) => edge().map(|e| Pt { h: deep(wi, sh).unwrap_or(e.h), ..e }),
                 (None, None) => edge(),
             }
             .ok_or_else(|| format!("{}: ({x}, {z}) is deep inside a world", spec.name))?;

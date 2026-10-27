@@ -359,3 +359,39 @@ coming down that map's ridge); from 150 ft inside every outer side, straight out
 each 151–153 ft from the world's edge. A shot from 580 ft inside mxu_free06 towards mxu_free10 shows
 one ridge with the next map beyond it. `OPENMX_WORLDS` set, the test copies the world to
 `$OPENMX_WORLDS/tracks/world_mxu_free` for openmx's own `world_joins` test.
+
+## Wrapped worlds (C12)
+
+Every spec carries `"wrap": "xz"` (openmx MD29): riding off one edge comes in at the other. openmx closes
+each wrapped axis itself: a strip of game-sim seam joins (`generate::seam_joins`) past the far edge, 15
+cells of the coarsest whole spacing that divides the side (1 ft on a 4.5 ft world, so 15 ft; 9 ft on
+world_mxu_free), its ground straight from the far edge's to the near edge's.
+
+- **The holes the user saw were C11's strips**, not the wrap: the installed worlds were built on
+  2026-10-23 before C11's leaf overlap, and every hole was the 4.5 ft last cell of a 256-cell join, every
+  1152 ft (2189 on world_mxu; the wrap's seam joins only add cut lines to `Tiled::holes`, 5052). Any
+  world built since C11 has none.
+- **What the wrap broke was the ground across it.** Built with edges, the far edge is the last row's
+  extension and the near edge the first row's; the snake layout puts the highest row last and the
+  lowest first, so world_mxu's strip had to climb 193 ft in 15 ft (130 ft on x).
+- **The field is a torus on a wrapped axis** (`Plan::period`, `images`): each tile is also heard a
+  period (`size × spacing`) either way, its Shepard weight summed over its images, and the distances
+  (radii, bins, candidates, gates) are to the nearest image. The ground at the far edge is the near
+  edge's, and the last row and column of tiles meet the first through a blend as any two lines do. The
+  layout gives each pair across the wrap (a row's last tile and its first) `gap_for`'s gap, and the
+  widening (C9) widens it. A world with no `wrap` is the same to the bit. The ultra map likewise
+  (`UltraPlan::period`).
+- openmx's extent is `size × spacing − spacing` (it drops the last cell), so its strip starts at the
+  whole foot under that, up to 5 ft short of the period: the strip runs from h(W − 5) to h(0) = h(W), a
+  kink of a few tenths of a foot, no step.
+- The images reach into the edge bands: world_mxu now widens to 2.441 (1.5625 before), 41,733 ×
+  38,898 ft, 1,059 lattice joins. world_mxvatv 1.953 and world_untamed 2.441 as before; the ultra map
+  3.815 (4.768 in C11), 121,140 × 40,050 ft.
+- `stitch check` compares a wrapped world's near-edge join samples with the far edge's (worst on the
+  five: 0.0070 ft). `stitch holes WORLD_DIR...` loads a world as openmx does, closes its wrap as openmx
+  does (`stitch::openmx::World::closed`) and prints game-sim's `Tiled::holes` count (openmx's
+  `world holes:` line) and the steepest step across the seams, half a foot a step.
+- On the five (2026-10-27): 0 holes, every point across the seams has ground, steepest step 0.105–0.172
+  ft in half a foot; openmx 09da0164 says `world holes: none` on all five; 30 rides on the gas across
+  the wraps (3 lines per axis per world) all cross, none thrown, 7 with one wreck 543–1078 ft past the
+  wrap on the first tile's own ground.

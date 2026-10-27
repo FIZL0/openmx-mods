@@ -152,6 +152,7 @@ fn params(j: &modcheck::json::Json) -> Params {
     let g = |k: &str| j.get(k).and_then(Json::str).map(str::to_owned);
     let mut p = Params::new(&g("id").unwrap(), &g("name").unwrap());
     p.sky = g("sky");
+    p.wrap = g("wrap");
     p.todo = j.get("todo").and_then(Json::arr).unwrap_or_default().iter().filter_map(Json::str).map(str::to_owned).collect();
     for (k, v) in [("max_slope", &mut p.max_slope), ("min_gap", &mut p.min_gap), ("fade", &mut p.fade)] {
         if let Some(n) = j.get(k).and_then(Json::num) {
