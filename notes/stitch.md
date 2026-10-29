@@ -37,6 +37,9 @@ up in `--mods`/tracks/. A spec whose tiles are not all built is skipped with a l
    stands over 10 ft above the berm and falls over 10 ft again inward of it, the side is cut at the peak
    instead. Of the 123 maps of the three discs only MX Unleashed's five freeride maps have such a side
    (all four of theirs). The world's `todo` names the tile and the sides.
+   **No seam runs through rock** (openmx MD53, `Tile::rock_cut`): while a side's cut line is steeper than
+   `ROCK` (3 ft a foot) across it anywhere along its kept span, the side whose nearest gentle line inward
+   costs the least ground moves to it. The world's `todo` names the tile, the sides and the feet.
 2. **The layout** (`build::plan`). Tiles are sorted by the mean height of their interior's edge and
    laid in a near-square grid, filled snake-wise, so neighbours are close in height. Each gap is
    `max(min_gap, 1.6 |Δh| / max_slope + room_a + room_b)`, where Δh is between the two facing edges and
@@ -359,3 +362,31 @@ coming down that map's ridge); from 150 ft inside every outer side, straight out
 each 151–153 ft from the world's edge. A shot from 580 ft inside mxu_free06 towards mxu_free10 shows
 one ridge with the next map beyond it. `OPENMX_WORLDS` set, the test copies the world to
 `$OPENMX_WORLDS/tracks/world_mxu_free` for openmx's own `world_joins` test.
+
+## Rock at a cut (openmx MD53)
+
+openmx's `--seams` (MD47) put world_mxu's steepest step, 4.14 ft, where mxu_nat17 meets j017_023. The
+join met the tile there to the quantum, as everywhere (`stitch check`: worst height step 0.003 ft).
+What the walk read was slope: its rays sit an eighth of a foot either side of the seam, and nat17's own
+last cell there was 16.6 ft a foot. nat17 stands a mountain about 900 ft square in its x1/z1 corner, 8
+to 30 ft a foot through every line across it for 219 samples in, and the berm cut (34 samples, the
+shootoff band) ran through it on both sides. The joins beside it were held steep for 2808 ft (its z1
+seam gate). Two changes:
+
+- **The cut moves past rock** (`ROCK`, `Tile::past_rock`). nat17's x1 moves in 219 samples (985 ft),
+  which also takes the mountain off its z1 line. Its gates go from 392/315/1206/2808 ft to
+  378/270/266/288. At 3 ft a foot (the walk's 0.75 ft), nat10's x1 moves 1 sample, nat20's z0 2 and
+  x1 1, and nat21's x1 6. Those lines were 3.05 to 3.72. No tile of MX vs. ATV's or Untamed's worlds
+  moves.
+- **The edge slope is blurred faster than the height** (`Source::extend`: σ = d′ for the slope,
+  d′²/(d′ + fade) for the height, both 0 on the pinned ring). The extension is the edge's height plus
+  its last cell's slope times the taper. That slope is ragged from sample to sample, and with the
+  taper's ~50 ft it stood ribs along the join: 3.7 ft a foot 27 ft out beside nat17's x0 edge, where the
+  tile is 1.7 at its edge and 0.1 inside. The seam's height and slope stay the tile's (the pinned ring
+  is untouched).
+
+world_mxu (on C12's stitch): 721 pieces (806 before), 37792 × 31960 ft, near-seam join slope 5.20
+(46.3), `--seams` steepest step 0.700 ft at a j023_011 | mxu_nat20 seam, 0.106 across the wrap, no gaps,
+no holes. `tests/rock.rs`: a map with a rock corner is cut past it; its world's seam walk stays under
+0.75 ft (6.8 ft without the cut).
+

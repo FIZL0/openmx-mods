@@ -1172,6 +1172,19 @@ pub fn build(tile_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, Str
                 plan.placed[i].keep
             )));
         }
+        let rock = t.rock_cut();
+        if rock.iter().any(|r| *r > 0) {
+            let sides: Vec<String> =
+                ["x0", "z0", "x1", "z1"].iter().zip(rock).filter(|(_, r)| *r > 0).map(|(n, r)| format!("{n} by {:.0} ft", f64::from(r) * t.spacing)).collect();
+            todo.push(s(format!(
+                "{}: cut past a rock face (ground steeper than {} ft a foot across the berm's cut line, openmx MD53) on {}, \
+                 keep {:?}: the ground between, the map's own, is not in the world, and a join stands in its place",
+                t.id,
+                crate::ROCK,
+                sides.join(" "),
+                plan.placed[i].keep
+            )));
+        }
     }
     for c in &plan.collars {
         todo.push(s(format!(

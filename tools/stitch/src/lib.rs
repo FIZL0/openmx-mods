@@ -52,6 +52,13 @@ pub const RIDGE_RISE: f64 = 10.0;
 pub const RIDGE_PLATEAU: f64 = 2.0 * SHOOTOFF;
 /// How far from the berm's height the plateau may stray, feet.
 pub const RIDGE_FLAT: f64 = 1.0;
+/// Ground steeper than this across a cut line, feet per foot (72°: no bike climbs it), is a rock face,
+/// and no seam runs through one ([`Tile::find_cut`], openmx MD53). The join's first cell takes the tile's
+/// last cell's slope, so openmx's `--seams`, rays an eighth of a foot either side of the seam, reads a
+/// quarter of it as a step: this is its 0.75 ft. nat17's corner mountain is 10 to 30 a foot through every
+/// line across it; the berm cuts of nat10, nat20 and nat21 were 3.05 to 3.72 and move in 1 to 6 samples;
+/// no map of MX vs. ATV's or Untamed's worlds moves.
+pub const ROCK: f64 = 3.0;
 
 /// One track mod folder read for joining.
 pub struct Tile {
@@ -302,7 +309,25 @@ impl Tile {
     }
 
     /// [`Tile::find_keep`]'s interior, and which sides (x0, z0, x1, z1) it cut at a ridge.
+    ///
+    /// A side whose cut would run through a rock face is then cut farther in, past it ([`Tile::rock_cut`]).
     pub fn find_cut(&self) -> ([u32; 4], [bool; 4]) {
+        let g = self.ground;
+        let (mut band, ridged) = self.berm_cut();
+        let rock = self.past_rock(&self.terrain(), band);
+        (0..4).for_each(|side| band[side] += rock[side]);
+        ([g[0] + band[0], g[1] + band[1], g[2] - band[2], g[3] - band[3]], ridged)
+    }
+
+    /// How many samples farther in than its berm (or ridge) [`Tile::find_cut`] cuts each side, past a
+    /// rock face: 0 on every side of most maps.
+    pub fn rock_cut(&self) -> [u32; 4] {
+        self.past_rock(&self.terrain(), self.berm_cut().0)
+    }
+
+    /// Each side's band in samples from the [`Tile::ground`]'s side, berm or ridge, and which it cut at a
+    /// ridge.
+    fn berm_cut(&self) -> ([u32; 4], [bool; 4]) {
         let t = self.terrain();
         let s = self.spacing;
         let g = self.ground;
@@ -325,7 +350,54 @@ impl Tile {
             ridged[side] = ridge.is_some();
             *b = ridge.unwrap_or(d) as u32;
         }
-        ([g[0] + band[0], g[1] + band[1], g[2] - band[2], g[3] - band[3]], ridged)
+        (band, ridged)
+    }
+
+    /// The samples each side of `band` is cut farther in so that no seam runs through a rock face
+    /// (openmx MD53): while some side's cut line has ground steeper than [`ROCK`] across it (its last
+    /// cell, anywhere along the side's kept span), the side whose nearest line inward that is not steep
+    /// costs the least ground is moved to that line, until none is steep or no steep side can move
+    /// (within a quarter of the map, as the berm is). MX Unleashed's nat17 stands a mountain about 900 ft
+    /// square in its x1/z1 corner, 10 to 30 ft a foot through every line across it, and its seam there
+    /// was a 4 ft step between rays a quarter of a foot apart.
+    fn past_rock(&self, t: &Terrain, band: [u32; 4]) -> [u32; 4] {
+        let g = self.ground;
+        let mut b = band;
+        let side_len = |side: usize| if side % 2 == 0 { g[2] - g[0] } else { g[3] - g[1] };
+        // The steepest slope across side `side`'s line `d` samples in, over the other sides' kept span.
+        let steep = |b: &[u32; 4], side: usize, d: u32| -> f64 {
+            let (lo, hi) = if side % 2 == 0 { (g[1] + b[1], g[3] - b[3]) } else { (g[0] + b[0], g[2] - b[2]) };
+            let mut most = 0.0f64;
+            for a in lo..=hi {
+                let (p, q) = match side {
+                    0 => (self.sample(t, g[0] + d, a), self.sample(t, g[0] + d + 1, a)),
+                    1 => (self.sample(t, a, g[1] + d), self.sample(t, a, g[1] + d + 1)),
+                    2 => (self.sample(t, g[2] - d, a), self.sample(t, g[2] - d - 1, a)),
+                    _ => (self.sample(t, a, g[3] - d), self.sample(t, a, g[3] - d - 1)),
+                };
+                most = most.max((p - q).abs() / self.spacing);
+            }
+            most
+        };
+        loop {
+            let mut best: Option<(u64, usize, u32)> = None;
+            for side in 0..4 {
+                if steep(&b, side, b[side]) <= ROCK {
+                    continue;
+                }
+                let span = u64::from(side_len(1 - side % 2) - b[(side + 1) % 4] - b[(side + 3) % 4]);
+                let cap = side_len(side % 2) / 4;
+                if let Some(d) = (b[side] + 1..=cap).find(|&d| steep(&b, side, d) <= ROCK) {
+                    let cost = u64::from(d - b[side]) * span;
+                    if best.is_none_or(|(c, _, _)| cost < c) {
+                        best = Some((cost, side, d));
+                    }
+                }
+            }
+            let Some((_, side, d)) = best else { break };
+            b[side] = d;
+        }
+        (0..4).map(|side| b[side] - band[side]).collect::<Vec<_>>().try_into().expect("four sides")
     }
 
     /// The peak of a ridge in a side's `profile` (samples `spacing` feet apart) past the berm at `berm`,
@@ -734,17 +806,25 @@ impl Source {
         // σ = d′² / (d′ + fade) feet, so a hill cut by the edge does not run on as a ridge forever.
         let dp = (d - step).max(0.0);
         let sigma = dp * dp / (dp + fade) / s;
+        // The slope is blurred faster, over d′ either way (openmx MD53): it is one cell's, ragged from
+        // sample to sample, and times the taper it stood ribs across the join several feet a foot steep
+        // along an edge whose own ground was gentle (3.7 beside nat17's 1.7 and 0.1, 27 ft out).
+        let sigma_g = dp / s;
+        let blurred = |edge: usize, a: f64| {
+            let (h, g) = (self.ring.blurred(edge, a, sigma), self.ring.blurred(edge, a, sigma_g));
+            [h[0], g[1], g[2]]
+        };
         let (vert, horiz) = (if fx < x0 { Some(0) } else if fx > x1 { Some(2) } else { None }, if fz < z0 { Some(1) } else if fz > z1 { Some(3) } else { None });
         let (e, surface) = match (vert, horiz) {
             (Some(v), Some(h)) => {
                 // A corner: the two edges' ends, by the angle out of it (each alone on its side's line).
-                let a = self.ring.blurred(v, qz - z0, sigma);
-                let b = self.ring.blurred(h, qx - x0, sigma);
+                let a = blurred(v, qz - z0);
+                let b = blurred(h, qx - x0);
                 let (wa, wb) = (ux * ux / (d * d), uz * uz / (d * d));
                 ([0, 1, 2].map(|i| wa * a[i] + wb * b[i]), self.ring.along(v, qz - z0).surface)
             }
-            (Some(v), None) => (self.ring.blurred(v, qz - z0, sigma), self.ring.along(v, qz - z0).surface),
-            (None, Some(h)) => (self.ring.blurred(h, qx - x0, sigma), self.ring.along(h, qx - x0).surface),
+            (Some(v), None) => (blurred(v, qz - z0), self.ring.along(v, qz - z0).surface),
+            (None, Some(h)) => (blurred(h, qx - x0), self.ring.along(h, qx - x0).surface),
             (None, None) => {
                 let e = self.ring.along(0, qz - z0);
                 ([e.h, e.gx, e.gz], e.surface)
