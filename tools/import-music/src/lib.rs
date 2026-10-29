@@ -21,6 +21,11 @@
 #[allow(dead_code, unused_imports, unused_mut, unused_variables, clippy::all)]
 pub mod audio;
 
+/// openmx's `crates/openmx/src/thread.rs`, which audio.rs's player spawns through (`crate::thread`).
+#[path = "../../../openmx/crates/openmx/src/thread.rs"]
+#[allow(dead_code, unused_imports)]
+mod thread;
+
 use audio::{Adpcm, Clip, Stream};
 use game_render::ini;
 use std::path::{Path, PathBuf};
