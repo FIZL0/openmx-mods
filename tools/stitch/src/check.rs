@@ -450,6 +450,11 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
             _ => [base; 4],
         })
         .collect();
+    // On a wrapped axis a tile's edge is also across the wrap, a period (the joins' far edge) on
+    // (openmx MD54): the join ground just inside the near edge is the last tile's taper.
+    let wrap = meta.get("wrap").and_then(Json::str).unwrap_or("");
+    let period = [0, 1].map(|a| if wrap.contains(["x", "z"][a]) { joins.iter().map(|j| j.rect()[a + 2]).fold(0.0, f64::max) } else { 0.0 });
+    let shifts = crate::build::images(period);
     // An ultra map's new joins (no world's prefix) are held past each world's gates too.
     let clear = |x: f64, z: f64, new: bool| -> f64 {
         let past_worlds = if new {
@@ -466,6 +471,7 @@ pub fn check(dir: &Path, mods: Option<&Path>, iso: Option<PathBuf>) -> Report {
         rects
             .iter()
             .zip(&gates)
+            .flat_map(|(a, g)| shifts.iter().map(move |sh| ([a[0] + sh[0], a[1] + sh[1], a[2] + sh[0], a[3] + sh[1]], g)))
             .map(|(a, g)| {
                 let (ux, uz) = ((a[0] - x).max(x - a[2]).max(0.0), (a[1] - z).max(z - a[3]).max(0.0));
                 let v = if x < a[0] { Some(g[0]) } else if x > a[2] { Some(g[2]) } else { None };

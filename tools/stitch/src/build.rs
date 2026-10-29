@@ -411,9 +411,14 @@ pub fn plan(tiles: &[Tile], cuts: &[[u32; 4]], gates: &[[f64; 4]], p: &Params, w
         })
         .collect();
     // A wrapped axis ends far enough out that each pair across the wrap has its gap: the band past the
-    // last tile and the band before the first together.
+    // last tile and the band before the first together. It has no outer band, so not the open edge's
+    // pad past the last tile either (openmx MD54), only two lattice cells: openmx drops the lattice's
+    // last cell, and the last tile's edge needs a join cell outside it. The first line's cursor already
+    // starts `pad` or more in (a deep cut's offset, Dallas's 792 ft), and the pad on top made
+    // world_mxu_free's Norfolk→Dallas join 1134 ft where its stitched joins are 135.
     let end = [0, 1].map(|a| {
-        across[a].iter().map(|&(t, u, g)| sources[t].rect[a + 2] + g - sources[u].rect[a]).fold(far[a] + pad, f64::max)
+        let open = if wraps[a] { far[a] + 2.0 * step } else { far[a] + pad };
+        across[a].iter().map(|&(t, u, g)| sources[t].rect[a + 2] + g - sources[u].rect[a]).fold(open, f64::max)
     });
     let size = [0, 1].map(|a| whole_samples((end[a] / step).ceil() as u32, step));
     let period = [0, 1].map(|a| if wraps[a] { f64::from(size[a]) * step } else { 0.0 });

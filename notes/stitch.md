@@ -387,6 +387,15 @@ world_mxu_free), its ground straight from the far edge's to the near edge's.
 - The images reach into the edge bands: world_mxu now widens to 2.441 (1.5625 before), 41,733 ×
   38,898 ft, 1,059 lattice joins. world_mxvatv 1.953 and world_untamed 2.441 as before; the ultra map
   3.815 (4.768 in C11), 121,140 × 40,050 ft.
+- **The wrap join is no wider than it has to be** (openmx MD54). On a wrapped axis the layout leaves
+  no open edge's pad past the last line, only two lattice cells (openmx drops the last, and the last
+  tile's edge needs a join cell outside it): the band before the first line, at least the first tile's
+  cut (a tile's origin is never below 0), is the other half of the join. world_mxu_free shrinks from
+  17415 × 11934 to 17091 × 11610 ft, and openmx's `--seams` reads Norfolk→Dallas as 927 ft of join
+  (1134 before): Dallas's 792 ft cut, 18 ft past Norfolk and openmx's 135 ft seam strip. A stitched join
+  is 135 ft; closing the rest needs openmx to take a tile across the far seam. `stitch check` measures a
+  cell's distance from a tile through the wrap, so the last tile's taper just inside the near edge is
+  held as near its seam. `stitch build --wrap xz` builds one wrapped world by hand.
 - `stitch check` compares a wrapped world's near-edge join samples with the far edge's (worst on the
   five: 0.0070 ft). `stitch holes WORLD_DIR...` loads a world as openmx does, closes its wrap as openmx
   does (`stitch::openmx::World::closed`) and prints game-sim's `Tiled::holes` count (openmx's
