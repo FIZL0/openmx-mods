@@ -34,6 +34,7 @@ disc     SLUS_211.04            import-music   music    A1
 disc     SLUS_217.01            import-music   music    A1
 disc     SLUS_211.04            import-tricks  tricks   M19
 disc     SLUS_217.01            import-tricks  tricks   M19
+disc     SLUS_211.04            import-atv     machines MD37c
 data     -                      elevation      tracks   M1
 after    -                      stitch         tracks   C1
 '

@@ -11,9 +11,10 @@
 //!   `drop` naming a section that exists.
 //! - **music** (§4): every song's file is there.
 //! - **tricks** (§6): every table, `.mcf`, `.MLB` and `.phy` its `mod.json` names is there.
+//! - **machine** (§7): every build's `.sub`, every file `mod.json` names is there.
 //!
 //! A mod copied off a disc is also compared, byte for byte, with the members its `source.members`
-//! names, read off the disc with that `source.boot` through `game_sim::archive::{Psr, Res}` (discx).
+//! names (a `.res` whole, or `OUTER:INNER` for the members of one a glob picks), read off the disc with that `source.boot` through `game_sim::archive::{Psr, Res}` (discx).
 //! A file in the folder that no member accounts for must be named in `todo`.
 //!
 //! Every problem is a `fail`. What was checked in a weaker way than the standard asks, or not at all,
@@ -182,6 +183,10 @@ fn check_into(dir: &Path, discs: &mut Discs, as_tile: bool, r: &mut Report) {
         }
         "tricks" => {
             tricks(dir, &meta, r);
+            copies(dir, &files, &meta, discs, r);
+        }
+        "machine" => {
+            machine(dir, &meta, r);
             copies(dir, &files, &meta, discs, r);
         }
         // §1: any other kind is skipped quietly by the loader, so it is not this check's to fail.
@@ -564,8 +569,12 @@ fn copies(dir: &Path, files: &[String], meta: &Meta, discs: &mut Discs, r: &mut 
     };
     let mut covered: HashSet<String> = HashSet::new();
     let mut compared = 0usize;
+    // A member is looked for at its own path in any case: a pack may spell a folder the disc spells
+    // two ways (`Veh\Tex`, `veh\tex`) one way, so that it has one folder on any file system (§7).
+    let spelt: HashMap<String, &String> = files.iter().map(|f| (f.to_ascii_lowercase(), f)).collect();
     let mut compare = |rel: String, want: &[u8], from: &str, r: &mut Report| {
         compared += 1;
+        let rel = spelt.get(&rel.to_ascii_lowercase()).map(|f| f.to_string()).unwrap_or(rel);
         match std::fs::read(dir.join(&rel)) {
             Err(_) => r.fail.push(format!("{rel}: missing (from {from})")),
             Ok(have) if have == want => {}
@@ -578,8 +587,9 @@ fn copies(dir: &Path, files: &[String], meta: &Meta, discs: &mut Discs, r: &mut 
     };
     for m in &meta.members {
         let mut hits = 0;
+        let pattern = discx::Pattern::parse(m);
         for disc in psrs.iter_mut() {
-            let entries: Vec<_> = disc.matching(m).into_iter().cloned().collect();
+            let entries: Vec<_> = disc.matching(&pattern.outer).into_iter().cloned().collect();
             for e in entries {
                 hits += 1;
                 if e.name.to_ascii_lowercase().ends_with(".res") {
@@ -593,6 +603,9 @@ fn copies(dir: &Path, files: &[String], meta: &Meta, discs: &mut Discs, r: &mut 
                                 ));
                             }
                             for inner in res.entries().to_vec() {
+                                if pattern.inner.as_deref().is_some_and(|g| !discx::glob_match(g, &inner.name)) {
+                                    continue;
+                                }
                                 match res.read(&inner) {
                                     Ok(want) => compare(inner.path(), &want, &format!("{}:{}", e.name, inner.name), r),
                                     Err(err) => r.fail.push(format!("{}:{}: {err}", e.name, inner.name)),
@@ -776,6 +789,48 @@ fn tricks(dir: &Path, meta: &Meta, r: &mut Report) {
         }
     }
     r.note.push("tables and clips not read here: `import-tricks check` reads them back".into());
+}
+
+/// §7, what can be checked without openmx's readers: there are builds, and every file `mod.json`
+/// names is in the pack (in any case: the PSR's names are). The models, clips, cameras and sounds are
+/// read back by `import-atv check` and by openmx's own `tests/machine_packs.rs`.
+fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
+    let j = &meta.json;
+    if j.get("machine").and_then(Json::str).is_none_or(|m| m.trim().is_empty()) {
+        r.fail.push("mod.json: a machine pack says no machine".into());
+    }
+    let builds = j.get("builds").and_then(Json::arr).unwrap_or_default();
+    if builds.is_empty() {
+        r.fail.push("a machine pack has no builds".into());
+    }
+    let mut named: Vec<String> = Vec::new();
+    for b in builds {
+        match b.get("sub").and_then(Json::str) {
+            Some(f) => named.push(f.to_owned()),
+            None => r.fail.push("builds[]: no sub".into()),
+        }
+    }
+    named.extend(j.get("phy").and_then(Json::arr).unwrap_or_default().iter().filter_map(|v| v.str().map(str::to_owned)));
+    if let Some(rd) = j.get("rider") {
+        for k in ["motions", "stunts", "table"] {
+            named.extend(rd.get(k).and_then(Json::str).map(str::to_owned));
+        }
+    }
+    for k in ["cameras", "wreck"] {
+        named.extend(j.get(k).and_then(Json::str).map(str::to_owned));
+    }
+    for (group, keys) in [("sounds", &["engine"][..]), ("particles", &["list", "zones"][..])] {
+        for k in keys {
+            named.extend(j.get(group).and_then(|g| g.get(k)).and_then(Json::str).map(str::to_owned));
+        }
+    }
+    let have: HashSet<String> = files(dir).unwrap_or_default().iter().map(|f| f.to_ascii_lowercase()).collect();
+    for f in named {
+        if !have.contains(&f.replace('\\', "/").to_ascii_lowercase()) {
+            r.fail.push(format!("{f}: named in mod.json, not in the pack"));
+        }
+    }
+    r.note.push("models, clips, cameras and sounds not read here: `import-atv check` reads them back".into());
 }
 
 /// Every mod folder under `root`: `root` itself if it has a `mod.json`, else its children, else

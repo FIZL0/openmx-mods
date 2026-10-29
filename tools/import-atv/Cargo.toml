@@ -1,0 +1,16 @@
+[package]
+name = "import-atv"
+description = "MX vs. ATV Unleashed's quads (models, textures, clips, stunt table, cameras, sounds, particles) as a machine pack (standard §7), each file read back through openmx's own readers"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Every model, material, clip, motion set and emitter list through openmx's own readers, so a pack
+# says what the port makes of it.
+game-render = { path = "../../openmx/crates/game-render", default-features = false }
+discx = { path = "../discx" }
+
+[dev-dependencies]
+# The disc test proves the built pack as build.sh --check does.
+modcheck = { path = "../modcheck" }

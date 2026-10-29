@@ -2,7 +2,7 @@
 
 What a mod for the MX Unleashed port (`openmx`) holds: a **track** (one map from another game or from
 elevation data, §2), a **world** (several tracks joined into one ground, §3), a **music** pack (§4) or a
-**trick** pack (§6). The port's loader is openmx Phase 14: MD2 reads tracks, MD7 music, MD8 and MD9
+**trick** pack (§6) or a **machine** pack (§7). The port's loader is openmx Phase 14: MD2 reads tracks, MD7 music, MD8 and MD9
 worlds; nothing reads trick packs yet (`notes/openmx-asks.md`, M19).
 
 The rule all three keep: **a mod is its source as the source's disc has it.** The files are the source's
@@ -53,7 +53,7 @@ Each mod's folder has a `mod.json` (UTF-8 JSON):
 | field | | what |
 |---|---|---|
 | `standard` | required | `1`. If the number is higher than the loader knows, the mod is skipped with one log line. |
-| `kind` | required | `track`, `world`, `music` or `tricks` (§6). Any other value is skipped quietly. It is not an error. |
+| `kind` | required | `track`, `world`, `music`, `tricks` (§6) or `machine` (§7). Any other value is skipped quietly. It is not an error. |
 | `id` | required | Equal to the folder name. `[a-z0-9_]`, 1–40 characters, `<prefix>_<map>` (table below), never changed once published. The prefix keeps a mod from ever taking a disc track's name (`free06`, `nat01`, `sx01`). |
 | `name` | required | What the track pick or the song list shows. Use the source game's own name for the map where it has one (its UI strings, M8). |
 | `source` | required | Where it came from. `game`: exactly one of the names below, which the track pick filters by (MD11). From a disc: `boot` (the boot ELF in SYSTEM.CNF, AGENTS.md's table) and `members` (the PSR members the files were copied from). From a data set: `data` (product and tile, e.g. `"USGS 3DEP 1 m, n33w115"`) and `date` (when it was fetched). |
@@ -421,3 +421,62 @@ mods/tricks/mxvatv_tricks/
 - Proof: `build.sh --check` (modcheck) compares every file with its member and finds every file
   `mod.json` names; `import-tricks check DIR` reads every table back with the loader's rules and with
   openmx's `Stunts::parse`, and every `.mot` with `skin::Clip::parse`.
+
+## 7. Machine pack (MD37c)
+
+A machine MX Unleashed does not have, as a later game's disc has it: its models and textures, its
+clips and its rider's, its stunt table, cameras, sounds and particles. The one pack so far is MX vs.
+ATV Unleashed's quad, `tools/import-atv`. openmx reads it from `mods/machines/<id>/`
+(`crates/openmx/src/machine_packs.rs`, `openmx --machine-packs`); nothing rides it until the quad's
+step (openmx MD37b) and its pick (MD37d) land.
+
+```
+mods/machines/mxvatv_atv/
+  mod.json                          kind "machine"
+  Veh/Anim/ATVS_R_250_250RTHQ1.sub every member of Veh\vehicletype_1.res, the quad's archive, at its path:
+  Veh/Anim/ATV_SM.mcf                 the builds, the chassis' motion sets, models, parts, collision,
+  Veh/Anim/atvs_r_chasis.psg          the .phy, Aud\vehicle.aud and event.aud, Part\atvparticles.dat
+  Veh/Anim/ATV_Bike_BackFlip.mot    every Veh\Anim\ATV_*.mot loose on the PSR (the quad's own clips)
+  Veh/Tex/250R_CurtisS_01_Plastics.psm  the materials, in the archive (else Veh\Vehicle_mat.res or loose)
+  Veh/Tex/250R_CurtisS_01_Plastics.pst  each material's texture, loose on the PSR or in Veh\Vehicle_tex.res
+  Rider/Anim/ATV_RiderMotions.mcf   Rider\RiderMotionSet_ATV.res whole, and every clip its two sets
+  Rider/Anim/ATV_Cliffhanger.mot      name that is loose instead
+  Rider/Anim/ATV_Rider_Stunts.ini   the stunt table
+  Cam/FC_ATVDefault.pb              the follow cameras GAME_REL.BIN loads, and FC_ATV.ini beside them
+  Aud/Engine/450A/idle04.VAG        every sound vehicle.aud names (no extension: the .VAG)
+```
+
+```json
+{
+  "standard": 1, "kind": "machine", "id": "mxvatv_atv", "name": "MX vs. ATV Unleashed quads", "machine": "atv",
+  "source": {"game": "MX vs. ATV Unleashed", "boot": "SLUS_211.04", "psr": "MXVSATV.PSR",
+             "members": ["Veh\\vehicletype_1.res", "Cam\\CameraPresets.res:Cam\\FC_ATVDefault.pb", "Aud\\Engine\\450A\\idle04.VAG", "…"]},
+  "version": "1.0.0", "author": "openmx-mods tools/import-atv 0.1", "permission": "own-disc",
+  "archive": "Veh\\vehicletype_1.res",
+  "builds": [{"sub": "Veh/Anim/ATVS_R_250_250RTHQ1.sub", "mcf": "ATV_SM.mcf", "chassis": "ATVS_R_Chasis"}, "…"],
+  "phy": ["Veh/atv_Pro250A.phy", "…"],
+  "rider": {"rider": "ATV", "motions": "Rider/Anim/ATV_RiderMotions.mcf", "stunts": "Rider/Anim/ATV_RiderStunts.mcf", "table": "Rider/Anim/ATV_Rider_Stunts.ini"},
+  "bike_clips": "Veh/Anim/ATV_Bike_<name>.mot",
+  "cameras": "Cam/FC_ATVDefault.pb", "cameras_ini": "Cam/FC_ATV.ini",
+  "sounds": {"engine": "Aud/vehicle.aud", "events": "Aud/event.aud"},
+  "particles": {"list": "Part/atvparticles.dat", "ai": "Part/atvaiparticles.dat", "zones": "Part/atvparticlezones.dat"},
+  "wreck": "Veh/Col/WreckATVm.col",
+  "todo": ["the quad's step is openmx MD37b and its pick MD37d: …", "mxvatv_atv: not yet looked at beside MX vs. ATV in PCSX2 (T7)"]
+}
+```
+
+- Every file is a disc member's bytes, at the member's own path. Where the disc spells one folder two
+  ways (`Veh\Tex`, `veh\tex`) the pack spells it the first way it met, so it has one folder on any file
+  system; paths are matched without regard to case, as the game's are.
+- `source.members`: a `.res` copied whole by its name; any other member of a `.res` as `OUTER:INNER`
+  (discx's pattern); a loose file by its PSR name.
+- `builds`: each `.sub`, the motion set its `[Objects] MCF` names, and the chassis model that set's
+  `SLTFile` names. `machine`: what openmx is to ride it as. `rider`: the rider's clip prefix, its riding
+  and stunt motion sets and its stunt table. `cameras`: the follow cameras, sections
+  `[<aspect>/<viewport>/<n>]` (`4x3/1p`, `16x9/2pv`, …).
+- `todo` names every file a build, model, motion set, `vehicle.aud` or particle list names that the
+  disc lacks, and the PCSX2 check (T7).
+- Proof: `build.sh --check` (modcheck) compares every file with its member and finds every file
+  `mod.json` names; `import-atv check DIR` reads every model, clip, texture and sound back with openmx's
+  readers and prints each chassis' nodes; openmx's `tests/machine_packs.rs` loads the pack as the port
+  does.
