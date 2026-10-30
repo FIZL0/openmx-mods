@@ -9,6 +9,7 @@ are the same INI; Untamed's are binary `.bpb`. `notes/mxvatv.md`, `notes/mxvatv-
 
 ### Tooling
 
+- [ ] **T13** stitch builds on openmx's stitcher (after openmx P232; user 2026-10-29: 'can we have the real one here and just have mxmods depend on the stitching?'). openmx P232 moves tools/stitch's core (lib.rs, build.rs, check.rs seams, jsonw.rs) and tools/trnwrite into openmx as crates/stitch and crates/trnwrite, and ships world_mxu and world_mxu_free built from the player's disc. Here: delete the moved code, path-depend on openmx/crates/stitch and openmx/crates/trnwrite (as game-sim is today), keep ultra.rs, the CLI and the import step; stop installing world_mxu and world_mxu_free (openmx makes them), keep world_mxvatv, world_untamed and world_ultra and any new world. build.sh and check.sh green; the other worlds rebuild byte-identical -> tools/stitch · tools/trnwrite · build.sh | t: stitch tests on the openmx crates; world_mxvatv/untamed/ultra joins unchanged
 ### MX vs. ATV Unleashed
 
 
