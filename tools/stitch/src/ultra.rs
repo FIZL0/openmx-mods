@@ -1004,6 +1004,8 @@ pub fn build(world_dirs: &[PathBuf], out: &Path, p: &Params) -> Result<Built, St
         ("kind", s("world")),
         ("id", s(&p.id)),
         ("name", s(&p.name)),
+        // openmx MD66: every world's category (standard §1).
+        ("category", s("World")),
         ("source", o(vec![("game", s("Combined")), ("games", J::A(games.into_iter().map(J::S).collect()))])),
         ("version", s(&p.version)),
         ("author", s(crate::build::AUTHOR)),

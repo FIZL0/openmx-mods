@@ -1443,6 +1443,24 @@ fn q(s: &str) -> String {
     o
 }
 
+/// The map's category (§1, openmx MD66): the source game's event type, read from the id after the
+/// game's prefix. Untamed's misc/free-ride maps (`am`, `mt`) are Free Roam, its opencross ones (`bt`)
+/// Opencross; MX vs. ATV Unleashed's `mc` maps are its Machine Challenge; anything else is Other.
+pub fn category(origin: &Origin, id: &str) -> &'static str {
+    let rest = id.strip_prefix(origin.prefix).unwrap_or(id);
+    let kind = rest.trim_end_matches(|c: char| c.is_ascii_digit()).split('_').next().unwrap_or("");
+    match kind {
+        "fs" => "Freestyle",
+        "sx" => "Supercross",
+        "nat" => "National",
+        "sm" => "Supermoto",
+        "mc" => "Machine Challenge",
+        "bt" => "Opencross",
+        "am" | "mt" | "free" => "Free Roam",
+        _ => "Other",
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn mod_json(
     origin: &Origin,
@@ -1464,7 +1482,7 @@ fn mod_json(
     };
     let mut o = String::from("{\n");
     o += "  \"standard\": 1,\n  \"kind\": \"track\",\n";
-    o += &format!("  \"id\": {},\n  \"name\": {},\n", q(id), q(name));
+    o += &format!("  \"id\": {},\n  \"name\": {},\n  \"category\": {},\n", q(id), q(name), q(category(origin, id)));
     o += &format!("  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"members\": {}\n  }},\n", q(origin.game), q(origin.boot), list(members, "    "));
     o += &format!("  \"version\": {},\n  \"author\": {},\n  \"permission\": \"own-disc\",\n", q(VERSION), q(AUTHOR));
     if let Some((p, d, from)) = spawn {
