@@ -56,6 +56,7 @@ Each mod's folder has a `mod.json` (UTF-8 JSON):
 | `kind` | required | `track`, `world`, `music`, `tricks` (§6) or `machine` (§7). Any other value is skipped quietly. It is not an error. |
 | `id` | required | Equal to the folder name. `[a-z0-9_]`, 1–40 characters, `<prefix>_<map>` (table below), never changed once published. The prefix keeps a mod from ever taking a disc track's name (`free06`, `nat01`, `sx01`). |
 | `name` | required | What the track pick or the song list shows. Use the source game's own name for the map where it has one (its UI strings, M8). |
+| `category` | optional | The map's event type, which the track pick and the store's Browse filter by (openmx MD66): `Free Roam`, `Freestyle`, `Supercross`, `National`, `Supermoto`, `Machine Challenge`, `Opencross` or `World` (every world, §3). Take it from the source game's own event type for the map; a real-ground map (`elev_`) is `Free Roam`. Up to 24 characters; a mod without one is listed under `Other`. |
 | `source` | required | Where it came from. `game`: exactly one of the names below, which the track pick filters by (MD11). From a disc: `boot` (the boot ELF in SYSTEM.CNF, AGENTS.md's table) and `members` (the PSR members the files were copied from). From a data set: `data` (product and tile, e.g. `"USGS 3DEP 1 m, n33w115"`) and `date` (when it was fetched). |
 | `version` | required | The mod's own version, `major.minor.patch`. Bump it whenever any file changes. Online, a peer needs the same id and hash (MD6), so a stale version is refused there anyway. |
 | `author` | required | Who or what built it: the tool and its version, or a person. |
@@ -263,7 +264,7 @@ mods/tracks/world_mxvatv/
 
 ```json
 {
-  "standard": 1, "kind": "world", "id": "world_mxvatv", "name": "MX vs. ATV Unleashed: everything",
+  "standard": 1, "kind": "world", "id": "world_mxvatv", "name": "MX vs. ATV Unleashed: everything", "category": "World",
   "source": {"game": "Combined", "games": ["MX vs. ATV Unleashed"]},
   "version": "1.0.0", "author": "openmx-mods tools/stitch 0.1", "permission": "own-disc",
   "tiles": [
