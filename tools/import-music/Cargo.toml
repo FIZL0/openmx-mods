@@ -17,3 +17,8 @@ discx = { path = "../discx" }
 bpb = { path = "../bpb" }
 # mod.json read back (`check`), and in the tests every pack proved against the standard.
 modcheck = { path = "../modcheck" }
+
+# audio.rs's DeviceSound opens the device through cpal on Windows and Linux since openmx 42eeed3b, as
+# openmx's own Cargo.toml has it (the packs never play a song; this only lets the file compile).
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+cpal = "0.16"
