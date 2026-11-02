@@ -319,7 +319,10 @@ mods/tracks/world_mxvatv/
   tile's.
 - `wrap` (optional): the axes the world wraps round, `"x"`, `"z"` or `"xz"` (openmx MD29). Riding off a
   wrapped edge comes in at the far one. The port closes each wrapped axis itself with a seam join from the
-  last tile back to the first; a world with no `wrap` has edges, and the shootoff is at them.
+  last tile back to the first; a world with no `wrap` has edges, and the shootoff is at them. A wrapped
+  world's own ground is the same at its far edge as at its near one on each wrapped axis (the last row or
+  column of tiles joined to the first across it, as any two are), so that seam join runs between equal
+  ground; `stitch check` holds it to the joins' quanta (C12).
 - A world may hold another world's tiles (the ultra map, C5). It copies the tiles and joins it keeps. It
   does not point at another mod.
 - `source.games` lists every game a tile came from. The pick shows worlds under their own heading (MD11).

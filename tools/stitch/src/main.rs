@@ -9,6 +9,7 @@
 //! stitch edges [--max-slope X] [--fade FT] TILE_DIR...  (each edge's relief and seam gate, C9)
 //! stitch --mods OUT/mods --out STAGE        (build.sh: every world in tools/stitch/worlds/*.json)
 //! stitch ultra OUT --id world_x --name NAME [--sky TILE] [--max-slope X] [--min-gap FT] [--fade FT] WORLD_DIR...
+//! stitch holes WORLD_DIR...                 (openmx's `world holes:` count, wrap closed as openmx closes it, C12)
 //! ```
 //!
 //! A world spec (`worlds/<id>.json`): `{"id": "world_x", "name": "...", "tiles": ["mxvatv_nat05", ...]}`
@@ -27,7 +28,7 @@ use std::process::ExitCode;
 use stitch::build::{Params, build};
 
 fn usage() -> ExitCode {
-    eprintln!("{}", include_str!("main.rs").lines().skip(3).take(9).map(|l| l.trim_start_matches("//! ")).collect::<Vec<_>>().join("\n"));
+    eprintln!("{}", include_str!("main.rs").lines().skip(3).take(10).map(|l| l.trim_start_matches("//! ")).collect::<Vec<_>>().join("\n"));
     ExitCode::from(2)
 }
 
@@ -40,6 +41,7 @@ fn main() -> ExitCode {
         Some("map") => cmd_map(&args[1..]),
         Some("edges") => cmd_edges(&args[1..]),
         Some("ultra") => cmd_ultra(&args[1..]),
+        Some("holes") => cmd_holes(&args[1..]),
         Some("--mods") | Some("--out") => cmd_specs(&args),
         _ => usage(),
     }
@@ -200,6 +202,9 @@ fn cmd_check(args: &[String]) -> ExitCode {
         r.far_slope,
         if r.ok() { "ok" } else { "FAILED" }
     );
+    if r.wrap_points > 0 {
+        println!("stitch check {}: wraps, {} samples on the near edges against the far ones (worst {:.5} ft)", dir.display(), r.wrap_points, r.wrap_height);
+    }
     if r.ok() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
@@ -454,4 +459,46 @@ fn cmd_map(args: &[String]) -> ExitCode {
     }
     println!("stitch: {out}: {w}×{h} at {step} ft, {lo:.1} to {hi:.1} ft");
     ExitCode::SUCCESS
+}
+
+/// `stitch holes WORLD_DIR...` (C12): each world as openmx rides it (`stitch::openmx`, its seam joins
+/// made where mod.json wraps): game-sim's `Tiled::holes`, the count openmx's `world holes:` line gives,
+/// and across each wrap seam whether every point has ground and the largest step in half a foot.
+fn cmd_holes(args: &[String]) -> ExitCode {
+    if args.is_empty() {
+        return usage();
+    }
+    let mut failed = false;
+    for dir in args {
+        let r = (|| -> Result<String, String> {
+            let w = stitch::openmx::load(Path::new(dir))?;
+            let (t, seams, spacing) = w.closed()?;
+            let holes = t.holes();
+            failed |= !holes.is_empty();
+            let mut line = format!("{}: {:.0} × {:.0} ft, world holes: {}", w.id, t.extent()[0].0, t.extent()[1].0, holes.len());
+            if let Some([x0, z0, x1, z1]) = holes.first() {
+                line += &format!(" (first x {}..{} z {}..{})", x0.0, x1.0, z0.0, z1.0);
+            }
+            if seams > 0 {
+                let strip = (game_sim::tiles::generate::SEAM_CELLS * spacing) as f32;
+                let (asked, none, step, at) = stitch::openmx::across_seams(&t, strip);
+                failed |= none > 0;
+                line += &format!(
+                    "; wraps {}, {seams} seam joins {spacing} ft apart: {asked} points across the seams, {none} with no ground, steepest step {step:.3} ft in half a foot at ({:.1}, {:.1})",
+                    ["", "x", "z", "xz"][usize::from(w.wrap[0]) + 2 * usize::from(w.wrap[1])],
+                    at[0],
+                    at[1]
+                );
+            }
+            Ok(line)
+        })();
+        match r {
+            Ok(l) => println!("{l}"),
+            Err(e) => {
+                println!("{dir}: {e}");
+                failed = true;
+            }
+        }
+    }
+    if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
