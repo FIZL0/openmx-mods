@@ -243,6 +243,31 @@ SM_MB (334), Nat_CO (7.8), SX_I (9.6), SX_E (3.2), SX_H (2.4), and the camera th
 | AM_JY | TK's Salvage Yard | 4480 × 4480 | same | 35 | 148 (head lost) | 11 | -16 ft along, +8 up |
 | AM_GFUC | Chesterbridge | 5760 × 5760 | same | 35 | 164 (head lost) | 11 | -16 ft along, +6 up |
 
+### Machines (openmx MD81)
+
+Read 2026-11-03 by unpacking the vehicle archives, not by string scan. The full inventory is in openmx's
+`research/untamed-machines.md`, and its `research/md81_phy_diff.py` does the key-by-key compare.
+
+- **Archives.** `res\veh\VehicleType_<n>.res` (`%sVehicleType_%d.res`, the same numbering as MX vs.
+  ATV Unleashed's `Veh\vehicletype_<n>.res`): 0 MX bike, 1 ATV (ATV_R only), 5 monster truck, 6 baja
+  truck, 7 golf cart, 8 sandrail. Unleashed's 2 (biplane) and 4 (buggy) are absent, and neither game has
+  a 3 (helicopter). `discx` and `Res` read all six. The garage models are
+  `res\UI\Vehicle\VehUI_*.res` (696). Sound is in `res\VehicleAud.res` and the AI in `res\veh\AIParams.res`.
+- **No new machine.** The `.phy` name formats and machine classes (MX 50/125/250/250F/450F/500, ATV_R
+  250/450F) are Unleashed's. Only the skins are new (Storm/Swift bikes, Raven/Striker quads). `GAME_REL.BIN`
+  has no `MXVehicleBiplane.cpp`/`MXVehicleHelicopter.cpp`. The buggy, kiowa and `atv_s_` `.phy.bpb` are
+  loose leftovers that no archive or menu loads.
+- **Retuned `.phy`** (decoded with `bpb`, against Unleashed's text, as f32): the eight `mx_*P` (`[Wrecks]`
+  limits only), `atv_Race250P`/`atv_Pro250P` (`[Front Tire]`, and Race's `[Wrecks]`), `monstertruck`,
+  `baja`, `golfcart`, `sandrail`. The `mx_*A` and `atv_*A` files, `WreckBike*`/`WreckBlade`, `mrider*`
+  and all 38 vehicle `.col` are unchanged. The `.phy` copies in the archives are byte-identical to the
+  loose ones.
+- **Unleashed's `baja.phy` (and every car's)** has `s[FrontRightTire Surface 10]` (a stray `s`). Untamed's
+  compiled file has that section as written.
+- openmx files one task per retuned machine (MD81a–f). Each captures in an Untamed PCSX2 copy and checks
+  the step against SLUS-21104's (no code was compared yet), and each is a machine pack like
+  `mxvatv_atv`, off by default.
+
 ### The giant map (C3)
 
 `world_untamed` (`tools/stitch/worlds/world_untamed.json`, built by build.sh's stitch step from the

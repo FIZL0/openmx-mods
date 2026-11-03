@@ -73,6 +73,7 @@ fn the_world_of_every_open_map_builds_and_checks() {
 
     let mut p = Params::new(j.get("id").and_then(Json::str).unwrap(), j.get("name").and_then(Json::str).unwrap());
     p.sky = j.get("sky").and_then(Json::str).map(str::to_owned);
+    p.wrap = j.get("wrap").and_then(Json::str).map(str::to_owned);
     let dirs: Vec<PathBuf> = names.iter().map(|t| mods.join(t)).collect();
     let built = build(&dirs, &root.join("out"), &p).unwrap();
     let r = stitch::check::check(&built.dir, Some(&mods), Some(dir));
