@@ -23,6 +23,8 @@
 //!
 //! Every file is the member's bytes. [`check`] reads a built pack back through openmx's readers.
 
+pub mod fliers;
+
 use discx::{Disc, ResFile};
 use game_render::scene::{Material, Vehicle};
 use game_render::{Model, ini};

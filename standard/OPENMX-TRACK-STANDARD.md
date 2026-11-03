@@ -428,7 +428,7 @@ mods/tricks/mxvatv_tricks/
 ## 7. Machine pack (MD37c)
 
 A machine MX Unleashed does not have, as a later game's disc has it: its models and textures, its
-clips and its rider's, its stunt table, cameras, sounds and particles. The one pack so far is MX vs.
+clips and its rider's, its stunt table, cameras, sounds and particles. The first pack is MX vs.
 ATV Unleashed's quad, `tools/import-atv`. openmx reads it from `mods/machines/<id>/`
 (`crates/openmx/src/machine_packs.rs`, `openmx --machine-packs`); nothing rides it until the quad's
 step (openmx MD37b) and its pick (MD37d) land.
@@ -483,3 +483,57 @@ mods/machines/mxvatv_atv/
   `mod.json` names; `import-atv check DIR` reads every model, clip, texture and sound back with openmx's
   readers and prints each chassis' nodes; openmx's `tests/machine_packs.rs` loads the pack as the port
   does.
+
+### 7a. A flier pack (MD80d)
+
+MX vs. ATV's biplane and Kiowa, `import-atv fliers`. MX Unleashed has both machines; MX vs. ATV has
+four skins of each over two models, and a machine of skins has no builds. Skins 1 and 2 are model one,
+MX Unleashed's own machine; 3 and 4 are model two. The `.phy` gives each model its own keys
+(`ModelOne<Key>`, `ModelTwo<Key>`).
+
+```
+mods/machines/mxvatv_fliers/
+  mod.json                          kind "machine", machine "fliers"
+  Veh/Anim/biplane3.psg             every member of Veh\vehicletype_2.res, the biplane's archive, at its path:
+  Veh/Col/Biplane3F.col               the models and propcones, the collision, biplane.phy, the materials,
+  Part/biplaneparticles.dat           the particle list and its emitters, the zones, event.aud
+  Veh/Anim/kiowa3.psg               the Kiowa, loose on the PSR: its models and blades, kiowa.phy,
+  Veh/Col/Kiowa3M.col                 WreckBlade.phy, Kiowa*.col, Part\helicopterparticles.dat
+  Veh/Anim/biplane3_ui.psg          every member of the garage sets UI\Res\Veh_BiPlane1-4.res and
+  Veh/Tex/Pitts_body01.pst            Veh_Helicopter1-4.res: the _ui models and most skins' only textures
+  Rider/Anim/biplane_roll_fwd.mot   the pilot's two clips
+  Cam/FC_BiplaneDefault.pb          the follow and replay cameras, FC_/RC_ Biplane and Heli
+  Aud/carengine.aud                 the three .aud tables, and every sound their fliers' sections name
+  Aud/Engine/...                      ([biplane], [Helicopter], [biplaneWreck], [biplaneTireTouchdown],
+                                      [helicopterWreck])
+```
+
+```json
+{
+  "standard": 1, "kind": "machine", "id": "mxvatv_fliers", "name": "MX vs. ATV Unleashed biplane and Kiowa", "machine": "fliers",
+  "archive": "Veh\\vehicletype_2.res",
+  "skins": [{"machine": "biplane", "skin": "biplane3", "model": 2, "psg": "Veh/Anim/biplane3.psg", "ui": "Veh/Anim/biplane3_ui.psg",
+             "hull": "Veh/Col/Biplane3F.col", "rays": "Veh/Col/Biplane3M.col", "garage": "UI/Res/Veh_BiPlane3.res"}, "…"],
+  "fliers": {"biplane": {"phy": "Veh/biplane.phy", "cameras": "Cam/FC_BiplaneDefault.pb", "replay_cameras": "Cam/RC_BiplaneDefault.pb",
+                         "particles": "Part/biplaneparticles.dat", "sounds": "biplane"},
+             "kiowa": {"phy": "Veh/kiowa.phy", "…": "…", "sounds": "helicopter"}},
+  "phy": ["Veh/WreckBlade.phy", "Veh/biplane.phy", "Veh/kiowa.phy"],
+  "pilot_clips": ["Rider/Anim/biplane_roll_bck.mot", "Rider/Anim/biplane_roll_fwd.mot"],
+  "sounds": {"engine": "Aud/carengine.aud", "helicopter": "Aud/otherengine.aud", "machine": "Aud/machine.aud", "events": "Aud/event.aud"},
+  "particles": {"list": "Part/biplaneparticles.dat", "kiowa": "Part/helicopterparticles.dat", "zones": "Part/mxparticlezones.dat"},
+  "todo": ["the fliers' MX vs. ATV steps are openmx MD80b/MD80c and their pick MD80e: …", "mxvatv_fliers: not yet looked at beside MX vs. ATV in PCSX2 (T7)"]
+}
+```
+
+- `skins`: each skin's model, its garage model, its collision pair (`<stem>F.col` is the hull the world
+  meets, `<stem>M.col` the ray probe) and its model number. `garage` names the set its `_ui` model and
+  textures came from. It is a source, not a file in the pack. `fliers.<machine>.sounds` is the prefix
+  of its sections in the `.aud` tables.
+- A machine pack has `builds`, `skins` or both. modcheck finds every file a skin and a flier name.
+- A file two sources give is taken once. The importer stops if their bytes differ.
+- kiowa3 and kiowa4 spell three seat dummies with a trailing `01` (`Dummy_Foot_R_pos01`).
+  `import-atv fliers check` and openmx's report say so.
+- Proof: `build.sh --check` (modcheck). `import-atv fliers check DIR` reads every model, collision
+  file, clip, texture and sound back with openmx's readers, and prints each skin's flier nodes.
+  openmx's `tests/machine_packs.rs` loads every skin's models, nodes, collision and textures, and each
+  flier's `.phy`, cameras, sounds and particles.
