@@ -445,7 +445,8 @@ mods/machines/mxvatv_atv/
   Rider/Anim/ATV_RiderMotions.mcf   Rider\RiderMotionSet_ATV.res whole, and every clip its two sets
   Rider/Anim/ATV_Cliffhanger.mot      name that is loose instead
   Rider/Anim/ATV_Rider_Stunts.ini   the stunt table
-  Cam/FC_ATVDefault.pb              the follow cameras GAME_REL.BIN loads, and FC_ATV.ini beside them
+  Cam/FC_ATVDefault.pb              the follow cameras GAME_REL.BIN loads, RC_ATVDefault.pb (the race
+                                    camera's) and FC_ATV.ini beside them
   Aud/Engine/450A/idle04.VAG        every sound vehicle.aud names (no extension: the .VAG)
 ```
 
@@ -460,7 +461,7 @@ mods/machines/mxvatv_atv/
   "phy": ["Veh/atv_Pro250A.phy", "…"],
   "rider": {"rider": "ATV", "motions": "Rider/Anim/ATV_RiderMotions.mcf", "stunts": "Rider/Anim/ATV_RiderStunts.mcf", "table": "Rider/Anim/ATV_Rider_Stunts.ini"},
   "bike_clips": "Veh/Anim/ATV_Bike_<name>.mot",
-  "cameras": "Cam/FC_ATVDefault.pb", "cameras_ini": "Cam/FC_ATV.ini",
+  "cameras": "Cam/FC_ATVDefault.pb", "replay_cameras": "Cam/RC_ATVDefault.pb", "cameras_ini": "Cam/FC_ATV.ini",
   "sounds": {"engine": "Aud/vehicle.aud", "events": "Aud/event.aud"},
   "particles": {"list": "Part/atvparticles.dat", "ai": "Part/atvaiparticles.dat", "zones": "Part/atvparticlezones.dat"},
   "wreck": "Veh/Col/WreckATVm.col",
@@ -476,12 +477,15 @@ mods/machines/mxvatv_atv/
 - `builds`: each `.sub`, the motion set its `[Objects] MCF` names, and the chassis model that set's
   `SLTFile` names. `machine`: what openmx is to ride it as. `rider`: the rider's clip prefix, its riding
   and stunt motion sets and its stunt table. `cameras`: the follow cameras, sections
-  `[<aspect>/<viewport>/<n>]` (`4x3/1p`, `16x9/2pv`, …).
+  `[<aspect>/<viewport>/<n>]` (`4x3/1p`, `16x9/2pv`, …); `replay_cameras`: the file SLUS-21104 reads
+  under its race camera, the same name with `RC_` for `FC_`. Both are the files openmx's
+  `chase::mod_presets` and `mod_race_presets` name for the machine, read with `Preset::read_layout`.
 - `todo` names every file a build, model, motion set, `vehicle.aud` or particle list names that the
   disc lacks, and the PCSX2 check (T7).
 - Proof: `build.sh --check` (modcheck) compares every file with its member and finds every file
   `mod.json` names; `import-atv check DIR` reads every model, clip, texture and sound back with openmx's
-  readers and prints each chassis' nodes; openmx's `tests/machine_packs.rs` loads the pack as the port
+  readers, each `FC_`/`RC_` camera file with `Preset::read_layout` (a file with no 4x3/1p preset is
+  refused), and prints each chassis' nodes; openmx's `tests/machine_packs.rs` loads the pack as the port
   does.
 
 ### 7a. A flier pack (MD80d)

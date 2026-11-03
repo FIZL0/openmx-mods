@@ -18,7 +18,9 @@
 //!   and stunt motion sets, every clip they name (most stunt clips are loose in `Rider\Anim\`), and
 //!   the stunt table `ATV_Rider_Stunts.ini`.
 //! - **the cameras**: `Cam\FC_ATVDefault.pb` out of `Cam\CameraPresets.res` (the file GAME_REL.BIN
-//!   names for the quad's follow camera) and `Cam\FC_ATV.ini` beside it.
+//!   names for the quad's follow camera), `Cam\RC_ATVDefault.pb`, the one SLUS-21104 reads under
+//!   the race camera (openmx `chase::mod_presets`/`mod_race_presets`, MD82a, MD84), and
+//!   `Cam\FC_ATV.ini` beside them.
 //! - **the sounds**: every `.VAG` the archive's `vehicle.aud` names, at `Aud\<name>`.
 //!
 //! Every file is the member's bytes. [`check`] reads a built pack back through openmx's readers.
@@ -50,9 +52,11 @@ pub const RIDER_MOTIONS: &str = "Rider\\Anim\\ATV_RiderMotions.mcf";
 pub const RIDER_STUNTS: &str = "Rider\\Anim\\ATV_RiderStunts.mcf";
 /// The quad's own clips, loose on the PSR (`ATV_Bike_<trick>.mot` MD21 reads, the `ATV_Air_*` poses).
 pub const QUAD_CLIPS: &str = "Veh\\Anim\\ATV_*.mot";
-/// The camera archive (`%sCameraPresets.res`) and the two quad camera files in it.
+/// The camera archive (`%sCameraPresets.res`) and the three quad camera files in it.
 pub const CAMERA_SET: &str = "Cam\\CameraPresets.res";
 pub const CAMERAS: &str = "Cam\\FC_ATVDefault.pb";
+/// The race camera's file: the follow camera's name with `RC_` for `FC_`.
+pub const REPLAY_CAMERAS: &str = "Cam\\RC_ATVDefault.pb";
 pub const CAMERAS_INI: &str = "Cam\\FC_ATV.ini";
 pub const MATERIALS: &str = "Veh\\Vehicle_mat.res";
 pub const TEXTURES: &str = "Veh\\Vehicle_tex.res";
@@ -256,7 +260,7 @@ fn build(src: &mut Source, origin: &Origin, root: &Path) -> Result<Built, String
     let b = src.disc.read(&e)?;
     out.put(&e.name, &e.name, &b)?;
     // The cameras.
-    for cam in [CAMERAS, CAMERAS_INI] {
+    for cam in [CAMERAS, REPLAY_CAMERAS, CAMERAS_INI] {
         let got = match &src.cameras {
             Some(r) => res_find(r, cam).map(|(m, b)| (m.clone(), from_res(CAMERA_SET, &m), b)),
             None => None,
@@ -535,7 +539,7 @@ fn mod_json(origin: &Origin, members: &[(String, String)], builds: &[Build], tod
         .collect();
     phy.sort();
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": {}\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"archive\": {},\n  \"builds\": {},\n  \"phy\": {},\n  \"rider\": {{\"rider\": \"ATV\", \"motions\": {}, \"stunts\": {}, \"table\": {}}},\n  \"bike_clips\": \"Veh/Anim/ATV_Bike_<name>.mot\",\n  \"cameras\": {},\n  \"cameras_ini\": {},\n  \"sounds\": {{\"engine\": {}, \"events\": {}}},\n  \"particles\": {{\"list\": {}, \"ai\": {}, \"zones\": {}}},\n  \"wreck\": {},\n  \"todo\": {}\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": {}\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"archive\": {},\n  \"builds\": {},\n  \"phy\": {},\n  \"rider\": {{\"rider\": \"ATV\", \"motions\": {}, \"stunts\": {}, \"table\": {}}},\n  \"bike_clips\": \"Veh/Anim/ATV_Bike_<name>.mot\",\n  \"cameras\": {},\n  \"replay_cameras\": {},\n  \"cameras_ini\": {},\n  \"sounds\": {{\"engine\": {}, \"events\": {}}},\n  \"particles\": {{\"list\": {}, \"ai\": {}, \"zones\": {}}},\n  \"wreck\": {},\n  \"todo\": {}\n}}\n",
         json_str(ID),
         json_str(NAME),
         json_str(MACHINE),
@@ -551,6 +555,7 @@ fn mod_json(origin: &Origin, members: &[(String, String)], builds: &[Build], tod
         json_str(&file(RIDER_STUNTS)),
         json_str(&file(STUNT_TABLE)),
         json_str(&file(CAMERAS)),
+        json_str(&file(REPLAY_CAMERAS)),
         json_str(&file(CAMERAS_INI)),
         json_str(&file(ENGINE_SOUNDS)),
         json_str(&file(EVENT_SOUNDS)),
@@ -573,6 +578,8 @@ pub struct Checked {
     /// Of [`Checked::sounds`], those whose header lacks the `VAGp` magic.
     pub unmarked_sounds: usize,
     pub emitters: usize,
+    /// Each `FC_`/`RC_` camera file and its one-player 4:3 presets, as `Preset::read_layout` reads them.
+    pub cameras: Vec<(String, usize)>,
     /// Each chassis model and its nodes, as `name<parent`.
     pub chassis: Vec<(String, Vec<String>)>,
     /// Every file openmx's reader refused, with why.
@@ -637,9 +644,26 @@ pub fn check(dir: &Path) -> Result<Checked, String> {
                 }
                 _ => refuse("no VAG header".into()),
             }
+        } else if let Some(n) = camera_presets(&e.name, &bytes) {
+            match n {
+                0 => refuse("no 4x3/1p presets".into()),
+                n => c.cameras.push((file(&e.name), n)),
+            }
         } else if lower.ends_with("particles.dat") {
             c.emitters += game_render::biplane::emitters(&ini::text(&bytes)).len();
         }
     }
     Ok(c)
+}
+
+/// How many one-player 4:3 presets a camera file holds, read as openmx's shell reads a mod
+/// machine's (`game_sim::camera::Preset::read_layout`, MD82a); `None` for a file that is not a
+/// `Cam\FC_*.pb` or `Cam\RC_*.pb`.
+pub fn camera_presets(name: &str, bytes: &[u8]) -> Option<usize> {
+    let leaf = leaf_of(name).to_ascii_lowercase();
+    if !(leaf.ends_with(".pb") && (leaf.starts_with("fc_") || leaf.starts_with("rc_"))) {
+        return None;
+    }
+    let ini = game_sim::phy::Ini::parse_bytes(bytes);
+    Some(game_sim::camera::Preset::read_layout(&ini, game_sim::camera::Aspect::Standard, game_sim::camera::Viewport::Full).len())
 }

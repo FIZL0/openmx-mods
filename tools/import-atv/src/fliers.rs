@@ -547,6 +547,8 @@ pub struct Checked {
     pub sounds: usize,
     pub unmarked_sounds: usize,
     pub emitters: usize,
+    /// Each `FC_`/`RC_` camera file and its one-player 4:3 presets (`crate::camera_presets`).
+    pub cameras: Vec<(String, usize)>,
     /// Each skin, its model, and each node openmx wants of it with the name the model gives it
     /// (`None`: not there).
     pub skins: Vec<(String, usize, Vec<(String, Option<String>)>)>,
@@ -614,6 +616,11 @@ pub fn check(dir: &Path) -> Result<Checked, String> {
                     }
                 }
                 _ => refuse("no VAG header".into()),
+            }
+        } else if let Some(n) = crate::camera_presets(&e.name, &bytes) {
+            match n {
+                0 => refuse("no 4x3/1p presets".into()),
+                n => c.cameras.push((file(&e.name), n)),
             }
         } else if lower.ends_with("particles.dat") {
             c.emitters += game_render::biplane::emitters(&ini::text(&bytes)).len();

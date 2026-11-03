@@ -35,5 +35,8 @@ fn the_pack_is_the_discs_and_openmx_reads_it() {
             assert!(nodes.iter().any(|n| n.starts_with(want)), "{model}: no {want} in {nodes:?}");
         }
     }
+    // The follow and race cameras (MD84), each read as openmx's shell reads a mod machine's.
+    let cams: Vec<&str> = c.cameras.iter().map(|(f, _)| f.as_str()).collect();
+    assert_eq!(cams, ["Cam/FC_ATVDefault.pb", "Cam/RC_ATVDefault.pb"], "{:?}", c.cameras);
     assert!(c.clips >= 80 && c.sounds >= 26 && c.textures >= 90, "{c:?}");
 }
