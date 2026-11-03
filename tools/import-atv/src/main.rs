@@ -45,6 +45,9 @@ fn fliers_check(dir: &Path) -> Result<(), String> {
         "{} models, {} collision files, {} clips, {} materials, {} textures, {} sounds ({} without VAGp), {} emitters read by openmx",
         c.models, c.collisions, c.clips, c.materials, c.textures, c.sounds, c.unmarked_sounds, c.emitters
     );
+    for (cam, n) in &c.cameras {
+        println!("{cam}: {n} presets (4x3/1p)");
+    }
     for (skin, model, nodes) in &c.skins {
         let lacks: Vec<&str> = nodes.iter().filter(|(_, got)| got.is_none()).map(|(w, _)| w.as_str()).collect();
         let other: Vec<String> = nodes.iter().filter_map(|(w, got)| got.as_ref().filter(|g| *g != w).map(|g| format!("{w} as {g}"))).collect();
@@ -81,6 +84,9 @@ fn run(args: &[String]) -> Result<(), String> {
             );
             for (model, nodes) in &c.chassis {
                 println!("{model}: {}", nodes.join(" "));
+            }
+            for (cam, n) in &c.cameras {
+                println!("{cam}: {n} presets (4x3/1p)");
             }
             for (f, why) in &c.refused {
                 println!("  refused {f}: {why}");

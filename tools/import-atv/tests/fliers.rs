@@ -40,6 +40,10 @@ fn the_fliers_pack_is_the_discs_and_openmx_reads_it() {
     assert_eq!(c.sounds, 14);
     assert_eq!(c.clips, 2);
     assert!(c.models >= 28 && c.textures >= 24 && c.emitters >= 20, "{c:?}");
+    // Each flier's follow and race cameras (MD84), read as openmx's shell reads a mod machine's.
+    let mut cams: Vec<&str> = c.cameras.iter().map(|(f, _)| f.as_str()).collect();
+    cams.sort();
+    assert_eq!(cams, ["Cam/FC_BiplaneDefault.pb", "Cam/FC_HeliDefault.pb", "Cam/RC_BiplaneDefault.pb", "Cam/RC_HeliDefault.pb"], "{:?}", c.cameras);
     assert_eq!(c.skins.len(), 8);
     for (skin, _, nodes) in &c.skins {
         let lacks: Vec<&String> = nodes.iter().filter(|(_, got)| got.is_none()).map(|(w, _)| w).collect();

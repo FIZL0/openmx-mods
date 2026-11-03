@@ -827,7 +827,7 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
             named.extend(rd.get(k).and_then(Json::str).map(str::to_owned));
         }
     }
-    for k in ["cameras", "wreck"] {
+    for k in ["cameras", "replay_cameras", "wreck"] {
         named.extend(j.get(k).and_then(Json::str).map(str::to_owned));
     }
     // A flier pack's per-flier files (`fliers.biplane.cameras`, …) and its other sound tables.
