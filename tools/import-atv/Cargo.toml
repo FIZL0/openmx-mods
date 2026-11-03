@@ -1,6 +1,6 @@
 [package]
 name = "import-atv"
-description = "MX vs. ATV Unleashed's quads (models, textures, clips, stunt table, cameras, sounds, particles) as a machine pack (standard §7), each file read back through openmx's own readers"
+description = "MX vs. ATV Unleashed's quads, biplane and Kiowa (models, textures, clips, stunt table, cameras, sounds, particles) as a machine pack (standard §7), each file read back through openmx's own readers"
 edition.workspace = true
 version.workspace = true
 publish.workspace = true
@@ -10,6 +10,8 @@ publish.workspace = true
 # says what the port makes of it.
 game-render = { path = "../../openmx/crates/game-render", default-features = false }
 discx = { path = "../discx" }
+# The fliers' collision files (`fliers::check`) through the sim's own `.col` readers.
+game-sim = { path = "../../openmx/crates/game-sim" }
 
 [dev-dependencies]
 # The disc test proves the built pack as build.sh --check does.

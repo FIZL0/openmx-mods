@@ -800,14 +800,25 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
         r.fail.push("mod.json: a machine pack says no machine".into());
     }
     let builds = j.get("builds").and_then(Json::arr).unwrap_or_default();
-    if builds.is_empty() {
-        r.fail.push("a machine pack has no builds".into());
+    // A flier pack (MD80d) has no `.sub` builds: its `skins` name each skin's model, garage model,
+    // collision pair and garage set instead.
+    let skins = j.get("skins").and_then(Json::arr).unwrap_or_default();
+    if builds.is_empty() && skins.is_empty() {
+        r.fail.push("a machine pack has neither builds nor skins".into());
     }
     let mut named: Vec<String> = Vec::new();
     for b in builds {
         match b.get("sub").and_then(Json::str) {
             Some(f) => named.push(f.to_owned()),
             None => r.fail.push("builds[]: no sub".into()),
+        }
+    }
+    for sk in skins {
+        for k in ["psg", "ui", "hull", "rays"] {
+            match sk.get(k).and_then(Json::str) {
+                Some(f) => named.push(f.to_owned()),
+                None => r.fail.push(format!("skins[]: no {k}")),
+            }
         }
     }
     named.extend(j.get("phy").and_then(Json::arr).unwrap_or_default().iter().filter_map(|v| v.str().map(str::to_owned)));
@@ -818,6 +829,17 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
     }
     for k in ["cameras", "wreck"] {
         named.extend(j.get(k).and_then(Json::str).map(str::to_owned));
+    }
+    // A flier pack's per-flier files (`fliers.biplane.cameras`, …) and its other sound tables.
+    if let Some(Json::Obj(fliers)) = j.get("fliers") {
+        for (_, f) in fliers {
+            for k in ["phy", "cameras", "replay_cameras", "particles"] {
+                named.extend(f.get(k).and_then(Json::str).map(str::to_owned));
+            }
+        }
+        for k in ["helicopter", "machine"] {
+            named.extend(j.get("sounds").and_then(|g| g.get(k)).and_then(Json::str).map(str::to_owned));
+        }
     }
     for (group, keys) in [("sounds", &["engine"][..]), ("particles", &["list", "zones"][..])] {
         for k in keys {
