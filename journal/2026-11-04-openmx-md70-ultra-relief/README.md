@@ -20,6 +20,10 @@ gains `--wrap`. New test: tests/ultra_relief.rs.
 - Rebuilt world_ultra from the installed worlds: same layout as before (widen 3.815, 77 tiles, 2265
   joins, 625 new pieces), relief scale 1.0 after 14 dents, new-ground slope 0.498 far and 0.448 near.
   World reliefs: mxu 38.3 ft spread, mxvatv 64.9 ft, untamed 105.1 ft, all at gain 1.00.
+- `stitch check --mods out/mods --iso iso` on it: ok in 76 min. 60,726 points where new ground meets a
+  world's edge, worst 0.00354 ft; wraps worst 0.00351 ft; join slope 0.500; every tile byte for byte
+  its disc. Installed in out/mods/tracks and openmx's mods/tracks; openmx's
+  `every_installed_worlds_tiles_read_as_alone` and `the_stitched_worlds_have_no_gap_along_a_seam` pass.
 - Far new ground (195 windows of 300 ft, each ≥1000 ft from every world; ignored test
   `the_installed_ultra_maps_far_new_ground_has_relief`): mean spread 0.31 ft before and 3.89 after;
   median 0.27 before and 3.72 after.
@@ -28,7 +32,6 @@ gains `--wrap`. New test: tests/ultra_relief.rs.
 
 - tests/wrap.rs: `a_wrapped_world_*` fail with "elev_c12_a: at -144 is not a whole number of feet",
   and they fail the same way on untouched origin/main. MD61's game-sim half is not yet in openmx.
-- `stitch check` with `--iso` ran out its 50 min limit; see the openmx journal for the run without it.
 - The relief is rolling ground only: no tracks, jumps or objects are carried into the gaps.
 - The installed world_ultra/mod.json's `"category": "World"` line (MD66) was put back by hand.
 - Not ridden in the shell.
