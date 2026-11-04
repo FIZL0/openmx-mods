@@ -66,6 +66,16 @@ tile is.
    Files are hard links where the file system allows it, so the worlds' bytes are on disk once. build.sh
    replaces a mod folder whole (`rm -rf` then `mv`), which never writes through a link. A hand edit in
    place to a world's join would change the ultra map's copy too.
+9. **Relief (openmx MD70).** Past the worlds' seam gates the new ground also carries the nearest worlds'
+   own relief, the way a world's far joins carry its maps' (MD57, `notes/stitch.md`). Each world's ground
+   (its tiles over their keeps, its joins elsewhere, each lattice sample once) is averaged into 16 ft
+   nodes over its whole rectangle, then smoothed, less its mean, and held to 0.25 ft/ft by build's
+   `Relief::of_nodes`. A point of new ground reads each world folded back and forth into its rectangle
+   (from each image on a wrapped map), weighted `1/d²` and normalised `Σwr/√Σw²`; a world three times as
+   far as the nearest drops out. It is eased under `0.1 × room × the distance past every world's widest
+   gate, or from the map's edge`. The room comes from the coarse pass of the blend alone, dented where the
+   relief still comes out over `max_slope`, then the relief scale lowered. The gaps never widen for it.
+   mod.json `stitch.relief` = {scale, worlds: [{world, gain, spread}]}.
 
 `stitch check` on an ultra map (`stitch.worlds` present) adds three things to C1's checks:
 

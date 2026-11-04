@@ -151,7 +151,7 @@ pub struct Collar {
 }
 
 /// `1` at 0, falling with zero slope at both ends to `0` at 1 and past.
-fn fall(t: f64) -> f64 {
+pub(crate) fn fall(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
     (1.0 - t) * (1.0 - t) * (1.0 + 2.0 * t)
 }
@@ -620,7 +620,7 @@ pub const RELIEF_RAMP: f64 = 600.0;
 pub const RELIEF_DENT: f64 = 1200.0;
 
 /// How many dents a build makes before it lowers the relief over the whole world instead.
-const RELIEF_DENTS: usize = 60;
+pub(crate) const RELIEF_DENTS: usize = 60;
 
 /// The steepest a map's smoothed relief may be in a join, feet per foot: a map whose own is steeper is
 /// carried at the gain that brings it to this, leaving the rest of `max_slope` to the blend.
@@ -630,13 +630,13 @@ pub const RELIEF_SLOPE: f64 = 0.25;
 /// (game-render `terrain::reach`), which hand a gap's middle from one map to the other within a couple
 /// of hundred feet: fine for a colour, but two maps' hills of opposite sign meeting there would make a
 /// cliff of the swap.
-fn relief_weight(d: f64) -> f64 {
+pub(crate) fn relief_weight(d: f64) -> f64 {
     1.0 / d.max(1.0).powi(2)
 }
 
 /// `v` folded back and forth into `lo..hi` (game-render `terrain::mirror`): continuous, and the map's
 /// own ground at every distance however wide the join.
-fn fold(v: f64, lo: f64, hi: f64) -> f64 {
+pub(crate) fn fold(v: f64, lo: f64, hi: f64) -> f64 {
     let span = hi - lo;
     if span <= 0.0 {
         return lo;
@@ -712,6 +712,13 @@ impl Relief {
                 v[i + j * n[0]] = sum / (k * k) as f64;
             }
         }
+        Relief::of_nodes(lo, cell, n, v)
+    }
+
+    /// The relief of ground already averaged over `n` nodes `cell` feet apart from `lo` (each node its
+    /// cell's mean): smoothed, less its mean, held to [`RELIEF_SLOPE`]. A world of an ultra map (C5,
+    /// MD70) reads its own ground into nodes and comes here, as a map does.
+    pub(crate) fn of_nodes(lo: [f64; 2], cell: [f64; 2], n: [usize; 2], mut v: Vec<f64>) -> Relief {
         // Two passes of a three-node box each way: [1 2 3 2 1] / 9 across five cells.
         for _ in 0..2 {
             for axis in 0..2 {
@@ -756,7 +763,7 @@ impl Relief {
     }
 
     /// The relief at a tile-local point, bilinear between the nodes, the edge nodes' past the grid.
-    fn at(&self, x: f64, z: f64) -> f64 {
+    pub(crate) fn at(&self, x: f64, z: f64) -> f64 {
         let f = |a: usize, v: f64| {
             let t = ((v - self.origin[a]) / self.cell[a]).clamp(0.0, (self.n[a] - 1) as f64);
             let i = (t.floor() as usize).min(self.n[a] - 2);
@@ -1173,10 +1180,15 @@ pub struct Room {
 
 impl Room {
     fn of(l: &Lattice, max_slope: f64) -> Room {
-        let (n, step) = (l.n, l.step);
+        Room::of_cells(l.n, l.step, l.cells(), max_slope)
+    }
+
+    /// [`Room::of`] from a lattice's cells, `(kx, kz, slope)`, `None` where it does not count (by a
+    /// gate; an ultra map's, inside a world too): `n` nodes a side, `step` feet apart.
+    pub(crate) fn of_cells(n: [usize; 2], step: f64, cells: impl Iterator<Item = (usize, usize, Option<f64>)>, max_slope: f64) -> Room {
         let (lo, hi) = (max_slope * 0.9 - RELIEF_SLOPE, max_slope * 0.9);
         let mut v = vec![1.0f64; n[0] * n[1]];
-        for (kx, kz, g) in l.cells() {
+        for (kx, kz, g) in cells {
             // A cell by the gates is the blend's whatever the room: only steep blend past them counts.
             let Some(g) = g else { continue };
             let r = ((hi - g) / (hi - lo)).clamp(0.0, 1.0);
@@ -1195,7 +1207,7 @@ impl Room {
     /// A quarter less room about a world point, fading to none lost [`RELIEF_DENT`] away: where the
     /// relief made the ground too steep after all (two maps' hills of opposite sign meeting in a gap),
     /// it is lowered there, not over the whole world.
-    fn dent(&mut self, x: f64, z: f64) {
+    pub(crate) fn dent(&mut self, x: f64, z: f64) {
         let k = (RELIEF_DENT / self.step).ceil() as isize;
         let (ci, cj) = ((x / self.step).round() as isize, (z / self.step).round() as isize);
         for j in (cj - k).max(0)..=(cj + k).min(self.n[1] as isize - 1) {
@@ -1465,7 +1477,7 @@ pub struct Built {
 }
 
 /// The relief's scale a step lower ([`Plan::relief_scale`]): 0 once it is too small to show.
-fn lower(scale: f64) -> f64 {
+pub(crate) fn lower(scale: f64) -> f64 {
     let s = scale * 0.8;
     if s < 0.05 { 0.0 } else { s }
 }

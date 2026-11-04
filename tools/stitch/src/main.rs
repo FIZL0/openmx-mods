@@ -8,7 +8,7 @@
 //! stitch map WORLD_DIR OUT.pgm [FEET]       (the world's heights as a greyscale picture, shaded)
 //! stitch edges [--max-slope X] [--fade FT] TILE_DIR...  (each edge's relief and seam gate, C9)
 //! stitch --mods OUT/mods --out STAGE        (build.sh: every world in tools/stitch/worlds/*.json)
-//! stitch ultra OUT --id world_x --name NAME [--sky TILE] [--max-slope X] [--min-gap FT] [--fade FT] WORLD_DIR...
+//! stitch ultra OUT --id world_x --name NAME [--sky TILE] [--max-slope X] [--min-gap FT] [--fade FT] [--wrap x|z|xz] WORLD_DIR...
 //! stitch holes WORLD_DIR...                 (openmx's `world holes:` count, wrap closed as openmx closes it, C12)
 //! ```
 //!
@@ -143,6 +143,7 @@ fn cmd_ultra(args: &[String]) -> ExitCode {
                 "--fade" => p.fade = num(&take(args, &mut i, a)?, a)?,
                 "--chunk" => p.chunk = num(&take(args, &mut i, a)?, a)? as u32,
                 "--threads" => p.threads = num(&take(args, &mut i, a)?, a)? as usize,
+                "--wrap" => p.wrap = Some(take(args, &mut i, a)?),
                 _ if a.starts_with("--") => return Err(format!("unknown flag {a}")),
                 _ if out.is_none() => out = Some(PathBuf::from(a)),
                 _ => worlds.push(PathBuf::from(a)),
