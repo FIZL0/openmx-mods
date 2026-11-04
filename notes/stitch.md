@@ -426,6 +426,14 @@ world_mxu_free), its ground straight from the far edge's to the near edge's.
   is 135 ft; closing the rest needs openmx to take a tile across the far seam. `stitch check` measures a
   cell's distance from a tile through the wrap, so the last tile's taper just inside the near edge is
   held as near its seam. `stitch build --wrap xz` builds one wrapped world by hand.
+- **A wrapped world's first line starts on the seam** (openmx MD61). game-sim now lets a tile's
+  origin stand below 0 where its kept cells start at or past 0, so on a wrapped axis the grid layout
+  starts its first line two lattice cells in, its cut hanging over the near seam, and each pair across
+  the wrap gets its own gap and no more. world_mxu_free comes off the disc at 16533 × 11061 ft (5 tiles,
+  35 + 13 seam joins); openmx's `--seams` reads its crossings over the seam at 252 ft (stitched 135 ft +
+  the 135 ft strip), against 1134 / 1125 ft installed; steepest step 0.246 ft, 0.131 ft across the wrap.
+  The units layout (world_mxu) still keeps every origin at or past 0. `tests/wrap_ridge.rs` holds four
+  ringed tiles to a stitched width across the wrap.
 - `stitch check` compares a wrapped world's near-edge join samples with the far edge's (worst on the
   five: 0.0070 ft). `stitch holes WORLD_DIR...` loads a world as openmx does, closes its wrap as openmx
   does (`stitch::openmx::World::closed`) and prints game-sim's `Tiled::holes` count (openmx's

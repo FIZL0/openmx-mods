@@ -664,7 +664,8 @@ fn rides_in_openmx() {
 }
 
 /// **M23 on the disc.** world_mxu_free built from its spec off the MX Unleashed disc: every tile cut at
-/// its ring's ridge on all four sides (keep `[88, 87, 681, 680]`), no origin below 0, every tile and
+/// its ring's ridge on all four sides (keep `[88, 87, 681, 680]`), no origin below 0 but across a wrap
+/// seam (MD61), every tile and
 /// join openmx's ground to the bit, no foot of the world owned by nothing, and across every join one
 /// ridge: on lines 50 ft apart (300 ft clear of the ring's corners) from 300 ft inside one tile to
 /// 300 ft inside the next, the ground between
@@ -690,8 +691,13 @@ fn world_mxu_free_meets_ridge_to_ridge() {
     }
     let out = root.join("out-mxu-free");
     let built = build(&dirs, &out, &p).unwrap();
-    for pl in &built.plan.placed {
-        assert!(pl.at[0] >= 0.0 && pl.at[1] >= 0.0, "a tile at {:?}", pl.at);
+    // On a wrapped axis the first line's cut ridge stands out past the near seam (MD61), its kept
+    // cells from 0 on.
+    for (pl, src) in built.plan.placed.iter().zip(&built.plan.sources) {
+        for a in 0..2 {
+            assert!(pl.at[a] >= 0.0 || p.wraps()[a], "a tile at {:?}", pl.at);
+            assert!(src.rect[a] >= 0.0, "a tile kept from {:?}", src.rect);
+        }
     }
     let tiles: Vec<stitch::Tile> = dirs.iter().map(|d| stitch::Tile::load(d).unwrap()).collect();
     let terrains: Vec<_> = tiles.iter().map(stitch::Tile::terrain).collect();
