@@ -24,6 +24,27 @@ fn the_fliers_pack_is_the_discs_and_openmx_reads_it() {
     for s in &built.skins {
         assert_eq!(s.model, if s.skin.ends_with('3') || s.skin.ends_with('4') { 2 } else { 1 }, "{}", s.skin);
     }
+    // Every skin is named and described by the disc's store, garage and challenge tables (P315e).
+    let named: Vec<(&str, &str)> = built.skins.iter().map(|s| (s.skin.as_str(), s.name.as_str())).collect();
+    assert_eq!(
+        named,
+        [
+            ("biplane", "Plane (1)"),
+            ("biplane2", "Plane (2)"),
+            ("biplane3", "Plane (3)"),
+            ("biplane4", "Plane (4)"),
+            ("kiowa", "Helicopter (1)"),
+            ("kiowa2", "Helicopter (2)"),
+            ("kiowa3", "Helicopter (3)"),
+            ("kiowa4", "Helicopter (4)"),
+        ]
+    );
+    let about = |skin: &str| built.skins.iter().find(|s| s.skin == skin).unwrap().about.clone();
+    assert_eq!(about("biplane"), "Model one: MX Unleashed's shape and flight figures. Garage logo: THQ. In the store for 250000.");
+    assert_eq!(
+        about("kiowa4"),
+        "Model two: its own shape, collision and flight figures. Garage logo: MaddCow. In the store for 250000. The Helicopter Challenge's prize."
+    );
     // Nothing a model, material, .aud section or particle list names is missing: the two standing
     // entries are MD80b/c/e's and T7's.
     assert_eq!(built.todo.len(), 2, "{:#?}", built.todo);

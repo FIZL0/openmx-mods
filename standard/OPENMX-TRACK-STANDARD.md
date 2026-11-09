@@ -517,7 +517,8 @@ mods/machines/mxvatv_fliers/
   "standard": 1, "kind": "machine", "id": "mxvatv_fliers", "name": "MX vs. ATV Unleashed biplane and Kiowa", "machine": "fliers",
   "archive": "Veh\\vehicletype_2.res",
   "skins": [{"machine": "biplane", "skin": "biplane3", "model": 2, "psg": "Veh/Anim/biplane3.psg", "ui": "Veh/Anim/biplane3_ui.psg",
-             "hull": "Veh/Col/Biplane3F.col", "rays": "Veh/Col/Biplane3M.col", "garage": "UI/Res/Veh_BiPlane3.res"}, "…"],
+             "hull": "Veh/Col/Biplane3F.col", "rays": "Veh/Col/Biplane3M.col", "garage": "UI/Res/Veh_BiPlane3.res",
+             "name": "Plane (3)", "about": "Model two: its own shape, collision and flight figures. Garage logo: THQ. …"}, "…"],
   "fliers": {"biplane": {"phy": "Veh/biplane.phy", "cameras": "Cam/FC_BiplaneDefault.pb", "replay_cameras": "Cam/RC_BiplaneDefault.pb",
                          "particles": "Part/biplaneparticles.dat", "sounds": "biplane"},
              "kiowa": {"phy": "Veh/kiowa.phy", "…": "…", "sounds": "helicopter"}},
@@ -533,7 +534,17 @@ mods/machines/mxvatv_fliers/
   meets, `<stem>M.col` the ray probe) and its model number. `garage` names the set its `_ui` model and
   textures came from. It is a source, not a file in the pack. `fliers.<machine>.sounds` is the prefix
   of its sections in the `.aud` tables.
-- A machine pack has `builds`, `skins` or both. modcheck finds every file a skin and a flier name.
+- `skins[].name` and `skins[].about` (openmx P315e) are what openmx's machine picker calls the skin
+  and says under it. Both are optional; without them openmx names a skin by its kind and place
+  (`Plane 3`) and describes its model. `import-atv fliers` takes the name from `UI\Store.dat` (the
+  store's `StoreText` for the skin's `AssetName`, `PLANE (3)`, in the case the challenges' unlock lines
+  spell it) and builds the about from the model, `Veh\Vehicles.dat`'s garage `Logo`, the store's
+  `Price` and the `UI\Challenges.dat` challenge whose `Prize` the skin is. Those three tables are
+  read, not carried.
+- A machine pack has `builds`, `skins` or both. modcheck finds every file a skin and a flier name, and
+  holds each skin to: `machine` and `skin` given and not empty, no `machine`/`skin` pair twice,
+  `model` 1 or 2, `psg`, `hull` and `rays` named and in the pack (`ui` in the pack where named), and
+  `name`/`about` non-empty text where given.
 - A file two sources give is taken once. The importer stops if their bytes differ.
 - kiowa3 and kiowa4 spell three seat dummies with a trailing `01` (`Dummy_Foot_R_pos01`).
   `import-atv fliers check` and openmx's report say so.

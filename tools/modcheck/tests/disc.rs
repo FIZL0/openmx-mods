@@ -535,3 +535,43 @@ fn the_binary_checks_a_tree_of_mods() {
     assert!(text.contains("TerrainFile=Test.trn finds no file (tried Test.trn, Test.ps2.trn)"), "{text}");
     assert!(text.contains("modcheck: 1 ok, 1 failed"), "{text}");
 }
+
+/// A flier pack's `skins[]` (openmx P315 reads them for its picker): each names its kind and model,
+/// model 1 or 2, a model and collision pair in the pack, and a name and about that are text if given.
+#[test]
+fn a_machine_packs_skins_are_held_to_the_standard() {
+    let m = map("skins", 1);
+    let dir = m.root.join("mods").join("machines").join("mxvatv_testfly");
+    for (name, data) in &m.members {
+        let p = dir.join(name.replace('\\', "/"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, data).unwrap();
+    }
+    let good = r#"{"machine": "biplane", "skin": "biplane3", "model": 2, "psg": "Col/Rock.col", "hull": "Col/Rock.col", "rays": "Col/Blade.col", "name": "Plane (3)", "about": "Garage logo THQ."}"#;
+    let pack = |skins: &str| {
+        write_json(&dir, "mxvatv_testfly", MEMBERS, TODO, &format!(r#", "skins": [{skins}]"#));
+        let j = std::fs::read_to_string(dir.join("mod.json")).unwrap();
+        std::fs::write(dir.join("mod.json"), j.replace(r#""kind": "track""#, r#""kind": "machine", "machine": "fliers""#)).unwrap();
+        run(&m, &dir)
+    };
+    let r = pack(good);
+    assert!(r.ok(), "{:#?}", r.fail);
+    // Without name and about, and without ui, it passes too: openmx names it by kind and place.
+    let plain = r#"{"machine": "kiowa", "skin": "kiowa", "model": 1, "psg": "Col/Rock.col", "hull": "Col/Rock.col", "rays": "Col/Rock.col"}"#;
+    assert!(pack(&format!("{good}, {plain}")).ok());
+    let cases: &[(&str, &str, &str)] = &[
+        (r#""machine": "biplane""#, r#""machine": " ""#, "skins[0]: machine missing or empty"),
+        (r#""skin": "biplane3", "#, "", "skins[0]: skin missing or empty"),
+        (r#""model": 2"#, r#""model": 3"#, "skins[0]: model: not 1 or 2"),
+        (r#""model": 2"#, r#""model": "2""#, "skins[0]: model: not 1 or 2"),
+        (r#""psg": "Col/Rock.col", "#, "", "skins[0]: psg missing"),
+        (r#""rays": "Col/Blade.col""#, r#""rays": "Col/Nope.col""#, "Col/Nope.col: named in mod.json, not in the pack"),
+        (r#""name": "Plane (3)""#, r#""name": """#, "skins[0]: name: given, not text"),
+        (r#""about": "Garage logo THQ.""#, r#""about": 7"#, "skins[0]: about: given, not text"),
+    ];
+    for (from, to, want) in cases {
+        fails_with(&pack(&good.replace(from, to)), want);
+    }
+    fails_with(&pack(&format!("{good}, {good}")), "skins[1]: skin: biplane biplane3 listed twice");
+    fails_with(&pack(&format!(r#"{good}, {{"skin": "x", "model": 1, "psg": "Col/Rock.col", "hull": "Col/Rock.col", "rays": "Col/Rock.col", "ui": "Veh/x_ui.psg"}}"#)), "Veh/x_ui.psg: named in mod.json, not in the pack");
+}

@@ -815,11 +815,43 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
             None => r.fail.push("builds[]: no sub".into()),
         }
     }
-    for sk in skins {
-        for k in ["psg", "ui", "hull", "rays"] {
+    // Each skin (openmx P315 reads them for its picker): its kind and model name, model 1 or 2,
+    // its model and collision pair in the pack, its garage model where it names one, and a name and
+    // about that are text where given (else openmx names it by kind and place).
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for (i, sk) in skins.iter().enumerate() {
+        let at = |k: &str| format!("skins[{i}]: {k}");
+        let word = |k: &str| sk.get(k).and_then(Json::str).map(str::trim).filter(|v| !v.is_empty());
+        let (machine, skin) = (word("machine"), word("skin"));
+        for (k, v) in [("machine", machine), ("skin", skin)] {
+            if v.is_none() {
+                r.fail.push(format!("{} missing or empty", at(k)));
+            }
+        }
+        if let (Some(m), Some(s)) = (machine, skin) {
+            let key = (m.to_ascii_lowercase(), s.to_ascii_lowercase());
+            if seen.contains(&key) {
+                r.fail.push(format!("{}: {m} {s} listed twice", at("skin")));
+            }
+            seen.push(key);
+        }
+        match sk.get("model") {
+            None => r.fail.push(format!("{} missing", at("model"))),
+            Some(v) if v.num().is_some_and(|n| n == 1.0 || n == 2.0) => {}
+            Some(_) => r.fail.push(format!("{}: not 1 or 2", at("model"))),
+        }
+        for k in ["psg", "hull", "rays"] {
             match sk.get(k).and_then(Json::str) {
                 Some(f) => named.push(f.to_owned()),
-                None => r.fail.push(format!("skins[]: no {k}")),
+                None => r.fail.push(format!("{} missing", at(k))),
+            }
+        }
+        named.extend(sk.get("ui").and_then(Json::str).map(str::to_owned));
+        for k in ["name", "about"] {
+            match sk.get(k) {
+                None => {}
+                Some(v) if v.str().is_some_and(|t| !t.trim().is_empty()) => {}
+                Some(_) => r.fail.push(format!("{}: given, not text", at(k))),
             }
         }
     }
