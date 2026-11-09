@@ -65,6 +65,12 @@ pub const BIPLANE_PARTICLES: &str = "Part\\biplaneparticles.dat";
 pub const KIOWA_PARTICLES: &str = "Part\\helicopterparticles.dat";
 /// The zones `vehicletype_2.res` carries beside the biplane's list.
 pub const PARTICLE_ZONES: &str = "Part\\mxparticlezones.dat";
+/// Where each skin's name and about come from (openmx P315e), read, not carried: the store's list,
+/// `[Plane 3]` `StoreText = "PLANE (3)"` `AssetName="BiPlane Skin 3"`, the garage's per-skin logo,
+/// `[BiPlane Skin 3]` `Logo="THQ"`, and the challenges, whose `Prize` is a skin.
+pub const STORE: &str = "UI\\Store.dat";
+pub const VEHICLES: &str = "Veh\\Vehicles.dat";
+pub const CHALLENGES: &str = "UI\\Challenges.dat";
 
 /// The two fliers, as `mod.json`'s `skins[].machine` names them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +106,15 @@ impl Flier {
         match n {
             1 => stem.to_string(),
             n => format!("{stem}{n}"),
+        }
+    }
+
+    /// Skin `n` as the store, the garage and the challenges name it: `BiPlane Skin 3`, `Helicopter
+    /// Skin 4`.
+    pub fn asset(self, n: usize) -> String {
+        match self {
+            Flier::Biplane => format!("BiPlane Skin {n}"),
+            Flier::Kiowa => format!("Helicopter Skin {n}"),
         }
     }
 
@@ -157,6 +172,87 @@ pub struct Skin {
     pub hull: String,
     pub rays: String,
     pub garage: String,
+    /// What openmx's picker calls it and says it is (P315e): empty where the disc's tables do not
+    /// say, and `mod.json` leaves the key out.
+    pub name: String,
+    pub about: String,
+}
+
+/// What MX vs. ATV's tables say of each skin, by its [`Flier::asset`] name.
+#[derive(Default)]
+struct Garage {
+    /// `Store.dat`: the asset, the store's name of it and its price.
+    store: Vec<(String, String, String)>,
+    /// `Vehicles.dat`: the asset and its garage logo.
+    logos: Vec<(String, String)>,
+    /// `Challenges.dat`: the asset a challenge gives as its prize, and the challenge's title.
+    prizes: Vec<(String, String)>,
+}
+
+impl Garage {
+    fn read(disc: &mut Disc, todo: &mut Vec<String>) -> Garage {
+        let mut text = |name: &str| match disc.find(name).cloned().map(|e| disc.read(&e)) {
+            Some(Ok(b)) => ini::parse(&ini::text(&b)),
+            _ => {
+                todo.push(format!("{}: not on the disc; the skins it names go unnamed", file(name)));
+                Vec::new()
+            }
+        };
+        let unquote = |v: Option<&str>| v.map(|v| v.trim().trim_matches('"').trim().to_string()).filter(|v| !v.is_empty());
+        let mut g = Garage::default();
+        for s in text(STORE) {
+            if let (Some(asset), Some(name)) = (unquote(s.get("AssetName")), unquote(s.get("StoreText"))) {
+                g.store.push((asset, name, unquote(s.get("Price")).unwrap_or_default()));
+            }
+        }
+        for s in text(VEHICLES) {
+            if let Some(logo) = unquote(s.get("Logo")) {
+                g.logos.push((s.name.clone(), logo));
+            }
+        }
+        for s in text(CHALLENGES) {
+            if let (Some(asset), Some(title)) = (unquote(s.get("Prize")), unquote(s.get("Title"))) {
+                g.prizes.push((asset, title));
+            }
+        }
+        g
+    }
+
+    /// Skin `n` of `f`'s name and about. The name is the store's, `PLANE (3)`, in the case the
+    /// challenges' unlock lines spell it (`Plane (2) is now unlocked.`); the about is its model's
+    /// kind, its garage logo, its store price and the challenge it is the prize of, where the tables
+    /// give them.
+    fn skin(&self, f: Flier, n: usize) -> (String, String) {
+        let asset = f.asset(n);
+        let is = |a: &String| a.eq_ignore_ascii_case(&asset);
+        let store = self.store.iter().find(|(a, ..)| is(a));
+        let name = store.map(|(_, name, _)| title_case(name)).unwrap_or_default();
+        let mut about = vec![match model_of(n) {
+            1 => "Model one: MX Unleashed's shape and flight figures.".to_string(),
+            _ => "Model two: its own shape, collision and flight figures.".to_string(),
+        }];
+        if let Some((_, logo)) = self.logos.iter().find(|(a, _)| is(a)) {
+            about.push(format!("Garage logo: {logo}."));
+        }
+        if let Some((.., price)) = store.filter(|(.., p)| !p.is_empty()) {
+            about.push(format!("In the store for {price}."));
+        }
+        for (_, title) in self.prizes.iter().filter(|(a, _)| is(a)) {
+            about.push(format!("The {title}'s prize."));
+        }
+        (name, about.join(" "))
+    }
+}
+
+/// `PLANE (3)` as `Plane (3)`: each word's first letter kept, the rest lowered.
+fn title_case(s: &str) -> String {
+    s.split(' ')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map_or(String::new(), |f| f.to_string() + &c.as_str().to_lowercase())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Clone, Debug)]
@@ -397,6 +493,7 @@ fn build(src: &mut Source, origin: &Origin, root: &Path) -> Result<Built, String
 
     // The skins: each one's model, garage model, collision pair and garage set.
     let mut skins = Vec::new();
+    let names = Garage::read(&mut src.disc, &mut todo);
     let spelt = |out: &Out, want: &str| out.members.iter().map(|(m, _)| m).find(|m| discx::normalise(m) == discx::normalise(want)).cloned();
     for f in Flier::ALL {
         for n in 1..=4 {
@@ -420,7 +517,11 @@ fn build(src: &mut Source, origin: &Origin, root: &Path) -> Result<Built, String
                     todo.push(format!("{}: holds no {want}; which skin it dresses is not known", file(&garage)));
                 }
             }
-            skins.push(Skin { machine: f, skin, model: model_of(n), psg, ui, hull, rays, garage: file(&garage) });
+            let (name, about) = names.skin(f, n);
+            if name.is_empty() {
+                todo.push(format!("{}: no store entry gives {} a name; openmx names it by its kind and place", file(STORE), f.asset(n)));
+            }
+            skins.push(Skin { machine: f, skin, model: model_of(n), psg, ui, hull, rays, garage: file(&garage), name, about });
         }
     }
 
@@ -473,8 +574,9 @@ fn mod_json(origin: &Origin, members: &[(String, String)], skins: &[Skin], garag
     let skins_json: Vec<String> = skins
         .iter()
         .map(|s| {
+            let text = |k: &str, v: &str| if v.is_empty() { String::new() } else { format!(", \"{k}\": {}", json_str(v)) };
             format!(
-                "{{\"machine\": {}, \"skin\": {}, \"model\": {}, \"psg\": {}, \"ui\": {}, \"hull\": {}, \"rays\": {}, \"garage\": {}}}",
+                "{{\"machine\": {}, \"skin\": {}, \"model\": {}, \"psg\": {}, \"ui\": {}, \"hull\": {}, \"rays\": {}, \"garage\": {}{}{}}}",
                 json_str(s.machine.name()),
                 json_str(&s.skin),
                 s.model,
@@ -482,7 +584,9 @@ fn mod_json(origin: &Origin, members: &[(String, String)], skins: &[Skin], garag
                 json_str(&s.ui),
                 json_str(&s.hull),
                 json_str(&s.rays),
-                json_str(&s.garage)
+                json_str(&s.garage),
+                text("name", &s.name),
+                text("about", &s.about)
             )
         })
         .collect();
