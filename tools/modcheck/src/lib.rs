@@ -803,8 +803,10 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
     // A flier pack (MD80d) has no `.sub` builds: its `skins` name each skin's model, garage model,
     // collision pair and garage set instead.
     let skins = j.get("skins").and_then(Json::arr).unwrap_or_default();
-    if builds.is_empty() && skins.is_empty() {
-        r.fail.push("a machine pack has neither builds nor skins".into());
+    // A car pack (openmx MD39c) neither: its `cars` name each car's .phy, chassis and collision.
+    let cars = j.get("cars").and_then(Json::arr).unwrap_or_default();
+    if builds.is_empty() && skins.is_empty() && cars.is_empty() {
+        r.fail.push("a machine pack has neither builds, skins nor cars".into());
     }
     let mut named: Vec<String> = Vec::new();
     for b in builds {
@@ -818,6 +820,14 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
             match sk.get(k).and_then(Json::str) {
                 Some(f) => named.push(f.to_owned()),
                 None => r.fail.push(format!("skins[]: no {k}")),
+            }
+        }
+    }
+    for c in cars {
+        for k in ["phy", "psg", "col"] {
+            match c.get(k).and_then(Json::str) {
+                Some(f) => named.push(f.to_owned()),
+                None => r.fail.push(format!("cars[]: no {k}")),
             }
         }
     }

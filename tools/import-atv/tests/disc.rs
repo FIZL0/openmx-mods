@@ -40,3 +40,21 @@ fn the_pack_is_the_discs_and_openmx_reads_it() {
     assert_eq!(cams, ["Cam/FC_ATVDefault.pb", "Cam/RC_ATVDefault.pb"], "{:?}", c.cameras);
     assert!(c.clips >= 80 && c.sounds >= 26 && c.textures >= 90, "{c:?}");
 }
+
+#[test]
+#[ignore = "needs the MX vs. ATV Unleashed disc image"]
+fn the_car_pack_is_the_discs_and_openmx_reads_it() {
+    // openmx MD39c: the five cars' archives, whole, each car's .phy, chassis and collision found.
+    let image = discx::resolve_image(import_atv::GAME, &iso_dir()).unwrap();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("import-atv-cars");
+    let built = import_atv::cars::import(&image, &out).unwrap();
+    let names: Vec<&str> = built.cars.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["buggy", "monstertruck", "baja", "golfcart", "sandrail"]);
+
+    let mut discs = modcheck::Discs::new(Some(iso_dir()));
+    let report = modcheck::check(&built.dir, &mut discs);
+    assert!(report.fail.is_empty(), "{:#?}", report.fail);
+
+    let lines = import_atv::cars::check(&built.dir).unwrap();
+    assert!(lines.iter().all(|l| l.ends_with("tires read")), "{lines:#?}");
+}
