@@ -27,6 +27,8 @@
 
 pub mod fliers;
 
+pub mod cars;
+
 use discx::{Disc, ResFile};
 use game_render::scene::{Material, Vehicle};
 use game_render::{Model, ini};
@@ -129,7 +131,7 @@ fn res_leaf(res: &ResFile, leaf: &str) -> Option<(String, Vec<u8>)> {
     Some((e.name.clone(), res.read(e).ok()?))
 }
 
-fn leaf_of(name: &str) -> &str {
+pub(crate) fn leaf_of(name: &str) -> &str {
     name.rsplit(['\\', '/']).next().unwrap_or(name)
 }
 

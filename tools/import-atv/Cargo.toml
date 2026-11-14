@@ -10,7 +10,8 @@ publish.workspace = true
 # says what the port makes of it.
 game-render = { path = "../../openmx/crates/game-render", default-features = false }
 discx = { path = "../discx" }
-# The fliers' collision files (`fliers::check`) through the sim's own `.col` readers.
+# The fliers' collision files (`fliers::check`) through the sim's own `.col` readers, and the
+# cars' .phy and chassis models (`cars::check`).
 game-sim = { path = "../../openmx/crates/game-sim" }
 
 [dev-dependencies]

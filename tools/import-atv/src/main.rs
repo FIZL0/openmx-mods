@@ -5,8 +5,11 @@ const USAGE: &str = "\
 import-atv: MX vs. ATV Unleashed's quads as a machine pack (standard §7)
 
   import-atv [OUT]                    build OUT/mxvatv_atv/ (default out/mods/machines) off the disc
-  import-atv --disc IMAGE --out OUT   the same off that image, and the fliers' pack beside it (build.sh)
+  import-atv --disc IMAGE --out OUT   the same off that image, and the fliers' and cars' packs beside it (build.sh)
   import-atv check DIR                read a built pack's models, clips, textures and sounds back
+  import-atv cars [OUT]               build OUT/mxvatv_cars/ (default out/mods/machines): the five cars
+  import-atv cars --disc IMAGE --out OUT
+  import-atv cars check DIR           read a built car pack's .phy and chassis models back
   import-atv fliers [OUT]             the biplane and the Kiowa: OUT/mxvatv_fliers/ (openmx MD80d)
   import-atv fliers --disc IMAGE --out OUT
   import-atv fliers check DIR         read the fliers' pack back: every model, .col, clip, texture, sound
@@ -62,6 +65,15 @@ fn fliers_check(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn cars(image: &Path, out: &Path) -> Result<(), String> {
+    let built = import_atv::cars::import(image, out)?;
+    println!("{}: {} files", built.dir.display(), built.members.len());
+    for c in &built.cars {
+        println!("{}: {} ({}, {})", c.name, c.phy, c.psg, c.col);
+    }
+    Ok(())
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     match args {
         [f, cmd, dir] if f == "fliers" && cmd == "check" => fliers_check(Path::new(dir)),
@@ -71,10 +83,23 @@ fn run(args: &[String]) -> Result<(), String> {
             let image = discx::resolve_image(import_atv::GAME, &iso_dir())?;
             fliers(&image, &out)
         }
-        // build.sh's form: both machine packs off the one disc.
+        // build.sh's form: the three machine packs off the one disc.
         [a, image, b, out] if a == "--disc" && b == "--out" => {
             one(Path::new(image), Path::new(out))?;
-            fliers(Path::new(image), Path::new(out))
+            fliers(Path::new(image), Path::new(out))?;
+            cars(Path::new(image), Path::new(out))
+        }
+        [c, a, image, b, out] if c == "cars" && a == "--disc" && b == "--out" => cars(Path::new(image), Path::new(out)),
+        [c, cmd, dir] if c == "cars" && cmd == "check" => {
+            for line in import_atv::cars::check(Path::new(dir))? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        [c] | [c, _] if c == "cars" => {
+            let out = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("out/mods/machines"));
+            let image = discx::resolve_image(import_atv::GAME, &iso_dir())?;
+            cars(&image, &out)
         }
         [cmd, dir] if cmd == "check" => {
             let c = import_atv::check(Path::new(dir))?;
