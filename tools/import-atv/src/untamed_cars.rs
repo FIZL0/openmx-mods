@@ -1,7 +1,8 @@
-//! MX vs. ATV Untamed's baja truck as a machine pack (standard §7, openmx MD163).
+//! MX vs. ATV Untamed's baja truck and golf cart as a machine pack (standard §7, openmx MD163, MD81e).
 //!
 //! SLUS-21701 builds each car's archive as `%sVehicleType_%d.res` under `res\veh\`, numbered as MX vs.
-//! ATV Unleashed's (openmx MD81): 6 is the baja truck (the menus' TROPHY TRUCK). Its archive holds the
+//! ATV Unleashed's (openmx MD81): 6 is the baja truck (the menus' TROPHY TRUCK), 7 the golf cart
+//! (`golfcart.phy.bpb`: MaxAnalogThrottle 0.8 -> 0.1 and `[Preload]` off). Each archive holds the
 //! car's `Veh\baja.phy.bpb` (the `.phy` compiled to a BPB, 51 keys retuned against Unleashed's: openmx
 //! research/untamed-machines.md), its chassis model `baja.psg` and its collision objects, with whatever
 //! else the car draws with. Every member is copied whole, at its own path, as [`crate::cars`] does for
@@ -28,11 +29,11 @@ pub const STEP: &str = "untamed";
 
 /// The cars: openmx's word for each (`car::MxvatvMachine`), and its archive's vehicle type. The monster
 /// truck (type 5) is openmx MD161b's.
-pub const CARS: [(&str, u32); 1] = [("baja", 6)];
+pub const CARS: [(&str, u32); 2] = [("baja", 6), ("golfcart", 7)];
 
 /// What openmx does not read off this pack yet.
 pub const TODO: [&str; 2] = [
-    "openmx rides the baja on MX vs. ATV Untamed's car step (MD161, MD163) and draws none of it, nor plays its sounds or cameras: only the .phy.bpb and its chassis .psg are read",
+    "openmx rides the baja and the golf cart on MX vs. ATV Untamed's car step (MD161, MD163, MD81e) and draws none of it, nor plays its sounds or cameras: only the .phy.bpb and its chassis .psg are read",
     "untamed_cars: not yet looked at beside MX vs. ATV Untamed in PCSX2 (T7)",
 ];
 
