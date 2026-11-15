@@ -29,6 +29,8 @@ pub mod fliers;
 
 pub mod cars;
 
+pub mod untamed_cars;
+
 use discx::{Disc, ResFile};
 use game_render::scene::{Material, Vehicle};
 use game_render::{Model, ini};
