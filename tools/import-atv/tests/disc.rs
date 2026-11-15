@@ -63,13 +63,14 @@ fn the_car_pack_is_the_discs_and_openmx_reads_it() {
 #[ignore = "needs the MX vs. ATV Untamed disc image"]
 fn the_untamed_car_pack_is_the_discs_and_openmx_reads_it() {
     // openmx MD163: the baja truck's archive whole, its .phy.bpb, chassis and collision found, and
-    // its car entry on Untamed's step.
+    // its car entry on Untamed's step; MD81e's golf cart beside it.
     let image = discx::resolve_image(import_atv::untamed_cars::GAME, &iso_dir()).unwrap();
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("import-atv-untamed-cars");
     let built = import_atv::untamed_cars::import(&image, &out).unwrap();
     let names: Vec<&str> = built.cars.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["baja"]);
+    assert_eq!(names, ["baja", "golfcart"]);
     assert!(built.cars[0].phy.to_ascii_lowercase().ends_with("baja.phy.bpb"), "{:?}", built.cars[0]);
+    assert!(built.cars[1].phy.to_ascii_lowercase().ends_with("golfcart.phy.bpb"), "{:?}", built.cars[1]);
     let manifest = std::fs::read_to_string(built.dir.join("mod.json")).unwrap();
     assert!(manifest.contains("\"step\": \"untamed\""), "{manifest}");
 
@@ -78,5 +79,5 @@ fn the_untamed_car_pack_is_the_discs_and_openmx_reads_it() {
     assert!(report.fail.is_empty(), "{:#?}", report.fail);
 
     let lines = import_atv::untamed_cars::check(&built.dir).unwrap();
-    assert_eq!(lines, ["baja: 43 nodes, tires read, Weight 3500"]);
+    assert_eq!(lines, ["baja: 43 nodes, tires read, Weight 3500", "golfcart: 47 nodes, tires read, Weight 1000"]);
 }
