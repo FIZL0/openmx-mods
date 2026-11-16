@@ -4,16 +4,23 @@
 //! monster truck, the baja, the golf cart and the sandrail (openmx MD39). Each archive holds the car's
 //! `Veh\<car>.phy`, its chassis model `<car>.psg` and its collision objects `<car>m.col` and
 //! `<car>f.col`, with whatever else the car draws with. Every member of the five archives is copied
-//! whole, at its own path, and nothing else: the pack is what openmx needs to ride the cars on MX vs.
-//! ATV's step (the `.phy`, the chassis model whose tire nodes place the tires and whose box is the
-//! mass properties' half box). Drawing, sound, cameras and particles read only what the archives
-//! hold, and openmx reads none of them for the cars yet ([`TODO`]).
+//! whole, at its own path: the pack is what openmx needs to ride the cars on MX vs. ATV's step (the
+//! `.phy`, the chassis model whose tire nodes place the tires and whose box is the mass properties'
+//! half box). For openmx MD157, to draw them, follow them and hear them, it also brings:
+//!
+//! - **the textures**: every texture map of every material the archives hold (the archives carry the
+//!   `.psm`s but none of their `.pst`s), out of `Veh\Vehicle_tex.res` or loose in `Veh\Tex\`;
+//! - **the cameras**: each car's `Cam\FC_<kind>Default.pb` and `RC_<kind>Default.pb` out of
+//!   `Cam\CameraPresets.res` ([`CAMERAS`], the names SLUS_211.04 builds from the car's class);
+//! - **the engine**: `Aud\carengine.aud`, loose on the PSR, and every sample its five car profiles'
+//!   loops name ([`ENGINE_PROFILES`]).
 //!
 //! `mod.json`'s `machine` is [`MACHINE`]; its `cars` lists each car once as openmx picks it: the
 //! name, the `.phy`, the chassis model and the collision object.
 
-use crate::{Origin, file, json_str, leaf_of};
+use crate::{Origin, Out, file, from_res, json_str, leaf_of, open_res, res_find, res_leaf};
 use discx::{Disc, ResFile};
+use game_render::{ini, scene::Material};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -27,9 +34,23 @@ pub const CARS: [(&str, u32); 5] = [("buggy", 4), ("monstertruck", 5), ("baja", 
 
 /// What openmx does not read off this pack yet.
 pub const TODO: [&str; 2] = [
-    "openmx rides the cars on MX vs. ATV's step (MD39c) and draws none of them, nor plays their sounds or cameras: only each .phy and its chassis .psg are read",
+    "openmx draws each car's chassis, follows it on its own FC_ camera and plays its carengine.aud loops (MD157); the particle lists, the event sounds and the other liveries' models are carried, not read",
     "mxvatv_cars: not yet looked at beside MX vs. ATV in PCSX2 (T7)",
 ];
+
+/// The camera archive, and each car's follow and race camera files in it, in [`CARS`]' order.
+pub const CAMERA_SET: &str = "Cam\\CameraPresets.res";
+pub const CAMERAS: [[&str; 2]; 5] = [
+    ["Cam\\FC_BuggyDefault.pb", "Cam\\RC_BuggyDefault.pb"],
+    ["Cam\\FC_MonsterDefault.pb", "Cam\\RC_MonsterDefault.pb"],
+    ["Cam\\FC_BajaDefault.pb", "Cam\\RC_BajaDefault.pb"],
+    ["Cam\\FC_GolfCartDefault.pb", "Cam\\RC_GolfCartDefault.pb"],
+    ["Cam\\FC_SandrailDefault.pb", "Cam\\RC_SandrailDefault.pb"],
+];
+/// The cars' keyed-loop engine table, loose on the PSR, and its profile for each car in [`CARS`]'
+/// order (the sections are spelt as the file spells them).
+pub const ENGINE_SOUNDS: &str = "Aud\\carengine.aud";
+pub const ENGINE_PROFILES: [&str; 5] = ["buggy", "monstertruck", "baja", "golfcart", "SandRail"];
 
 /// The archive of vehicle type `n`.
 pub fn archive(n: u32) -> String {
@@ -52,6 +73,8 @@ pub struct Built {
     pub dir: PathBuf,
     pub members: Vec<String>,
     pub cars: Vec<Car>,
+    /// What the disc did not give (a texture, a camera, a sample).
+    pub todo: Vec<String>,
 }
 
 /// Build `root/mxvatv_cars/` off the disc. A folder already there is replaced, but only if it is this
@@ -69,27 +92,43 @@ pub fn import(image: &Path, root: &Path) -> Result<Built, String> {
         let e = disc.find(&a).cloned().ok_or_else(|| format!("{a}: not on the disc"))?;
         archives.push((name, a, disc.res(&e)?));
     }
-    build(&archives, &origin, root)
+    let cameras = open_res(&mut disc, CAMERA_SET).ok();
+    let textures = open_res(&mut disc, crate::TEXTURES).ok();
+    build(&mut disc, &archives, cameras.as_ref(), textures.as_ref(), &origin, root)
 }
 
-fn build(archives: &[(&str, String, ResFile)], origin: &Origin, root: &Path) -> Result<Built, String> {
+/// A file by leaf name out of `res` (its own name, where it came from, its bytes), else loose on the
+/// PSR under `dir`.
+fn by_leaf(disc: &mut Disc, res: Option<(&ResFile, &str)>, dir: &str, leaf: &str) -> Option<(String, String, Vec<u8>)> {
+    if let Some((res, name)) = res
+        && let Some((member, b)) = res_leaf(res, leaf)
+    {
+        return Some((member.clone(), from_res(name, &member), b));
+    }
+    let e = disc.find(&format!("{dir}\\{leaf}")).cloned()?;
+    let b = disc.read(&e).ok()?;
+    Some((e.name.clone(), e.name, b))
+}
+
+fn build(
+    disc: &mut Disc,
+    archives: &[(&str, String, ResFile)],
+    cameras: Option<&ResFile>,
+    textures: Option<&ResFile>,
+    origin: &Origin,
+    root: &Path,
+) -> Result<Built, String> {
     let dir = root.join(ID);
     clear(&dir)?;
-    let mut have = BTreeSet::new();
-    let mut members: Vec<(String, String)> = Vec::new();
+    let mut out = Out { dir: dir.clone(), have: BTreeSet::new(), leaves: BTreeSet::new(), folders: Default::default(), members: Vec::new() };
+    let mut todo: Vec<String> = Vec::new();
     let mut cars = Vec::new();
     for (name, a, res) in archives {
         let mut own = Vec::new();
         for e in res.entries().to_vec() {
             let b = res.read(&e)?;
             own.push(e.name.clone());
-            if !have.insert(discx::normalise(&e.name)) {
-                continue;
-            }
-            let path = dir.join(file(&e.name));
-            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("{}: {e}", path.display()))?;
-            std::fs::write(&path, &b).map_err(|e| format!("{}: {e}", path.display()))?;
-            members.push((e.name.clone(), a.clone()));
+            out.put(&e.name, &from_res(a, &e.name), &b)?;
         }
         let find = |leaf: &str| {
             own.iter().find(|m| leaf_of(m).eq_ignore_ascii_case(leaf)).cloned().ok_or_else(|| format!("{a}: has no {leaf}"))
@@ -102,8 +141,107 @@ fn build(archives: &[(&str, String, ResFile)], origin: &Origin, root: &Path) -> 
             col: find(&format!("{name}m.col"))?,
         });
     }
-    std::fs::write(dir.join("mod.json"), mod_json(origin, &cars)).map_err(|e| format!("{}: {e}", dir.display()))?;
-    Ok(Built { dir, members: members.into_iter().map(|(m, _)| m).collect(), cars })
+
+    // Every material's texture maps: the material's own texture (the first of its forms found), then
+    // every other pass's.
+    let mut no_texture = Vec::new();
+    for psm in out.ending(".psm") {
+        let text = ini::text(&out.read(&psm)?);
+        let name = leaf_of(&psm).rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or_default();
+        let own = game_render::world::texture_files(&name, &Material::parse(&text));
+        if !own.is_empty() && !own.iter().any(|f| out.has_leaf(f)) {
+            match own.iter().find_map(|f| by_leaf(disc, textures.map(|r| (r, crate::TEXTURES)), "Veh\\Tex", f)) {
+                Some((n, from, b)) => {
+                    out.put(&n, &from, &b)?;
+                }
+                None => no_texture.push(format!("{} ({})", leaf_of(&psm), own[0])),
+            }
+        }
+        for s in ini::parse(&text) {
+            for (k, v) in &s.keys {
+                let v = v.trim().trim_matches('"');
+                if !k.to_ascii_lowercase().starts_with("texturemap_") || v.is_empty() {
+                    continue;
+                }
+                let f = format!("{v}.pst");
+                if out.has_leaf(&f) {
+                    continue;
+                }
+                match by_leaf(disc, textures.map(|r| (r, crate::TEXTURES)), "Veh\\Tex", &f) {
+                    Some((n, from, b)) => {
+                        out.put(&n, &from, &b)?;
+                    }
+                    None => no_texture.push(format!("{} ({f})", leaf_of(&psm))),
+                }
+            }
+        }
+    }
+    no_texture.sort();
+    no_texture.dedup();
+    if !no_texture.is_empty() {
+        todo.push(format!("{} texture maps a material names are not on the disc, so they draw untextured: {}", no_texture.len(), no_texture.join(", ")));
+    }
+
+    // The cameras.
+    for cam in CAMERAS.iter().flatten() {
+        let got = cameras.and_then(|r| res_find(r, cam)).map(|(m, b)| (m.clone(), from_res(CAMERA_SET, &m), b));
+        let got = got.or_else(|| {
+            let e = disc.find(cam).cloned()?;
+            let b = disc.read(&e).ok()?;
+            Some((e.name.clone(), e.name, b))
+        });
+        match got {
+            Some((m, from, b)) => {
+                out.put(&m, &from, &b)?;
+            }
+            None => todo.push(format!("{}: not on the disc; that car follows on the bike's camera", leaf_of(cam))),
+        }
+    }
+
+    // The engine table and the samples its car profiles' loops name. A name with no extension is the
+    // `.VAG` of that name under `Aud\`.
+    let mut engine = String::new();
+    match disc.find(ENGINE_SOUNDS).cloned() {
+        Some(e) => {
+            let b = disc.read(&e)?;
+            out.put(&e.name, &e.name, &b)?;
+            engine = file(&e.name);
+            let sections = ini::parse(&ini::text(&b));
+            let mut no_sound = Vec::new();
+            for profile in ENGINE_PROFILES {
+                let lower = profile.to_ascii_lowercase();
+                for s in sections.iter().filter(|s| s.name.to_ascii_lowercase().strip_prefix(&lower).is_some_and(|n| n.starts_with("loop"))) {
+                    for (k, v) in &s.keys {
+                        if !k.eq_ignore_ascii_case("filename") {
+                            continue;
+                        }
+                        let name = format!("Aud\\{}", v.trim().trim_matches('"'));
+                        let tries = match leaf_of(&name).contains('.') {
+                            true => vec![name.clone()],
+                            false => vec![format!("{name}.VAG"), format!("{name}.vig")],
+                        };
+                        if tries.iter().any(|t| out.have.contains(&discx::normalise(t))) {
+                            continue;
+                        }
+                        match tries.iter().find_map(|t| disc.find(t).cloned()) {
+                            Some(e) => {
+                                let b = disc.read(&e)?;
+                                out.put(&e.name, &e.name, &b)?;
+                            }
+                            None => no_sound.push(format!("{} [{}]", file(&name), s.name)),
+                        }
+                    }
+                }
+            }
+            if !no_sound.is_empty() {
+                todo.push(format!("{} samples carengine.aud's car loops name are not on the disc: {}", no_sound.len(), no_sound.join(", ")));
+            }
+        }
+        None => todo.push(format!("{}: not on the disc; the cars are silent", file(ENGINE_SOUNDS))),
+    }
+
+    std::fs::write(dir.join("mod.json"), mod_json(origin, &cars, &out.members, &engine, &todo)).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(Built { dir, members: out.members.into_iter().map(|(m, _)| m).collect(), cars, todo })
 }
 
 /// Make way for the pack: a folder that is not there, or one whose `mod.json` is this pack's, removed.
@@ -119,9 +257,21 @@ fn clear(dir: &Path) -> Result<(), String> {
     std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
-fn mod_json(origin: &Origin, cars: &[Car]) -> String {
+fn mod_json(origin: &Origin, cars: &[Car], members: &[(String, String)], engine: &str, missing: &[String]) -> String {
     let list = |items: Vec<String>| format!("[\n    {}\n  ]", items.join(",\n    "));
-    let archives = cars.iter().map(|c| json_str(&c.archive)).collect::<Vec<_>>().join(", ");
+    // `source.members` (§7): the cars' archives whole by name, any other `.res` member as
+    // `OUTER:INNER`, every loose file by its PSR name.
+    let mut psr: Vec<String> = cars.iter().map(|c| c.archive.clone()).collect();
+    for (_, from) in members {
+        let m = match from.split_once(':') {
+            Some((res, _)) if cars.iter().any(|c| c.archive.eq_ignore_ascii_case(res)) => res.to_string(),
+            _ => from.clone(),
+        };
+        if !psr.contains(&m) {
+            psr.push(m);
+        }
+    }
+    let archives = psr.iter().map(|m| json_str(m)).collect::<Vec<_>>().join(", ");
     let phy = list(cars.iter().map(|c| json_str(&file(&c.phy))).collect());
     let cars_json = list(
         cars.iter()
@@ -136,9 +286,9 @@ fn mod_json(origin: &Origin, cars: &[Car]) -> String {
             })
             .collect(),
     );
-    let todo = list(TODO.iter().map(|t| json_str(t)).collect());
+    let todo = list(TODO.iter().map(|t| json_str(t)).chain(missing.iter().map(|t| json_str(t))).collect());
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": [{archives}]\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"phy\": {phy},\n  \"cars\": {cars_json},\n  \"todo\": {todo}\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": [{archives}]\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"phy\": {phy},\n  \"cars\": {cars_json},\n  \"sounds\": {{\"engine\": {}}},\n  \"todo\": {todo}\n}}\n",
         json_str(ID),
         json_str(NAME),
         json_str(MACHINE),
@@ -146,6 +296,7 @@ fn mod_json(origin: &Origin, cars: &[Car]) -> String {
         json_str(&origin.boot),
         json_str(&origin.psr),
         json_str(crate::AUTHOR),
+        json_str(engine),
     )
 }
 

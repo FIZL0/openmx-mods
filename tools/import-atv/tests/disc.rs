@@ -57,6 +57,19 @@ fn the_car_pack_is_the_discs_and_openmx_reads_it() {
 
     let lines = import_atv::cars::check(&built.dir).unwrap();
     assert!(lines.iter().all(|l| l.ends_with("tires read")), "{lines:#?}");
+
+    // Each kind's own chase and replay cameras, and the engine sounds with their loops.
+    for kind in ["Buggy", "Monster", "Baja", "GolfCart", "Sandrail"] {
+        for side in ["FC", "RC"] {
+            let cam = built.dir.join(format!("Cam/{side}_{kind}Default.pb"));
+            assert!(cam.is_file(), "{}", cam.display());
+        }
+    }
+    assert!(built.dir.join("Aud/carengine.aud").is_file());
+    let vags = std::fs::read_dir(built.dir.join("Aud/Engine")).unwrap().count();
+    assert!(vags > 0, "no engine loops");
+    let json = std::fs::read_to_string(built.dir.join("mod.json")).unwrap();
+    assert!(json.contains("\"engine\""), "{json}");
 }
 
 #[test]
