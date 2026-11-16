@@ -82,3 +82,23 @@ fn the_untamed_car_pack_is_the_discs_and_openmx_reads_it() {
     let lines = import_atv::untamed_cars::check(&built.dir).unwrap();
     assert_eq!(lines, ["baja: 43 nodes, tires read, Weight 3500", "golfcart: 47 nodes, tires read, Weight 1000", "sandrail: 43 nodes, tires read, Weight 2300"]);
 }
+
+#[test]
+#[ignore = "needs the MX vs. ATV Untamed disc image"]
+fn the_untamed_quad_pack_is_the_discs_and_openmx_reads_it() {
+    // openmx MD144: the quad's archive whole, its two race quads' .phy.bpb listed, on Untamed's step,
+    // and each builds a quad off the pack's chassis.
+    let image = discx::resolve_image(import_atv::untamed_atv::GAME, &iso_dir()).unwrap();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("import-atv-untamed-atv");
+    let built = import_atv::untamed_atv::import(&image, &out).unwrap();
+    assert_eq!(built.phy, ["Veh\\atv_Race250P.phy.bpb", "Veh\\atv_Pro250P.phy.bpb"]);
+    let manifest = std::fs::read_to_string(built.dir.join("mod.json")).unwrap();
+    assert!(manifest.contains("\"step\": \"untamed\"") && manifest.contains("\"machine\": \"atv\""), "{manifest}");
+
+    let mut discs = modcheck::Discs::new(Some(iso_dir()));
+    let report = modcheck::check(&built.dir, &mut discs);
+    assert!(report.fail.is_empty(), "{:#?}", report.fail);
+
+    let lines = import_atv::untamed_atv::check(&built.dir).unwrap();
+    assert_eq!(lines, ["atv_Race250P: built, Weight 420", "atv_Pro250P: built, Weight 420"]);
+}

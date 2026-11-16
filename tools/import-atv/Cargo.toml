@@ -13,6 +13,8 @@ discx = { path = "../discx" }
 # The fliers' collision files (`fliers::check`) through the sim's own `.col` readers, and the
 # cars' .phy and chassis models (`cars::check`).
 game-sim = { path = "../../openmx/crates/game-sim" }
+# The Untamed quads' check builds a quad at the origin (`untamed_atv::check`).
+ps2-float = { path = "../../openmx/crates/ps2-float" }
 
 [dev-dependencies]
 # The disc test proves the built pack as build.sh --check does.
