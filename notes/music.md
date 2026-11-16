@@ -53,13 +53,14 @@ openmx's reader (`Clip::vig`, `Adpcm::vig`) takes all 42 songs: stereo, 44,100 H
   `DataOffset=0`, and its durations count only the header's size.
 - **Size.** On every song of both discs, the header's size runs exactly one block pair (32 bytes) past
   the file. `streams.juk`'s `Size` is the file's length and its `Duration` is the header's size
-  (`size / 16 × 28 / 44100`) to 1e-4 s on all 42 songs. openmx's reader plays to the end of the file,
-  which is 28 frames short of `Duration`.
+  (`size / 16 × 28 / 44100`) to 1e-4 s on all 42 songs. openmx's reader plays to the end flag, which is
+  28 frames short of `Duration` on Untamed and 56 on Unleashed (its filler pair, below).
 - **End.** Untamed's last block pair carries the end flag (flags bit 0) in both channels. Unleashed's
   end-flagged pair is followed by one more pair of filler blocks (`07 00 77 …`, filter 0, shift 7), which
   decodes to 28 frames of a constant 224. `decode_mono` stops at the end flag, but `decode_stereo` and
-  `Adpcm` do not, so openmx plays the filler. It is 0.6 ms at about −43 dBFS, but it is not what the
-  SPU is presumably told to play. It is in the pack's `todo` and in `notes/openmx-asks.md`.
+  `Adpcm` did not, so openmx played the filler (0.6 ms at about −43 dBFS). Since openmx B1 (3f380b287)
+  all three stop at the end flag, so the filler is no longer played and no longer in the pack's `todo`
+  (MD111). `import-music` still reports a song whose read stops anywhere but the end flag.
 - **Interleave.** No end flag appears before the last pairs. Decoded at 16 bytes, left and right
   correlate 0.49 to 0.91 over each whole song. With the wrong interleave the two channels would be
   unrelated noise.
@@ -71,7 +72,7 @@ openmx's reader (`Clip::vig`, `Adpcm::vig`) takes all 42 songs: stereo, 44,100 H
 `mod.json`, the playlist member and every song's `.vig`, all at their member paths (`Aud/Music/…`) and
 byte for byte as on the disc. `source.members` lists exactly those files. `source.psr` names the
 container. Each song has the §4 fields plus `seconds` (its length as openmx reads it). `todo` lists the
-jukebox check still owed (T7) and, on Unleashed, the filler pair. Build them with
+jukebox check still owed (T7). Build them with
 `import-music mxvatv|untamed|all [OUT]` or `./build.sh` (its `--disc IMAGE --out STAGE` form). Read them
 back with `import-music check DIR`. `modcheck` proves them byte for byte against the discs.
 

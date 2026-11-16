@@ -29,9 +29,14 @@ fn every_song_on_both_discs_packages_and_reads_back() {
             assert!(r.correlation > 0.3, "{}: L/R {}", p.song.file(), r.correlation);
             assert!(r.seconds() > 90.0, "{}: {} s", p.song.file(), r.seconds());
         }
-        // The only gaps: the jukebox's screen (T7), and on MX vs. ATV Unleashed the filler pair.
-        let expect = if pack.game == "mxvatv" { 2 } else { 1 };
-        assert_eq!(built.todo.len(), expect, "{}: {:?}", pack.id, built.todo);
+        // The only gap: the jukebox's screen (T7). MX vs. ATV Unleashed's filler pair after the end
+        // flag is not played since openmx B1.
+        assert_eq!(built.todo.len(), 1, "{}: {:?}", pack.id, built.todo);
+        let filler = if pack.game == "mxvatv" { 1 } else { 0 };
+        for p in &built.songs {
+            assert_eq!(p.read.after_end, Some(filler), "{}", p.song.file());
+            assert_eq!(p.read.frames, (p.read.pairs - filler) * 28, "{}", p.song.file());
+        }
         assert_eq!(import_music::check(&built.dir).unwrap().len(), count);
 
         let r = modcheck::check(&built.dir, &mut modcheck::Discs::new(Some(iso_dir())));

@@ -207,10 +207,12 @@ pub struct ReadBack {
     /// wrong interleave decodes to two unrelated noises, near 0.
     pub correlation: f64,
     /// Block pairs after the first one flagged as the end (flags bit 0, in either channel), which
-    /// `decode_stereo` and `Adpcm` play though `decode_mono` would stop there; `None` if no block is.
+    /// `decode_stereo` and `Adpcm` stop at as `decode_mono` does (openmx B1); `None` if no block is.
     /// Untamed's songs end on the flag (0); MX vs. ATV Unleashed's have one more pair of `0x07`
-    /// filler blocks (1), 28 frames of a constant 224.
+    /// filler blocks (1), 28 frames of a constant 224 that are not played.
     pub after_end: Option<usize>,
+    /// Block pairs inside the header's size, the end-flagged one and any after it included.
+    pub pairs: usize,
 }
 
 impl ReadBack {
@@ -240,11 +242,12 @@ impl ReadBack {
         }
         match self.after_end {
             None => p.push("no block is flagged as the end".into()),
-            Some(0) => {}
-            Some(n) => p.push(format!(
-                "Clip::vig and Adpcm::vig play {n} block pair(s) ({} frames) past the end flag, which the game's SPU presumably stops at",
-                n * 28
-            )),
+            Some(n) => {
+                let to_flag = (self.pairs - n) * 28;
+                if self.frames != to_flag {
+                    p.push(format!("Clip::vig plays {} frames, the end flag is {to_flag} frames in", self.frames));
+                }
+            }
         }
         p
     }
@@ -295,6 +298,7 @@ pub fn read_back(bytes: &[u8]) -> Result<ReadBack, String> {
         unread: bytes.len() as i64 - (0x800 + 2 * size as i64),
         correlation,
         after_end,
+        pairs,
     })
 }
 

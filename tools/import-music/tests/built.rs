@@ -52,10 +52,11 @@ fn a_generated_vig_reads_back_as_the_header_says() {
 
 #[test]
 fn what_openmx_would_play_differently_is_a_problem() {
+    // The filler pair after the end flag is not played (openmx B1), so it is no problem.
     let r = read_back(&vig(50, 44100, false, 1, false)).unwrap();
-    assert_eq!(r.after_end, Some(1));
-    assert_eq!(r.frames, 51 * 28);
-    assert!(r.problems().iter().any(|p| p.contains("1 block pair(s) (28 frames) past the end flag")), "{:?}", r.problems());
+    assert_eq!((r.after_end, r.pairs), (Some(1), 51));
+    assert_eq!((r.frames, r.stream_frames), (50 * 28, 50 * 28));
+    assert!(r.problems().is_empty(), "{:?}", r.problems());
 
     // A rate the reader does not believe is played at 44100.
     let r = read_back(&vig(50, 0, false, 0, false)).unwrap();
@@ -189,7 +190,6 @@ fn a_generated_pack_is_written_whole_and_proves() {
         built.todo,
         [
             "Aud\\Music\\music.pb: titles and artists are music.pb's; not yet compared with the jukebox's screen in PCSX2 (T7)",
-            "Aud/Music/*.vig (all 3): Clip::vig and Adpcm::vig play 1 block pair(s) (28 frames) past the end flag, which the game's SPU presumably stops at",
         ]
     );
     for (name, bytes) in &files {
@@ -200,7 +200,7 @@ fn a_generated_pack_is_written_whole_and_proves() {
         assert_eq!(&std::fs::read(built.dir.join(name.replace('\\', "/"))).unwrap(), bytes, "{name}");
     }
     let back = check(&built.dir).unwrap();
-    assert_eq!(back.iter().map(|(f, r)| (f.as_str(), r.frames)).collect::<Vec<_>>(), [("Aud/Music/Zed_Song.vig", 31 * 28), ("Aud/Music/ALPHA.vig", 21 * 28), ("Aud/Music/beta.vig", 11 * 28)]);
+    assert_eq!(back.iter().map(|(f, r)| (f.as_str(), r.frames)).collect::<Vec<_>>(), [("Aud/Music/Zed_Song.vig", 30 * 28), ("Aud/Music/ALPHA.vig", 20 * 28), ("Aud/Music/beta.vig", 10 * 28)]);
 
     // The standard's checks, all but the copy against a disc this test does not have.
     let r = modcheck::check(&built.dir, &mut modcheck::Discs::new(None));

@@ -123,7 +123,8 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   Until then, A1's `tools/import-music` compiles `audio.rs` into itself by `#[path]` and runs
   `Clip::vig` / `Adpcm::vig` on all 42 MX vs. ATV songs. That build breaks if `audio.rs` ever uses
   `crate::`.
-- **MD7, stereo streams play past the end flag** (A1, `notes/music.md`). `decode_stereo` and
+- **MD7, stereo streams play past the end flag** (A1, `notes/music.md`). Done in openmx B1 (3f380b287):
+  stereo streams stop at the end-flagged pair; `import-music` follows since MD111. `decode_stereo` and
   `Adpcm::read` decode every block pair up to the header's size, but `decode_mono` stops at the
   first block flagged as the end (flags bit 0). All 20 of MX vs. ATV Unleashed's `Aud\Music\*.vig` have
   one pair of `0x07` filler blocks after the end-flagged pair, so openmx plays 28 frames of a constant
@@ -336,7 +337,8 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   the spawn takes the ground's height where the scene's is below it. Also: on Untamed's Nat_PA the start
   is 129.5 ft over the dirt, and openmx's rider drops and wrecks (landed too hard). M13's ride camera
   there was 121 ft under the start, so the original drops too; whether it wrecks was not seen.
-- **New: `world::Ground::at` has no ground in the last sample row and column** (T10). `sx + 1 >=
+- **New: `world::Ground::at` has no ground in the last sample row and column** (T10). Done in openmx
+  S320 (cdca4ffff); `tools/accuracy`'s ride test expects no strip since MD111. `sx + 1 >=
   samples_x` (and `z`) is `None`, so `World::ground` answers no ground at x or z ≥ (samples − 1) ×
   spacing: 5,755.5 ft on the big maps. The terrain's cells reach the edge and the original's query
   answers there (`tools/accuracy heights`: equal at those points). It is inside the 150 ft shoot-back

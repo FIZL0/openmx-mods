@@ -493,4 +493,4 @@ Ferris wheel. Animated toys are openmx's V43, open.
 | `untamed_sx_k` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | **no**: wreck 13 (off the map) | **no**: 896×896; border 1000, game holds 2896×2896; thrown at the start | ground textured; jumbotrons white (T11's `RenderTarget`) |
 | `untamed_sx_l` | ok: taken | ok: 8,000 of 8,000 equal; 14 in the last strip † | ok: on the ground (-0.5 ft) | ok: 896×896; border 1000, game holds 2896×2896 | ground textured; jumbotrons white (T11's `RenderTarget`) |
 
-† the last sample row and column: `World::ground` gives no ground at x or z ≥ (samples − 1) × spacing, where the original's query and the harness answer (notes/openmx-asks.md).
+† the last sample row and column: `World::ground` gives no ground at x or z ≥ (samples − 1) × spacing, where the original's query and the harness answer (notes/openmx-asks.md). Since openmx S320 it answers there too; the table is from before (not rerun, MD111).

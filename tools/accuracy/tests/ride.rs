@@ -140,11 +140,12 @@ fn the_shell_loads_a_generated_mod_as_openmx_does() {
     assert_eq!(shell.terrain, m.terrain);
     assert_eq!(shell.start(), [600.0, 200.0, 650.0]);
     assert_eq!(shell.edge(), (2304.0, 2304.0));
-    // The same ground everywhere but the last sample strip, where openmx's ride query has none.
+    // The same ground everywhere, the last sample strip too: openmx's ride query answers the field's
+    // last row and column since its S320 (it had none there before).
     let (ok, why) = ride::heights_verdict(&shell, &m, None, 500, 7).unwrap();
     assert!(ok, "{why}");
     let a = ride::shell_against_harness(&shell, &m, &[[100.0, 100.0], [1000.5, 2000.25], [2299.5, 500.0], [500.0, 2299.5]]);
-    assert_eq!((a.differ, a.strip), (0, 2), "{a:?}");
+    assert_eq!((a.differ, a.strip), (0, 0), "{a:?}");
 
     // mod.json's spawn takes the scene's place.
     let t2 = Temp::new("spawn");
