@@ -6,7 +6,7 @@ import-atv: MX vs. ATV Unleashed's quads as a machine pack (standard §7)
 
   import-atv [OUT]                    build OUT/mxvatv_atv/ (default out/mods/machines) off the disc
   import-atv --disc IMAGE --out OUT   the same off that image, and the fliers' and cars' packs beside it (build.sh);
-                                      off MX vs. ATV Untamed's disc, its car pack only
+                                      off MX vs. ATV Untamed's disc, its car and quad packs
   import-atv check DIR                read a built pack's models, clips, textures and sounds back
   import-atv cars [OUT]               build OUT/mxvatv_cars/ (default out/mods/machines): the five cars
   import-atv cars --disc IMAGE --out OUT
@@ -15,6 +15,10 @@ import-atv: MX vs. ATV Unleashed's quads as a machine pack (standard §7)
                                       sandrail, on Untamed's car step (openmx MD163, MD81e, MD81f)
   import-atv untamed-cars --disc IMAGE --out OUT
   import-atv untamed-cars check DIR   read the Untamed car pack's .phy.bpb and chassis model back
+  import-atv untamed-atv [OUT]        build OUT/untamed_atv/ off MX vs. ATV Untamed's disc: its race quads on Untamed's
+                                      step (openmx MD144)
+  import-atv untamed-atv --disc IMAGE --out OUT
+  import-atv untamed-atv check DIR    read the Untamed quad pack's .phy.bpb, chassis and collision back
   import-atv fliers [OUT]             the biplane and the Kiowa: OUT/mxvatv_fliers/ (openmx MD80d)
   import-atv fliers --disc IMAGE --out OUT
   import-atv fliers check DIR         read the fliers' pack back: every model, .col, clip, texture, sound
@@ -92,8 +96,26 @@ fn untamed_cars(image: &Path, out: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn untamed_atv(image: &Path, out: &Path) -> Result<(), String> {
+    let built = import_atv::untamed_atv::import(image, out)?;
+    println!("{}: {} files; {}, on Untamed's step", built.dir.display(), built.members.len(), built.phy.join(", "));
+    Ok(())
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     match args {
+        [c, a, image, b, out] if c == "untamed-atv" && a == "--disc" && b == "--out" => untamed_atv(Path::new(image), Path::new(out)),
+        [c, cmd, dir] if c == "untamed-atv" && cmd == "check" => {
+            for line in import_atv::untamed_atv::check(Path::new(dir))? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        [c] | [c, _] if c == "untamed-atv" => {
+            let out = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("out/mods/machines"));
+            let image = discx::resolve_image(import_atv::untamed_atv::GAME, &iso_dir())?;
+            untamed_atv(&image, &out)
+        }
         [c, a, image, b, out] if c == "untamed-cars" && a == "--disc" && b == "--out" => untamed_cars(Path::new(image), Path::new(out)),
         [c, cmd, dir] if c == "untamed-cars" && cmd == "check" => {
             for line in import_atv::untamed_cars::check(Path::new(dir))? {
@@ -115,7 +137,11 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         // build.sh's form: the three machine packs off the one disc.
         // build.sh's form off MX vs. ATV Untamed's disc: its car pack (openmx MD163).
-        [a, image, b, out] if a == "--disc" && b == "--out" && is_untamed(Path::new(image))? => untamed_cars(Path::new(image), Path::new(out)),
+        // And its quad pack (openmx MD144).
+        [a, image, b, out] if a == "--disc" && b == "--out" && is_untamed(Path::new(image))? => {
+            untamed_cars(Path::new(image), Path::new(out))?;
+            untamed_atv(Path::new(image), Path::new(out))
+        }
         [a, image, b, out] if a == "--disc" && b == "--out" => {
             one(Path::new(image), Path::new(out))?;
             fliers(Path::new(image), Path::new(out))?;
