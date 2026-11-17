@@ -124,13 +124,14 @@ Changes openmx has to make before a mod works there. Agents here write them; a h
   `Clip::vig` / `Adpcm::vig` on all 42 MX vs. ATV songs. That build breaks if `audio.rs` ever uses
   `crate::`.
 - **MD7, stereo streams play past the end flag** (A1, `notes/music.md`). Done in openmx B1 (3f380b287):
-  stereo streams stop at the end-flagged pair; `import-music` follows since MD111. `decode_stereo` and
-  `Adpcm::read` decode every block pair up to the header's size, but `decode_mono` stops at the
-  first block flagged as the end (flags bit 0). All 20 of MX vs. ATV Unleashed's `Aud\Music\*.vig` have
-  one pair of `0x07` filler blocks after the end-flagged pair, so openmx plays 28 frames of a constant
-  224 at the end of each song (`import-music` puts this in the pack's `todo`). Untamed's songs end on the
-  flag. Fix: stop a stereo stream at the pair whose blocks carry the end flag, as `decode_mono` does.
-  Not checked: whether MX Unleashed's own `.vig` songs have the same filler.
+  `decode_stereo` (so `Clip::vig`) and `Adpcm::read` now stop after the pair whose block carries the end
+  flag (flags bit 0, either channel), as `decode_mono` does. `import-music` follows since MD111: the
+  filler pair is no longer played and no longer in the pack's `todo`. Before, all 20 of MX vs. ATV
+  Unleashed's `Aud\Music\*.vig` played one pair of `0x07` filler blocks after the end-flagged pair, 28
+  frames of a constant 224. Untamed's songs end on the flag. Answered (B1's disc probe): MX Unleashed's
+  own 51 stereo `.vig` (13 songs in `Aud\Music`, 36 UI streams in `Aud\UI`, `cannonball_stereo.vig`,
+  `cheer.vig`) carry the same one filler pair, so the fix serves the port's own songs too. Not checked:
+  the original's stream player itself (the stop rests on the SPU's end-flag rule).
 - **New: game-render opens only `MX.PSR`** (M9, `tools/renderprobe`). `game-render/src/disc.rs`
   `Disc::read_from` looks up `MX.PSR` by name, and reads 64 KiB of directory. MX vs. ATV's
   `MXVSATV.PSR` directory is longer than that (20,391 members). `Res` has private fields and no
