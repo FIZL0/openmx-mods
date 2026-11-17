@@ -10,7 +10,8 @@
 //!   (the grown `BiplaneM`, the new `Biplane3`/`4`), `biplane.phy`, the materials, the particle list
 //!   and its emitters, `event.aud`;
 //! - **the Kiowa's files**, loose on the PSR (no `.res` holds them): `kiowa.phy`, `WreckBlade.phy`,
-//!   `kiowa{,2,3,4}{,_ui}.psg`, the blade and tail-rotor parts, the eight `Kiowa*{F,M}.col`,
+//!   `kiowa{,2,3,4}{,_ui}.psg`, the blade and tail-rotor parts, the eight `Kiowa*{F,M}.col`, the
+//!   thrown blades' `BladeBent{F,M}.col` (openmx MD130),
 //!   `helicopterparticles.dat` and its emitters;
 //! - **the garage's sets**, `UI\Res\Veh_BiPlane1-4.res` and `Veh_Helicopter1-4.res`, every member:
 //!   each skin's `_ui` model, materials and textures. They are the only copies of most skins'
@@ -40,7 +41,7 @@ pub const MACHINE: &str = "fliers";
 /// The biplane's archive: `%sVehicleType_%d.res` with 2 (every member a biplane file).
 pub const ARCHIVE: &str = "Veh\\vehicletype_2.res";
 /// The Kiowa's files and what both fliers share, loose on the PSR.
-pub const LOOSE: [&str; 13] = [
+pub const LOOSE: [&str; 14] = [
     "Veh\\kiowa.phy",
     "Veh\\WreckBlade.phy",
     "Veh\\Anim\\kiowa*.psg",
@@ -49,6 +50,7 @@ pub const LOOSE: [&str; 13] = [
     "Veh\\Anim\\sh_biplane2.psg",
     "Veh\\Anim\\SH_BiPlane2.pst",
     "Veh\\Col\\Kiowa*.col",
+    "Veh\\Col\\BladeBent*.col",
     "Rider\\Anim\\biplane_*.mot",
     "Part\\helicopterparticles.dat",
     "Aud\\carengine.aud",

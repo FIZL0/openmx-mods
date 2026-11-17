@@ -34,9 +34,9 @@ fn the_fliers_pack_is_the_discs_and_openmx_reads_it() {
 
     let c = fliers::check(&built.dir).unwrap();
     assert!(c.refused.is_empty(), "{:#?}", c.refused);
-    // 16 collision files (every skin's F and M), the seven biplane loops, the Kiowa's engine, five
+    // 18 collision files (every skin's F and M, and the thrown blades' pair), the seven biplane loops, the Kiowa's engine, five
     // wreck clanks and the touchdown.
-    assert_eq!(c.collisions, 16);
+    assert_eq!(c.collisions, 18);
     assert_eq!(c.sounds, 14);
     assert_eq!(c.clips, 2);
     assert!(c.models >= 28 && c.textures >= 24 && c.emitters >= 20, "{c:?}");
