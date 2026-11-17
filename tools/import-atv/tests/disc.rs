@@ -95,6 +95,16 @@ fn the_untamed_quad_pack_is_the_discs_and_openmx_reads_it() {
     assert_eq!(built.phy, ["Veh\\atv_Race250P.phy.bpb", "Veh\\atv_Pro250P.phy.bpb"]);
     let manifest = std::fs::read_to_string(built.dir.join("mod.json")).unwrap();
     assert!(manifest.contains("\"step\": \"untamed\"") && manifest.contains("\"machine\": \"atv\""), "{manifest}");
+    // openmx MD144b: drawn. Untamed's ATV rider set and the clips, materials and textures its build
+    // names, off the PSR's loose files; the compiled build reads as text with its parts.
+    assert!(manifest.contains("\"rider\": {"), "{manifest}");
+    for name in [import_atv::untamed_atv::RIDER_MOTIONS, import_atv::untamed_atv::RIDER_STUNTS, import_atv::untamed_atv::STUNT_TABLE] {
+        assert!(built.dir.join(name.replace('\\', "/")).is_file(), "no {name}");
+    }
+    let sub = std::fs::read(built.dir.join("Veh/Anim").join(import_atv::untamed_atv::SUB)).unwrap();
+    let text = game_render::ini::text_of(&sub);
+    assert!(text.contains("[Objects]") && text.contains("[Material Changes]"), "{text}");
+    assert!(built.dir.join("Veh/Tex/Striker_Plastics.psm.bpb").is_file());
 
     let mut discs = modcheck::Discs::new(Some(iso_dir()));
     let report = modcheck::check(&built.dir, &mut discs);
