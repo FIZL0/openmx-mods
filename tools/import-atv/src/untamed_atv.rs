@@ -19,6 +19,12 @@
 //! compiled) with their textures. `res\rider\RiderMotionSet_ATV.res`, `res\veh\Vehicle_mat.res`
 //! and `Vehicle_tex.res` hold the same files, but pad their directories past what the `.res` readers
 //! take, so the loose copies are read.
+//!
+//! What the quad is followed, heard and sprayed with (openmx MD206): the archive carries the engine's
+//! `Aud\vehicle.aud.bpb` and the particle lists, zone table and emitters (`Part\*.bpb`), all compiled.
+//! The follow cameras are loose on the PSR, compiled too ([`CAMERAS`]: `Cam\FC_ATVDefault.pb.bpb`,
+//! the race camera's `RC_` twin and `FC_ATV.ini.bpb`), and the sounds `vehicle.aud` names are in the
+//! disc's second PSR ([`AUDIO_PSR`]), each copied at its own path (`Aud\Engine\450A\idle04.VAG`).
 
 use crate::{Origin, file, json_str, leaf_of};
 use discx::{Disc, ResFile};
@@ -57,10 +63,22 @@ pub const STUNT_TABLE: &str = "Rider\\Anim\\ATV_Rider_Stunts.ini.bpb";
 pub const QUAD_CLIPS: &str = "Veh\\Anim\\ATV_Bike_*.mot";
 /// Where the materials and their textures are loose.
 pub const TEX: &str = "Veh\\Tex";
+/// The quad's camera files, loose on the PSR and compiled: the follow camera's, the race camera's and
+/// the `.ini` beside them (openmx `chase::mod_presets`, `mod_race_presets`, `ATV_CAMERA_INI`).
+pub const CAMERAS: [&str; 3] = ["Cam\\FC_ATVDefault.pb.bpb", "Cam\\RC_ATVDefault.pb.bpb", "Cam\\FC_ATV.ini.bpb"];
+/// The engine's sound lists, the race's event sounds, and the particle lists and zone table, in the
+/// archive (compiled).
+pub const ENGINE: &str = "vehicle.aud.bpb";
+pub const EVENTS: &str = "event.aud.bpb";
+pub const PARTICLES: &str = "atvparticles.dat.bpb";
+pub const AI_PARTICLES: &str = "atvaiparticles.dat.bpb";
+pub const ZONES: &str = "atvparticlezones.dat.bpb";
+/// The PSR the sounds are in.
+pub const AUDIO_PSR: &str = "MX08AUD.PSR";
 
 /// What openmx does not read off this pack yet.
 pub const TODO: [&str; 2] = [
-    "openmx rides the race quads on MX vs. ATV Untamed's step (MD144) and draws the KTM 250 build with Untamed's ATV rider set (MD144b); it does not play the pack's sounds, throw its particles or use its cameras",
+    "openmx rides the race quads on MX vs. ATV Untamed's step (MD144), draws the KTM 250 build with Untamed's ATV rider set (MD144b), and follows, hears and sprays it with the pack's cameras, engine and particles (MD206); event.aud and the AI particle list are carried, not followed",
     "untamed_atv: not yet looked at beside MX vs. ATV Untamed in PCSX2 (T7)",
 ];
 
@@ -83,10 +101,11 @@ pub fn import(image: &Path, root: &Path) -> Result<Built, String> {
     let origin = Origin { game: game.title.to_string(), boot: game.boot.to_string(), psr: disc.psr_name.clone() };
     let e = disc.find(ARCHIVE).cloned().ok_or_else(|| format!("{ARCHIVE}: not on the disc"))?;
     let res = disc.res(&e)?;
-    build(&res, &mut disc, &origin, root)
+    let mut audio = Disc::open_psr(image, Some(AUDIO_PSR))?;
+    build(&res, &mut disc, &mut audio, &origin, root)
 }
 
-fn build(res: &ResFile, disc: &mut Disc, origin: &Origin, root: &Path) -> Result<Built, String> {
+fn build(res: &ResFile, disc: &mut Disc, audio: &mut Disc, origin: &Origin, root: &Path) -> Result<Built, String> {
     let dir = root.join(ID);
     clear(&dir)?;
     let mut members = Vec::new();
@@ -153,13 +172,56 @@ fn build(res: &ResFile, disc: &mut Disc, origin: &Origin, root: &Path) -> Result
             return Err(format!("{}: names {}, which is not on the disc", leaf_of(&psm), files[0]));
         }
     }
+    // The cameras (MD206), loose on the PSR.
+    for name in CAMERAS {
+        loose.take(disc, name)?.ok_or_else(|| format!("{name}: not on the disc"))?;
+    }
+    // The sounds the engine's .aud names, out of the audio PSR: each `SoundN` of every list, `[Wreck]`'s
+    // too. A name with no extension (`Vehicle\WRECK01`) is the `.VAG` of that name, as import-atv takes
+    // MX vs. ATV Unleashed's.
+    let engine = find(loose.members, ENGINE)?;
+    let (events, particles, ai_particles, zones) = (find(loose.members, EVENTS)?, find(loose.members, PARTICLES)?, find(loose.members, AI_PARTICLES)?, find(loose.members, ZONES)?);
+    let mut no_sound = Vec::new();
+    for s in ini::parse(&ini::text_of(&loose.read(&engine)?)) {
+        for (k, v) in &s.keys {
+            let numbered = k.to_ascii_lowercase().strip_prefix("sound").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+            if !numbered {
+                continue;
+            }
+            let name = format!("Aud\\{}", v.trim().trim_matches('"'));
+            let tries = match leaf_of(&name).contains('.') {
+                true => vec![name.clone()],
+                false => vec![format!("{name}.VAG"), format!("{name}.vig")],
+            };
+            if tries.iter().any(|t| loose.members.iter().any(|m| m.eq_ignore_ascii_case(t))) {
+                continue;
+            }
+            if tries.iter().find_map(|t| loose.take(audio, t).transpose()).transpose()?.is_none() {
+                no_sound.push(format!("{} [{}] {k}", file(&name), s.name));
+            }
+        }
+    }
     let listed = loose.listed;
+    let own = Own { cameras: CAMERAS.map(file), engine: file(&engine), events: file(&events), particles: file(&particles), ai_particles: file(&ai_particles), zones: file(&zones) };
     let mut todo: Vec<String> = TODO.iter().map(|t| t.to_string()).collect();
     if !no_material.is_empty() {
         todo.insert(1, format!("{} materials a model or the build names are not on the disc, so they draw untextured: {}", no_material.len(), no_material.join(", ")));
     }
-    std::fs::write(dir.join("mod.json"), mod_json(origin, &listed, &phy, &sub, &mcf, &todo)).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !no_sound.is_empty() {
+        todo.insert(1, format!("{} sounds vehicle.aud names are not on the disc: {}", no_sound.len(), no_sound.join(", ")));
+    }
+    std::fs::write(dir.join("mod.json"), mod_json(origin, &listed, &phy, &sub, &mcf, &own, &todo)).map_err(|e| format!("{}: {e}", dir.display()))?;
     Ok(Built { dir, members, phy })
+}
+
+/// The pack's own camera, sound and particle files (MD206), as `mod.json` names them.
+struct Own {
+    cameras: [String; 3],
+    engine: String,
+    events: String,
+    particles: String,
+    ai_particles: String,
+    zones: String,
 }
 
 /// The pack's files as they are written: the archive's, and the loose PSR members added to them.
@@ -221,15 +283,18 @@ fn clear(dir: &Path) -> Result<(), String> {
     std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
-fn mod_json(origin: &Origin, loose: &[String], phy: &[String], sub: &str, mcf: &str, todo: &[String]) -> String {
+fn mod_json(origin: &Origin, loose: &[String], phy: &[String], sub: &str, mcf: &str, own: &Own, todo: &[String]) -> String {
     let list = |items: Vec<String>| format!("[\n    {}\n  ]", items.join(",\n    "));
     let phy_json = list(phy.iter().map(|p| json_str(&file(p))).collect());
     let builds = format!("[\n    {{\"sub\": {}, \"mcf\": {}, \"chassis\": {}}}\n  ]", json_str(&file(sub)), json_str(&file(mcf)), json_str(CHASSIS));
     let rider = format!("{{\"rider\": \"ATV\", \"motions\": {}, \"stunts\": {}, \"table\": {}}}", json_str(&file(RIDER_MOTIONS)), json_str(&file(RIDER_STUNTS)), json_str(&file(STUNT_TABLE)));
     let members = std::iter::once(ARCHIVE.to_string()).chain(loose.iter().cloned()).map(|m| json_str(&m)).collect::<Vec<_>>().join(", ");
     let todo = list(todo.iter().map(|t| json_str(t)).collect());
+    let [cameras, replay_cameras, cameras_ini] = own.cameras.each_ref().map(|c| json_str(c));
+    let sounds = format!("{{\"engine\": {}, \"events\": {}}}", json_str(&own.engine), json_str(&own.events));
+    let particles = format!("{{\"list\": {}, \"ai\": {}, \"zones\": {}}}", json_str(&own.particles), json_str(&own.ai_particles), json_str(&own.zones));
     format!(
-        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": [{members}]\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"step\": {},\n  \"builds\": {builds},\n  \"phy\": {phy_json},\n  \"rider\": {rider},\n  \"todo\": {todo}\n}}\n",
+        "{{\n  \"standard\": 1,\n  \"kind\": \"machine\",\n  \"id\": {},\n  \"name\": {},\n  \"machine\": {},\n  \"source\": {{\n    \"game\": {},\n    \"boot\": {},\n    \"psr\": {},\n    \"members\": [{members}]\n  }},\n  \"version\": \"1.0.0\",\n  \"author\": {},\n  \"permission\": \"own-disc\",\n  \"step\": {},\n  \"builds\": {builds},\n  \"phy\": {phy_json},\n  \"rider\": {rider},\n  \"cameras\": {cameras},\n  \"replay_cameras\": {replay_cameras},\n  \"cameras_ini\": {cameras_ini},\n  \"sounds\": {sounds},\n  \"particles\": {particles},\n  \"todo\": {todo}\n}}\n",
         json_str(ID),
         json_str(NAME),
         json_str(MACHINE),

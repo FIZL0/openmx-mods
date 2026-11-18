@@ -118,6 +118,17 @@ fn the_untamed_quad_pack_is_the_discs_and_openmx_reads_it() {
     let text = game_render::ini::text_of(&sub);
     assert!(text.contains("[Objects]") && text.contains("[Material Changes]"), "{text}");
     assert!(built.dir.join("Veh/Tex/Striker_Plastics.psm.bpb").is_file());
+    // openmx MD206: followed, heard and sprayed. The compiled camera files off the PSR, the engine's
+    // sounds off MX08AUD.PSR, and the archive's .aud and particle files named in mod.json.
+    for name in import_atv::untamed_atv::CAMERAS {
+        assert!(built.dir.join(name.replace('\\', "/")).is_file(), "no {name}");
+    }
+    for name in ["Aud/Engine/450A/idle04.VAG", "Aud/Engine/450A/power25.VAG", "Aud/Vehicle/WRECK06.VAG"] {
+        assert!(built.dir.join(name).is_file(), "no {name}");
+    }
+    for named in ["\"cameras\": \"Cam/FC_ATVDefault.pb.bpb\"", "\"engine\": \"Aud/vehicle.aud.bpb\"", "\"list\": \"Part/atvparticles.dat.bpb\"", "\"zones\": \"Part/atvparticlezones.dat.bpb\""] {
+        assert!(manifest.contains(named), "{named} not in {manifest}");
+    }
 
     let mut discs = modcheck::Discs::new(Some(iso_dir()));
     let report = modcheck::check(&built.dir, &mut discs);
