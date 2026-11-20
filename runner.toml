@@ -4,6 +4,7 @@
 journal = "journal"
 
 [run]
+auto_upgrade = true  # upgrade agent-runner by itself when a newer release is out, between merges
 test = "./check.sh"
 rules = "AGENTS.md"
 slots = 3
