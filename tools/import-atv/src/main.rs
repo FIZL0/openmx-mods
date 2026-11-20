@@ -12,9 +12,9 @@ import-atv: MX vs. ATV Unleashed's quads as a machine pack (standard §7)
   import-atv cars --disc IMAGE --out OUT
   import-atv cars check DIR           read a built car pack's .phy and chassis models back
   import-atv untamed-cars [OUT]       build OUT/untamed_cars/ off MX vs. ATV Untamed's disc: its baja truck, golf cart and
-                                      sandrail, on Untamed's car step (openmx MD163, MD81e, MD81f)
+                                      sandrail, on Untamed's car step, with their follow cameras (openmx MD163, MD81e, MD81f, MD258)
   import-atv untamed-cars --disc IMAGE --out OUT
-  import-atv untamed-cars check DIR   read the Untamed car pack's .phy.bpb and chassis model back
+  import-atv untamed-cars check DIR   read the Untamed car pack's .phy.bpb, chassis model and camera back
   import-atv fliers [OUT]             the biplane and the Kiowa: OUT/mxvatv_fliers/ (openmx MD80d)
   import-atv fliers --disc IMAGE --out OUT
   import-atv fliers check DIR         read the fliers' pack back: every model, .col, clip, texture, sound

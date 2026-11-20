@@ -80,5 +80,16 @@ fn the_untamed_car_pack_is_the_discs_and_openmx_reads_it() {
     assert!(report.fail.is_empty(), "{:#?}", report.fail);
 
     let lines = import_atv::untamed_cars::check(&built.dir).unwrap();
-    assert_eq!(lines, ["baja: 43 nodes, tires read, Weight 3500", "golfcart: 47 nodes, tires read, Weight 1000", "sandrail: 43 nodes, tires read, Weight 2300"]);
+    // MD258: each car's follow camera, loose on the disc, read as Untamed's slow/fast file.
+    let cams: Vec<&str> = built.cars.iter().map(|c| c.camera.as_str()).collect();
+    assert_eq!(cams, import_atv::untamed_cars::CAMERAS);
+    assert!(manifest.contains("\"Cam\\\\FC_BajaDefault.pb.bpb\""), "{manifest}");
+    assert_eq!(
+        lines,
+        [
+            "baja: 43 nodes, tires read, Weight 3500, camera 7 presets from Normal Camera",
+            "golfcart: 47 nodes, tires read, Weight 1000, camera 9 presets from Normal Camera",
+            "sandrail: 43 nodes, tires read, Weight 2300, camera 9 presets from Normal Camera"
+        ]
+    );
 }
