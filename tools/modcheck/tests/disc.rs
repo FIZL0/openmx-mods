@@ -423,6 +423,34 @@ fn a_packaged_map_passes() {
 }
 
 #[test]
+fn a_players_own_texture_pack_and_handling_mod_pass() {
+    let m = map("own", 1);
+    let make = |kind: &str, extra: &str| {
+        let dir = m.root.join("mods").join(kind).join(format!("my_{kind}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let j = format!(
+            r#"{{"standard": 1, "kind": "{kind}", "id": "my_{kind}", "name": "Mine", "version": "1.0.0", "author": "me"{extra}}}"#
+        );
+        std::fs::write(dir.join("mod.json"), j).unwrap();
+        dir
+    };
+    let t = make("textures", "");
+    fails_with(&run(&m, &t), "no <name>-<key>.png");
+    std::fs::create_dir_all(t.join("textures")).unwrap();
+    std::fs::write(t.join("textures/rock-0123456789ABCDEF.png"), b"x").unwrap();
+    fails_with(&run(&m, &t), "no <name>-<key>.png");
+    std::fs::write(t.join("textures/sand-0123456789abcdef.png"), b"x").unwrap();
+    assert!(run(&m, &t).ok(), "{:#?}", run(&m, &t).fail);
+
+    let h = make("handling", r#", "bike": "race125p.phy", "knobs": {"Power": 120}"#);
+    fails_with(&run(&m, &h), "race125p.phy: named in mod.json, not in the mod");
+    std::fs::write(h.join("race125p.phy"), b"[Engine]").unwrap();
+    assert!(run(&m, &h).ok(), "{:#?}", run(&m, &h).fail);
+    fails_with(&run(&m, &make("handling", r#", "bike": "../race125p.phy""#)), "is not a file name");
+    fails_with(&run(&m, &make("handling", "")), "says no bike");
+}
+
+#[test]
 fn a_copy_that_differs_from_the_disc_fails() {
     let m = map("differs", 1);
     let dir = package(&m, "mxvatv_test", TODO);

@@ -189,6 +189,8 @@ fn check_into(dir: &Path, discs: &mut Discs, as_tile: bool, r: &mut Report) {
             machine(dir, &meta, r);
             copies(dir, &files, &meta, discs, r);
         }
+        "textures" => textures(&files, r),
+        "handling" => handling(dir, &meta, r),
         // §1: any other kind is skipped quietly by the loader, so it is not this check's to fail.
         other => r.note.push(format!("kind {other:?} is not one the standard defines; the loader skips it")),
     }
@@ -240,7 +242,9 @@ fn mod_json(dir: &Path, as_tile: bool, r: &mut Report) -> Option<Meta> {
     let name = need("name", r);
     let version = need("version", r);
     need("author", r);
-    let permission = need("permission", r);
+    // A player's own work (§8, §9) copies no disc, so it has no source, permission or todo to say.
+    let own = matches!(kind.as_str(), "textures" | "handling");
+    let permission = if own { s("permission").unwrap_or_else(|| "own work".into()) } else { need("permission", r) };
 
     let folder = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     if id != folder {
@@ -264,6 +268,7 @@ fn mod_json(dir: &Path, as_tile: bool, r: &mut Report) -> Option<Meta> {
     let mut boot = None;
     let mut members = Vec::new();
     match j.get("source") {
+        _ if own => {}
         Some(src @ Json::Obj(_)) => {
             game = src.get("game").and_then(Json::str).unwrap_or_default().to_owned();
             match prefix_for(&game) {
@@ -309,12 +314,13 @@ fn mod_json(dir: &Path, as_tile: bool, r: &mut Report) -> Option<Meta> {
 
     let todo = match j.get("todo").and_then(Json::arr).map(|a| a.iter().map(|v| v.str().map(str::to_owned)).collect::<Option<Vec<_>>>()) {
         Some(Some(t)) => t,
+        _ if own && j.get("todo").is_none() => Vec::new(),
         _ => {
             r.fail.push("mod.json: todo is missing or not a list of strings".into());
             Vec::new()
         }
     };
-    if todo.is_empty() && j.get("checked").is_none() && kind != "world" {
+    if todo.is_empty() && j.get("checked").is_none() && kind != "world" && !own {
         r.fail.push("mod.json: todo is [] but T7 has not checked it (no checked)".into());
     }
     if let Some(c) = j.get("checked") {
@@ -863,6 +869,36 @@ fn machine(dir: &Path, meta: &Meta, r: &mut Report) {
         }
     }
     r.note.push("models, clips, cameras and sounds not read here: `import-atv check` reads them back".into());
+}
+
+/// §8: a texture pack has at least one `<anything>-<key>.png` under `textures/`, the key sixteen
+/// lowercase hex digits. The pictures are decoded by openmx, which skips one it cannot read.
+fn textures(files: &[String], r: &mut Report) {
+    let keyed = |f: &&String| {
+        let name = base(f);
+        let key = name.len().checked_sub(4).and_then(|n| name.get(..n)).and_then(|s| s.rsplit_once('-')).map_or("", |(_, k)| k);
+        f.starts_with("textures/")
+            && name.to_ascii_lowercase().ends_with(".png")
+            && key.len() == 16
+            && key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    match files.iter().filter(keyed).count() {
+        0 => r.fail.push("a texture pack has no <name>-<key>.png under textures/".into()),
+        n => r.note.push(format!("{n} replaced textures; the pictures not decoded here")),
+    }
+}
+
+/// §9: a handling mod names the bike file it edits, by its file name alone, and carries it.
+fn handling(dir: &Path, meta: &Meta, r: &mut Report) {
+    match meta.json.get("bike").and_then(Json::str) {
+        None | Some("") => r.fail.push("mod.json: a handling mod says no bike".into()),
+        Some(b) if b.contains(['/', '\\']) || b == ".." => r.fail.push(format!("mod.json: bike {b:?} is not a file name")),
+        Some(b) if !dir.join(b).is_file() => r.fail.push(format!("{b}: named in mod.json, not in the mod")),
+        _ => {}
+    }
+    if meta.json.get("knobs").is_some_and(|k| !matches!(k, Json::Obj(_))) {
+        r.fail.push("mod.json: knobs is not an object".into());
+    }
 }
 
 /// Every mod folder under `root`: `root` itself if it has a `mod.json`, else its children, else

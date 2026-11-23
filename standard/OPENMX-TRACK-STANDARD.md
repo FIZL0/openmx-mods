@@ -1,8 +1,8 @@
 # OpenMX track mod standard (v1, draft)
 
 What a mod for the MX Unleashed port (`openmx`) holds: a **track** (one map from another game or from
-elevation data, §2), a **world** (several tracks joined into one ground, §3), a **music** pack (§4) or a
-**trick** pack (§6) or a **machine** pack (§7). The port's loader is openmx Phase 14: MD2 reads tracks, MD7 music, MD8 and MD9
+elevation data, §2), a **world** (several tracks joined into one ground, §3), a **music** pack (§4),
+a **trick** pack (§6), a **machine** pack (§7), a **texture** pack (§8) or a **handling** mod (§9). The port's loader is openmx Phase 14: MD2 reads tracks, MD7 music, MD8 and MD9
 worlds; nothing reads trick packs yet (`notes/openmx-asks.md`, M19).
 
 The rule all three keep: **a mod is its source as the source's disc has it.** The files are the source's
@@ -27,6 +27,9 @@ mods/
   tracks/<id>/    a track (§2) or a world (§3)
   music/<id>/     a music pack (§4)
   tricks/<id>/    a trick pack (§6)
+  machines/<id>/  a machine pack (§7)
+  textures/<id>/  a texture pack (§8)
+  handling/<id>/  a handling mod (§9)
 ```
 
 The `mods/` folder sits beside `settings.txt`. On wasm the browser's storage holds it under the same paths.
@@ -53,7 +56,7 @@ Each mod's folder has a `mod.json` (UTF-8 JSON):
 | field | | what |
 |---|---|---|
 | `standard` | required | `1`. If the number is higher than the loader knows, the mod is skipped with one log line. |
-| `kind` | required | `track`, `world`, `music`, `tricks` (§6) or `machine` (§7). Any other value is skipped quietly. It is not an error. |
+| `kind` | required | `track`, `world`, `music`, `tricks` (§6), `machine` (§7), `textures` (§8) or `handling` (§9). Any other value is skipped quietly. It is not an error. |
 | `id` | required | Equal to the folder name. `[a-z0-9_]`, 1–40 characters, `<prefix>_<map>` (table below), never changed once published. The prefix keeps a mod from ever taking a disc track's name (`free06`, `nat01`, `sx01`). |
 | `name` | required | What the track pick or the song list shows. Use the source game's own name for the map where it has one (its UI strings, M8). |
 | `source` | required | Where it came from. `game`: exactly one of the names below, which the track pick filters by (MD11). From a disc: `boot` (the boot ELF in SYSTEM.CNF, AGENTS.md's table) and `members` (the PSR members the files were copied from). From a data set: `data` (product and tile, e.g. `"USGS 3DEP 1 m, n33w115"`) and `date` (when it was fetched). |
@@ -75,6 +78,8 @@ Each mod's folder has a `mod.json` (UTF-8 JSON):
 | `Combined` (a world, §3) | `world_` |
 
 A later source adds its row here in the same commit as its importer.
+
+A player's own `textures` or `handling` mod may leave out `source`, `permission` and `todo`. Its `id` needs no table prefix, only `[a-z0-9_]` with an underscore.
 
 The loader ignores fields it does not know. An importer may add its own fields (`map`, `notes`, …). It may
 not give a v1 field a different meaning.
@@ -541,3 +546,62 @@ mods/machines/mxvatv_fliers/
   file, clip, texture and sound back with openmx's readers, and prints each skin's flier nodes.
   openmx's `tests/machine_packs.rs` loads every skin's models, nodes, collision and textures, and each
   flier's `.phy`, cameras, sounds and particles.
+
+## 8. Texture pack
+
+Replacement textures, matched by key. Each sits at `mods/textures/<id>/`.
+
+```
+mods/textures/<id>/
+  mod.json
+  textures/**/<anything>-<key>.png
+```
+
+```json
+{
+  "standard": 1, "kind": "textures", "id": "my_rocks", "name": "Rocks at 2x",
+  "version": "1.0.0", "author": "a player"
+}
+```
+
+- `<key>` is 16 lowercase hex digits: the hash of the decoded texture (§1a's key). `openmx --dump-textures` names its files this way.
+- The folders under `textures/` and the name before `-<key>` are free.
+- At least one PNG. modcheck counts them. openmx decodes them.
+
+## 9. Handling mod
+
+One bike's tuning, as openmx's physics editor saves it. It sits at `mods/handling/<id>/`.
+
+```
+mods/handling/<id>/
+  mod.json
+  race125p.phy
+```
+
+```json
+{
+  "standard": 1, "kind": "handling", "id": "my_race125", "name": "Race 125, softer",
+  "version": "1.0.0", "author": "a player",
+  "bike": "race125p.phy", "knobs": {"Engine braking": 80}
+}
+```
+
+- `bike` is the `.phy`'s bare file name, in the same folder. modcheck checks it and that the file is there.
+- `knobs` is an object: each knob's label to its percent.
+- The store refuses a mod that lacks its bike file, or whose `mod.json` `id` differs from its folder.
+
+## 10. In the store
+
+openmx's mod store (Browse) has the tabs Tracks, Trick Packs, Music, Texture Packs, Machines and Handling. An install puts each kind in its folder:
+
+- tracks and worlds: `mods/tracks/`
+- tricks: `mods/tricks/`
+- music: `mods/music/`
+- textures: `mods/textures/`
+- machines: `mods/machines/`
+- handling: `mods/handling/`
+
+A kind with no folder is not listed.
+
+- A zip may hold only the file extensions in `EXTENSIONS` in `crates/openmx/src/modstore.rs`. Any other file refuses the whole zip. The list includes `.vag`, which machine packs carry.
+- A machine pack may have a `preview.png` at its top. It is the card's picture. Without one the card is blank.
